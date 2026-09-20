@@ -117,22 +117,74 @@ ebnily/
 
 ### Vercel
 
-This project is configured for zero-config Vercel deployment:
+This project ships with an explicit `vercel.json`:
+
+```json
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }]
+}
+```
+
+| Setting             | Value           | Notes                                           |
+| ------------------- | --------------- | ----------------------------------------------- |
+| Build command       | `npm run build` | Vite static build + esbuild server bundle       |
+| Output directory    | `dist`          | Vite frontend output (served by the Vercel CDN) |
+| Install command     | `npm install`   | Installs dependencies + devDependencies         |
+| Serverless function | `api/index.ts`  | Express app, mounted at `/api/*` via `rewrites` |
+
+#### Option A — Git-based deployment (recommended)
+
+1. Push this repository to GitHub (already done for `elsayedsameh803-star/ebnili-ai-app-builder`).
+2. Open [vercel.com/new](https://vercel.com/new) → **Import Git Repository** → choose the repo.
+3. Vercel reads `vercel.json` for the build settings (no manual configuration needed).
+4. Add `GEMINI_API_KEY` under **Project → Settings → Environment Variables**.
+5. Click **Deploy**. Every later push to `main` triggers an automatic deployment.
+
+#### Option B — Vercel CLI
 
 ```bash
 npm install -g vercel
+vercel login
+vercel link          # link to an existing project (e.g. "ebnili")
 vercel --prod
 ```
 
-Vercel auto-detects:
-- **Build command**: `npm run build` (Vite static build + Express bundle)
-- **Output directory**: `dist/`
-- **Serverless function**: `api/index.ts` → `/api/*` (Express app)
+#### Option C — Already linked project
 
-All routes under `/api/*` are rewritten to the serverless function via `vercel.json`.
+If a `.vercel/project.json` exists, just run:
 
-> **Note**: Set `GEMINI_API_KEY` in your Vercel Project Settings → Environment Variables
-> for AI features to work in production.
+```bash
+vercel --prod --yes
+```
+
+> ⚠️ **Network requirement**: the Vercel CLI needs outbound access to `api.vercel.com`
+> and `vercel.com`. If those hosts are blocked (firewall / sandbox / agent environment),
+> use **Option A** — Vercel pulls from GitHub and builds on its own infrastructure.
+
+### Required environment variables
+
+| Variable         | Where to set it                           | Required          |
+| ---------------- | ----------------------------------------- | ----------------- |
+| `GEMINI_API_KEY` | Vercel → Settings → Environment Variables | Yes (AI features) |
+| `APP_URL`        | Vercel → Settings → Environment Variables | Recommended       |
+
+> **Note**: Without `GEMINI_API_KEY` the app still deploys and the UI works, but every
+> call to a `/api/ai/*` endpoint returns an error.
+
+### Filesystem caveat on serverless
+
+The backend persists state in JSON files (`subscriptions_db.json`, `devices_db.json`,
+`admin_settings.json`) through `fs`. Vercel's serverless filesystem is **read-only**
+(except `/tmp`), so:
+
+- ✅ Read endpoints (`/api/subscriptions/current`, `/api/admin/overview`, …) work.
+- ⚠️ Write endpoints (submitting an Orange Cash payment, blocking a device, …) will not
+  persist on Vercel. For production, migrate this state to a database
+  (Vercel Postgres, Upstash Redis, Supabase, …).
 
 ## License
 
