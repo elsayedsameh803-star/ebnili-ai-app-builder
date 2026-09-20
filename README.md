@@ -125,7 +125,8 @@ This project ships with an explicit `vercel.json`:
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }]
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }],
+  "functions": { "api/index.ts": { "maxDuration": 60 } }
 }
 ```
 
@@ -135,6 +136,7 @@ This project ships with an explicit `vercel.json`:
 | Output directory    | `dist`          | Vite frontend output (served by the Vercel CDN) |
 | Install command     | `npm install`   | Installs dependencies + devDependencies         |
 | Serverless function | `api/index.ts`  | Express app, mounted at `/api/*` via `rewrites` |
+| Function duration   | `maxDuration: 60` | Head-room for Gemini calls (`/api/ai/*`)      |
 
 #### Option A — Git-based deployment (recommended)
 
@@ -185,6 +187,48 @@ The backend persists state in JSON files (`subscriptions_db.json`, `devices_db.j
 - ⚠️ Write endpoints (submitting an Orange Cash payment, blocking a device, …) will not
   persist on Vercel. For production, migrate this state to a database
   (Vercel Postgres, Upstash Redis, Supabase, …).
+
+### Troubleshooting
+
+#### `FUNCTION_INVOCATION_FAILED` on every `/api/*` request
+
+**Root cause (fixed in this repository):** `package.json` declares `"type": "module"`,
+so Vercel compiles TypeScript functions to **Node ESM**. Node's ESM loader refuses to
+resolve **extensionless** relative imports, so a function entry that used
+`import app from "../server"` crashed during cold start with:
+
+```
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/api/../server'
+imported from /var/task/api/index.js
+```
+
+That crash is exactly what Vercel reports to the browser as `FUNCTION_INVOCATION_FAILED`.
+
+**Fix:** every relative import inside a serverless function must carry an explicit
+`.js` extension (`import app from "../server.js"`). TypeScript resolves `../server.js`
+back to `../server.ts` while type-checking, and the emitted JS keeps the extension that
+Node needs at runtime.
+
+| Symptom                            | Cause                                        | Fix                                            |
+| ---------------------------------- | -------------------------------------------- | ---------------------------------------------- |
+| `FUNCTION_INVOCATION_FAILED`       | ESM + extensionless relative import          | Use `../server.js` (see `api/index.ts`)        |
+| `FUNCTION_INVOCATION_FAILED`       | Root throw during module evaluation          | Guard top-level code / lazy-init clients       |
+| `FUNCTION_INVOCATION_TIMEOUT`      | Gemini call exceeds `maxDuration`            | Raise `functions["api/index.ts"].maxDuration`  |
+| `404` on `/api/...`                | `rewrites` missing in `vercel.json`          | Keep the `/api/(.*)` → `/api` rewrite          |
+| UI loads but `/api/ai/*` errors    | `GEMINI_API_KEY` not set on Vercel           | Add it under Settings → Environment Variables  |
+
+#### Why the Vite dev-server import is loaded through a variable
+
+`server.ts` starts the Vite dev server with `await import(viteModuleId)` instead of
+`await import("vite")`. Using a variable keeps esbuild and Vercel's dependency tracer
+from pulling the whole Vite toolchain (~50 MB incl. native binaries) into the
+serverless function bundle. The branch only executes under `npm run dev`.
+
+#### Express 4 vs Express 5 route syntax
+
+The SPA fallback is registered as plain middleware rather than `app.get("*")`, because
+the bare `"*"` string pattern is rejected by Express 5's router (`path-to-regexp`)
+while still working on Express 4.
 
 ## License
 

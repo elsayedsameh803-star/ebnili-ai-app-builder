@@ -2207,21 +2207,64 @@ function getBookingTemplate(): string {
 </html>`;
 }
 
-// Vite middleware setup
+// ==========================================
+// STATIC ASSETS & SPA FALLBACK
+// ==========================================
+
+const distDir = path.join(appRootDir, "dist");
+
+// `typeof` guard keeps this safe when running as ESM (tsx dev server).
+const isBundledServer =
+  typeof __filename !== "undefined" && /\.cjs$/.test(String(__filename));
+
+// Serving the built SPA is required in three situations:
+//   1. `npm run dev`  → Vite dev middleware (handled in startServer below)
+//   2. `npm start`    → the esbuild bundle `dist/server.cjs` serves `dist/`
+//   3. Vercel         → the serverless function may receive every request
+// Registering these handlers unconditionally (in production only) means the app
+// behaves the same locally and on Vercel, regardless of how requests are routed.
+const isProductionBuild =
+  process.env.NODE_ENV === "production" ||
+  Boolean(process.env.VERCEL) ||
+  isBundledServer;
+
+if (isProductionBuild) {
+  app.use(express.static(distDir));
+
+  // SPA fallback implemented as plain middleware instead of `app.get("*")`,
+  // because the wildcard string pattern is rejected by Express 5's router.
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return next();
+    }
+    const requestPath = req.path || "/";
+    // Never intercept backend endpoints.
+    if (
+      requestPath === "/api" ||
+      requestPath.startsWith("/api/") ||
+      requestPath.startsWith("/download-project-zip")
+    ) {
+      return next();
+    }
+    res.sendFile(path.join(distDir, "index.html"), (err) => {
+      if (err) next();
+    });
+  });
+}
+
+// Vite middleware setup (local development only)
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
+  if (!isProductionBuild) {
+    // The module id is intentionally held in a variable: it prevents esbuild and
+    // Vercel's dependency tracer from pulling the whole Vite toolchain into the
+    // serverless function bundle. This branch only ever runs under `npm run dev`.
+    const viteModuleId = "vite";
+    const { createServer: createViteServer } = await import(viteModuleId);
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
@@ -2229,8 +2272,14 @@ async function startServer() {
   });
 }
 
+// On Vercel the exported `app` is invoked directly by the platform, so the port
+// listener must only be started for local runs.
 if (!process.env.VERCEL) {
-  startServer();
+  startServer().catch((err) => {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  });
 }
 
 export default app;
+
