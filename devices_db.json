@@ -1,0 +1,28 @@
+{
+  "dev_mu91brwh_cr2ynt8": {
+    "deviceId": "dev_mu91brwh_cr2ynt8",
+    "fingerprintHash": "fp_vy1ct9",
+    "ipAddress": "102.11.207.217",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "firstSeen": "2026-09-19T23:45:05.039Z",
+    "lastSeen": "2026-09-19T23:45:05.039Z",
+    "registeredEmails": [],
+    "freeGenerationsUsed": 0,
+    "freeGenerationsLimit": 5,
+    "isBlocked": false,
+    "associatedTier": "free"
+  },
+  "dev_1789861624360": {
+    "deviceId": "dev_1789861624360",
+    "fingerprintHash": "dev_1789861624360",
+    "ipAddress": "127.0.0.1",
+    "userAgent": "curl/7.88.1",
+    "firstSeen": "2026-09-19T23:47:04.359Z",
+    "lastSeen": "2026-09-19T23:47:04.359Z",
+    "registeredEmails": [],
+    "freeGenerationsUsed": 0,
+    "freeGenerationsLimit": 5,
+    "isBlocked": false,
+    "associatedTier": "free"
+  }
+}

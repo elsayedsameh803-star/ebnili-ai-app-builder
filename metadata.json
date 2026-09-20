@@ -1,0 +1,6 @@
+{
+  "name": "Ebnili - AI App Builder",
+  "description": "منصة إبنيلي (Ebnili) الذكية لبناء وتطوير تطبيقات الويب بالذكاء الاصطناعي مع معاينة فورية ومحرر كود ونظام اشتراكات ومحفظة أورانج كاش.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

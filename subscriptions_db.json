@@ -1,0 +1,50 @@
+{
+  "tier": "pro",
+  "status": "active",
+  "planName": "باقة المحترفين (Pro)",
+  "activatedAt": "2026-09-14T17:31:47.226Z",
+  "expiresAt": "2026-10-14T17:31:47.226Z",
+  "billingCycle": "monthly",
+  "generationsUsedToday": 2,
+  "generationsLimitToday": 99999,
+  "canExportZip": true,
+  "canDeployCustomDomain": true,
+  "canUseVisualInspector": true,
+  "priorityAiModel": true,
+  "transactions": [
+    {
+      "id": "txn_1789407107226_6d8gs",
+      "senderPhone": "01200000000",
+      "recipientWallet": "01207782741",
+      "transactionReference": "OG12345678",
+      "amount": 249,
+      "currency": "EGP",
+      "planId": "pro",
+      "planName": "باقة المحترفين (Pro)",
+      "billingCycle": "monthly",
+      "userName": "أحمد علي",
+      "userEmail": "user@ebnili.ai",
+      "submittedAt": "2026-09-14T17:31:47.226Z",
+      "status": "confirmed",
+      "verifiedAt": "2026-09-14T17:31:47.226Z",
+      "notes": "تحويل أورانج كاش إلى 01207782741"
+    },
+    {
+      "id": "txn_welcome_starter",
+      "senderPhone": "01207782741",
+      "recipientWallet": "01207782741",
+      "transactionReference": "EBNILI-FREE-STARTER",
+      "amount": 0,
+      "currency": "EGP",
+      "planId": "free",
+      "planName": "Starter Free",
+      "billingCycle": "monthly",
+      "userName": "مستخدم إبنيلي",
+      "userEmail": "user@ebnili.ai",
+      "submittedAt": "2026-09-14T17:31:39.618Z",
+      "status": "confirmed",
+      "verifiedAt": "2026-09-14T17:31:39.618Z",
+      "notes": "حساب افتراضي مجاني"
+    }
+  ]
+}
