@@ -192,10 +192,28 @@ CREATE TABLE records (
         },
         body: JSON.stringify({ prompt, templateId, language, deviceId: devFp.deviceId, fingerprintHash: devFp.fingerprintHash }),
       });
-      const data = await res.json();
+      // Defensive JSON parse: the server always returns JSON, but a CDN/proxy
+      // 404 page would be HTML — never crash, show the real server message.
+      const data = await res.json().catch(() => ({ success: false as const, message: '' as string }));
 
-      if (!res.ok || data.error === 'QUOTA_EXCEEDED') {
-        const errorMsg = data.message || (language === 'ar'
+      if (!res.ok) {
+        const errorMsg = (data as { message?: string }).message || (language === 'ar'
+          ? '⚠️ حدث خطأ في الخادم أثناء التوليد. حاول مرة أخرى بعد قليل.'
+          : '⚠️ Server error during generation. Please try again.');
+        const assistantMsg: ChatMessage = {
+          id: String(Date.now() + 1),
+          sender: 'assistant',
+          text: errorMsg,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setChatMessages((prev) => [...prev, assistantMsg]);
+        // Only open the subscription modal for quota errors, not server/key errors.
+        if (/QUOTA|quota|استنفذت|الرصيد/.test(errorMsg)) setShowSubscription(true);
+        return;
+      }
+
+      if ((data as { error?: string }).error === 'QUOTA_EXCEEDED') {
+        const errorMsg = (data as { message?: string }).message || (language === 'ar'
           ? '⚠️ لقد استنفذت الرصيد المجاني المخصص لجهازك (لحماية المنصة من الاستخدام المتكرر). يرجى الترقية إلى باقة المحترفين Pro عبر محفظة أورانج كاش (01207782741) للاستمتاع بإنشاء غير محدود وبدون علامة مائية.'
           : '⚠️ Free generation quota exceeded for this device. Please upgrade to Pro via Orange Cash (01207782741) to unlock unlimited creations without watermark.');
         
@@ -211,8 +229,8 @@ CREATE TABLE records (
       }
 
       const newVersionNum = `v1.0`;
-      const updatedCode = data.code || project.code;
-      const appName = data.appName || prompt.slice(0, 25);
+      const updatedCode = (data as { code?: string }).code || project.code;
+      const appName = (data as { appName?: string }).appName || prompt.slice(0, 25);
 
       const newVersion: VersionHistoryItem = {
         id: String(Date.now()),
@@ -243,14 +261,23 @@ CREATE TABLE records (
       const assistantMsg: ChatMessage = {
         id: String(Date.now() + 1),
         sender: 'assistant',
-        text: data.explanation || (language === 'ar' ? 'تم إنشاء التطبيق بنجاح!' : 'App generated successfully!'),
+        text: (data as { explanation?: string }).explanation || (language === 'ar' ? 'تم إنشاء التطبيق بنجاح!' : 'App generated successfully!'),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         versionTag: newVersionNum,
-        plan: data.plan || currentPlanSteps,
+        plan: (data as { plan?: string[] }).plan || currentPlanSteps,
       };
       setChatMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
       console.error(err);
+      const networkMsg: ChatMessage = {
+        id: String(Date.now() + 1),
+        sender: 'assistant',
+        text: language === 'ar'
+          ? '⚠️ تعذر الاتصال بالخادم. تحقق من اتصال الإنترنت وحاول مرة أخرى.'
+          : '⚠️ Could not reach the server. Check your connection and try again.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setChatMessages((prev) => [...prev, networkMsg]);
     } finally {
       setIsGenerating(false);
       setCurrentPlanSteps([]);
@@ -309,10 +336,25 @@ CREATE TABLE records (
           fingerprintHash: devFp.fingerprintHash,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ success: false as const, message: '' as string }));
 
-      if (!res.ok || data.error === 'QUOTA_EXCEEDED') {
-        const errorMsg = data.message || (language === 'ar'
+      if (!res.ok) {
+        const errorMsg = (data as { message?: string }).message || (language === 'ar'
+          ? '⚠️ حدث خطأ في الخادم أثناء التعديل. حاول مرة أخرى بعد قليل.'
+          : '⚠️ Server error during refinement. Please try again.');
+        const assistantMsg: ChatMessage = {
+          id: String(Date.now() + 1),
+          sender: 'assistant',
+          text: errorMsg,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setChatMessages((prev) => [...prev, assistantMsg]);
+        if (/QUOTA|quota|استنفذت|الرصيد/.test(errorMsg)) setShowSubscription(true);
+        return;
+      }
+
+      if ((data as { error?: string }).error === 'QUOTA_EXCEEDED') {
+        const errorMsg = (data as { message?: string }).message || (language === 'ar'
           ? '⚠️ لقد استنفذت الرصيد المجاني المخصص لجهازك (لحماية المنصة من الاستخدام المتكرر). يرجى الترقية إلى باقة المحترفين Pro عبر محفظة أورانج كاش (01207782741).'
           : '⚠️ Free generation quota exceeded for this device. Please upgrade to Pro via Orange Cash (01207782741).');
         
@@ -327,7 +369,7 @@ CREATE TABLE records (
         return;
       }
 
-      const updatedCode = data.code || project.code;
+      const updatedCode = (data as { code?: string }).code || project.code;
       const nextVer = `v1.${project.versions.length}`;
 
       const newVersion: VersionHistoryItem = {
@@ -362,10 +404,10 @@ CREATE TABLE records (
       const assistantMsg: ChatMessage = {
         id: String(Date.now() + 1),
         sender: 'assistant',
-        text: data.explanation || (language === 'ar' ? 'تم تطبيق التعديلات بنجاح.' : 'Modifications applied successfully.'),
+        text: (data as { explanation?: string }).explanation || (language === 'ar' ? 'تم تطبيق التعديلات بنجاح.' : 'Modifications applied successfully.'),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         versionTag: nextVer,
-        plan: data.plan || currentPlanSteps,
+        plan: (data as { plan?: string[] }).plan || currentPlanSteps,
       };
       setChatMessages((prev) => [...prev, assistantMsg]);
 
@@ -374,6 +416,15 @@ CREATE TABLE records (
       setIsInspectMode(false);
     } catch (err) {
       console.error(err);
+      const networkMsg: ChatMessage = {
+        id: String(Date.now() + 1),
+        sender: 'assistant',
+        text: language === 'ar'
+          ? '⚠️ تعذر الاتصال بالخادم. تحقق من اتصال الإنترنت وحاول مرة أخرى.'
+          : '⚠️ Could not reach the server. Check your connection and try again.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setChatMessages((prev) => [...prev, networkMsg]);
     } finally {
       setIsGenerating(false);
       setCurrentPlanSteps([]);

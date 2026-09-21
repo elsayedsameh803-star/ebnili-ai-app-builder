@@ -29,12 +29,15 @@ app.use((req, res, next) => {
 });
 
 // ── Health & status ─────────────────────────────────────────────────────────
+// NOTE: getApiKey is defined in the Gemini section below (function hoisting
+// makes it available here at runtime).
 app.get(["/api/health", "/api", "/", "/health"], (_req: Request, res: Response) => {
   res.json({
     status: "ok",
     service: "ebnili-api",
     time: new Date().toISOString(),
-    hasKey: Boolean(process.env.GEMINI_API_KEY),
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    hasKey: Boolean(getApiKey()),
   });
 });
 
@@ -149,8 +152,20 @@ for (const p of [
 }
 
 // ── Gemini AI proxy ─────────────────────────────────────────────────────────
+// Accepts GEMINI_API_KEY plus common aliases so the function works no matter
+// which exact variable name was configured in the Vercel dashboard.
+function getApiKey(): string {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    ""
+  ).trim();
+}
+
 function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getApiKey();
   if (!apiKey) return null;
   return new GoogleGenAI({ apiKey });
 }
@@ -193,9 +208,18 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
     const result = await generateWithGemini(ai, [
       `Build a complete single-file HTML app for this request (lang: ${language}):\n${prompt}`,
     ]);
-    res.json({ success: true, code: extractText(result), appName: prompt.slice(0, 60) });
+    const code = extractText(result);
+    if (!code) {
+      console.error("generate-app: Gemini returned empty text");
+      return res.status(500).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
+    }
+    res.json({ success: true, code, appName: prompt.slice(0, 60) });
   } catch (e) {
-    console.error("generate-app failed:", e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("generate-app failed:", msg);
+    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+      return res.status(500).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
+    }
     res.status(500).json({ success: false, message: "فشل توليد التطبيق، حاول مرة أخرى" });
   }
 });
@@ -210,9 +234,18 @@ app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
     const result = await generateWithGemini(ai, [
       `Refine this HTML app (lang: ${language}). Instruction: ${prompt}\n\nCurrent code:\n${currentCode}`,
     ]);
-    res.json({ success: true, code: extractText(result) });
+    const refined = extractText(result);
+    if (!refined) {
+      console.error("refine-app: Gemini returned empty text");
+      return res.status(500).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
+    }
+    res.json({ success: true, code: refined });
   } catch (e) {
-    console.error("refine-app failed:", e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("refine-app failed:", msg);
+    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+      return res.status(500).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
+    }
     res.status(500).json({ success: false, message: "فشل تحسين التطبيق، حاول مرة أخرى" });
   }
 });
@@ -224,9 +257,18 @@ for (const p of ["/api/ai/gemini-enhance-prompt", "/api/ai/gemini-architect", "/
       if (!ai) return res.status(500).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
       const { prompt = "", language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
       const result = await generateWithGemini(ai, [`(lang: ${language}) ${prompt}`]);
-      res.json({ success: true, result: extractText(result) });
+      const text = extractText(result);
+      if (!text) {
+        console.error(`${p}: Gemini returned empty text`);
+        return res.status(500).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
+      }
+      res.json({ success: true, result: text });
     } catch (e) {
-      console.error(`${p} failed:`, e);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`${p} failed:`, msg);
+      if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+        return res.status(500).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
+      }
       res.status(500).json({ success: false, message: "فشل طلب الذكاء الاصطناعي" });
     }
   });
