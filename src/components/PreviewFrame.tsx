@@ -258,7 +258,7 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
             srcDoc={injectedHtml}
             title="Lovable Application Preview"
             className="w-full h-full border-0 bg-white"
-            sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
+            sandbox="allow-scripts allow-forms allow-modals"
           />
 
           {/* Watermark Notice for Free Tier */}
