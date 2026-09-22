@@ -1,26 +1,21 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Send, 
-  Sparkles, 
-  MessageSquare, 
-  FolderTree, 
-  History, 
-  Settings2, 
-  RotateCcw, 
-  Mic, 
-  MicOff, 
-  Paperclip, 
-  CheckCircle2, 
-  Clock, 
-  ChevronRight, 
-  Layers,
+import { useState, useRef, useEffect } from 'react';
+import type { FormEvent, KeyboardEvent } from 'react';
+import {
+  Send,
+  Sparkles,
+  MessageSquare,
+  FolderTree,
+  History,
+  RotateCcw,
+  Mic,
+  MicOff,
+  CheckCircle2,
+  Clock,
   FileCode,
-  Sliders,
   Crown,
   Smartphone,
   Copy,
   Check,
-  Zap,
   ArrowRight,
   ArrowLeft
 } from 'lucide-react';
@@ -46,7 +41,7 @@ interface ChatSidebarProps {
   onOpenGeminiStudio?: () => void;
 }
 
-export const ChatSidebar: React.FC<ChatSidebarProps> = ({
+export const ChatSidebar = ({
   messages,
   versions,
   files,
@@ -62,14 +57,14 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
   subscription,
   onOpenSubscription,
   onOpenGeminiStudio,
-}) => {
+}: ChatSidebarProps) => {
   const [activeTab, setActiveTab] = useState<'chat' | 'files' | 'history' | 'subscription'>('chat');
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [copiedWallet, setCopiedWallet] = useState(false);
   const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
   const handleEnhanceCurrentPrompt = async () => {
     if (!inputText.trim() || isEnhancingPrompt) return;
@@ -80,9 +75,9 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: inputText.trim(), language }),
       });
-      const data = await res.json();
-      if (data && data.enhancedPrompt) {
-        setInputText(data.enhancedPrompt);
+      const data = await res.json().catch(() => ({}));
+      if (data && (data as { enhancedPrompt?: string }).enhancedPrompt) {
+        setInputText((data as { enhancedPrompt: string }).enhancedPrompt);
       }
     } catch (e) {
       console.warn('Enhance prompt failed:', e);
@@ -106,14 +101,26 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
       return;
     }
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
+    type SpeechRecognitionInstance = {
+      lang: string;
+      continuous: boolean;
+      interimResults: boolean;
+      onstart: (() => void) | null;
+      onend: (() => void) | null;
+      onerror: (() => void) | null;
+      onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+      start: () => void;
+      stop: () => void;
+    };
+    const win = window as unknown as Record<string, (new () => SpeechRecognitionInstance) | undefined>;
+    const SpeechRecognitionCtor = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
       alert(language === 'ar' ? 'متصفحك لا يدعم التعرف الصوتي المباشر.' : 'Speech recognition not supported in this browser.');
       return;
     }
 
     try {
-      const recognition = new SpeechRecognition();
+      const recognition = new SpeechRecognitionCtor();
       recognition.lang = language === 'ar' ? 'ar-SA' : 'en-US';
       recognition.continuous = false;
       recognition.interimResults = false;
@@ -121,7 +128,7 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
       recognition.onstart = () => setIsListening(true);
       recognition.onend = () => setIsListening(false);
       recognition.onerror = () => setIsListening(false);
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => {
         const transcript = event.results[0][0].transcript;
         setInputText((prev) => (prev ? `${prev} ${transcript}` : transcript));
       };
@@ -134,14 +141,14 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
     }
   };
 
-  const handleSend = (e?: React.FormEvent) => {
+  const handleSend = (e?: FormEvent) => {
     if (e) e.preventDefault();
     if (!inputText.trim() || isGenerating) return;
     onSubmitPrompt(inputText.trim());
     setInputText('');
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -515,7 +522,7 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(ORANGE_CASH_WALLET_NUMBER);
+                    navigator.clipboard?.writeText(ORANGE_CASH_WALLET_NUMBER).catch(() => undefined);
                     setCopiedWallet(true);
                     setTimeout(() => setCopiedWallet(false), 2000);
                   }}

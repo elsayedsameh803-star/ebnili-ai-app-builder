@@ -1,23 +1,22 @@
-import React, { useState } from 'react';
-import { 
-  X, 
-  Check, 
-  Sparkles, 
-  Copy, 
-  CheckCircle2, 
-  Smartphone, 
-  CreditCard, 
-  ShieldCheck, 
-  ArrowRight, 
+import { useState } from 'react';
+import type { FormEvent, ChangeEvent } from 'react';
+import {
+  X,
+  Check,
+  Sparkles,
+  Copy,
+  CheckCircle2,
+  Smartphone,
+  ShieldCheck,
+  ArrowRight,
   ArrowLeft,
-  Upload, 
-  FileText, 
-  Clock, 
-  Zap, 
-  HelpCircle,
-  RotateCcw,
+  Upload,
+  FileText,
+  Clock,
+  Zap,
   BadgeCheck,
-  AlertCircle
+  AlertCircle,
+  MessageCircle
 } from 'lucide-react';
 import { Language, UserSubscription, SubscriptionTier, BillingCycle } from '../types';
 import { 
@@ -28,7 +27,6 @@ import {
   ORANGE_CASH_STEPS_EN 
 } from '../data/plans';
 import { getDeviceFingerprint } from '../utils/fingerprint';
-import { MessageCircle } from 'lucide-react';
 
 interface SubscriptionModalProps {
   isOpen?: boolean;
@@ -39,14 +37,14 @@ interface SubscriptionModalProps {
   language: Language;
 }
 
-export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
+export const SubscriptionModal = ({
   isOpen = true,
   onClose,
   subscription: subProp,
   currentSubscription: currSubProp,
   onSubscriptionUpdated,
   language,
-}) => {
+}: SubscriptionModalProps) => {
   const subscription = subProp || currSubProp || {
     tier: 'free',
     planName: 'Starter Free',
@@ -94,18 +92,18 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   };
 
   const handleCopyWallet = () => {
-    navigator.clipboard.writeText(ORANGE_CASH_WALLET_NUMBER);
+    navigator.clipboard?.writeText(ORANGE_CASH_WALLET_NUMBER).catch(() => undefined);
     setCopiedNumber(true);
     setTimeout(() => setCopiedNumber(false), 2500);
   };
 
   const handleCopyUssd = () => {
-    navigator.clipboard.writeText(ORANGE_CASH_USSD_CODE);
+    navigator.clipboard?.writeText(ORANGE_CASH_USSD_CODE).catch(() => undefined);
     setCopiedUssd(true);
     setTimeout(() => setCopiedUssd(false), 2500);
   };
 
-  const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleReceiptUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -116,7 +114,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     }
   };
 
-  const handleSubmitPayment = async (e: React.FormEvent) => {
+  const handleSubmitPayment = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -157,20 +155,20 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(data.error || 'فشل التحقق من العملية، يرجى التأكد من الرقم المرجعي أو التواصل عبر واتساب.');
+        throw new Error((data as { error?: string }).error || 'فشل التحقق من العملية، يرجى التأكد من الرقم المرجعي أو التواصل عبر واتساب.');
       }
 
-      onSubscriptionUpdated(data.subscription);
+      onSubscriptionUpdated((data as { subscription: UserSubscription }).subscription);
       setSuccessCelebration(true);
       setTimeout(() => {
         setSuccessCelebration(false);
         setActiveTab('history');
       }, 2500);
-    } catch (err: any) {
-      setErrorMessage(err.message || (language === 'ar' ? 'حدث خطأ أثناء الاتصال بالخادم.' : 'Server communication error.'));
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : (language === 'ar' ? 'حدث خطأ أثناء الاتصال بالخادم.' : 'Server communication error.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -179,9 +177,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const handleResetToFree = async () => {
     try {
       const res = await fetch('/api/subscriptions/reset-free', { method: 'POST' });
-      const data = await res.json();
-      if (data.subscription) {
-        onSubscriptionUpdated(data.subscription);
+      const data = await res.json().catch(() => ({}));
+      if ((data as { subscription?: UserSubscription }).subscription) {
+        onSubscriptionUpdated((data as { subscription: UserSubscription }).subscription);
       }
     } catch (e) {
       console.error(e);

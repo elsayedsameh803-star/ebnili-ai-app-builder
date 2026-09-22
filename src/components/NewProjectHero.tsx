@@ -1,15 +1,12 @@
-import React, { useState, useRef } from 'react';
-import { 
-  Sparkles, 
-  ArrowRight, 
+import { useState, useRef } from 'react';
+import type { FormEvent } from 'react';
+import {
+  Sparkles,
+  ArrowRight,
   ArrowLeft,
-  Mic, 
-  MicOff, 
-  Paperclip, 
-  Layers, 
+  Mic,
+  MicOff,
   Globe,
-  Zap,
-  CheckCircle,
   Play,
   Crown
 } from 'lucide-react';
@@ -25,18 +22,18 @@ interface NewProjectHeroProps {
   onOpenSubscription?: () => void;
 }
 
-export const NewProjectHero: React.FC<NewProjectHeroProps> = ({
+export const NewProjectHero = ({
   onStartProject,
   isGenerating,
   language,
   onToggleLanguage,
   subscription,
   onOpenSubscription,
-}) => {
+}: NewProjectHeroProps) => {
   const [promptText, setPromptText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
   const toggleSpeech = () => {
     if (isListening) {
@@ -45,19 +42,35 @@ export const NewProjectHero: React.FC<NewProjectHeroProps> = ({
       return;
     }
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
+    const SpeechRecognitionCtor = (window as unknown as Record<string, new () => {
+      lang: string;
+      onstart: (() => void) | null;
+      onend: (() => void) | null;
+      onerror: (() => void) | null;
+      onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+      start: () => void;
+      stop: () => void;
+    } | undefined>).SpeechRecognition || (window as unknown as Record<string, new () => {
+      lang: string;
+      onstart: (() => void) | null;
+      onend: (() => void) | null;
+      onerror: (() => void) | null;
+      onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+      start: () => void;
+      stop: () => void;
+    } | undefined>).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
       alert(language === 'ar' ? 'المتصفح لا يدعم التسجيل الصوتي' : 'Speech recognition not supported');
       return;
     }
 
     try {
-      const rec = new SpeechRecognition();
+      const rec = new SpeechRecognitionCtor();
       rec.lang = language === 'ar' ? 'ar-SA' : 'en-US';
       rec.onstart = () => setIsListening(true);
       rec.onend = () => setIsListening(false);
       rec.onerror = () => setIsListening(false);
-      rec.onresult = (e: any) => {
+      rec.onresult = (e) => {
         const text = e.results[0][0].transcript;
         setPromptText((prev) => (prev ? `${prev} ${text}` : text));
       };
@@ -68,7 +81,7 @@ export const NewProjectHero: React.FC<NewProjectHeroProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!promptText.trim() || isGenerating) return;
     onStartProject(promptText.trim());

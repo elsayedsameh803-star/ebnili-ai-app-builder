@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { ChatSidebar } from './components/ChatSidebar';
 import { PreviewFrame } from './components/PreviewFrame';
@@ -56,7 +56,7 @@ export default function App() {
   // Fetch current subscription from backend
   useEffect(() => {
     fetch('/api/subscriptions/current')
-      .then((res) => res.json())
+      .then((res) => res.json().catch(() => null))
       .then((data) => {
         if (data && data.subscription) {
           setSubscription(data.subscription);

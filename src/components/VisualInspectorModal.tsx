@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import type { FormEvent } from 'react';
 import { MousePointerClick, Sparkles, X, Palette, Type, Trash2 } from 'lucide-react';
 import { SelectedElementInfo, Language } from '../types';
 
@@ -9,15 +10,22 @@ interface VisualInspectorModalProps {
   language: Language;
 }
 
-export const VisualInspectorModal: React.FC<VisualInspectorModalProps> = ({
+export const VisualInspectorModal = ({
   elementInfo,
   onClose,
   onSubmitRefinement,
   language,
-}) => {
+}: VisualInspectorModalProps) => {
   const [promptText, setPromptText] = useState('');
 
-  const quickActions = [
+  interface QuickAction {
+    titleAr: string;
+    titleEn: string;
+    prompt: string;
+    icon: import('react').ReactNode;
+  }
+
+  const quickActions: QuickAction[] = [
     {
       titleAr: 'تغيير اللون للبنفسجي 🟣',
       titleEn: 'Change color to purple',
@@ -44,7 +52,7 @@ export const VisualInspectorModal: React.FC<VisualInspectorModalProps> = ({
     },
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!promptText.trim()) return;
     onSubmitRefinement(promptText.trim(), elementInfo);

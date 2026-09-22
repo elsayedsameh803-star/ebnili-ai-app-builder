@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Database, X, Github, CreditCard, ShieldCheck, Check, Key } from 'lucide-react';
+import { useState } from 'react';
+import { Database, X, Github, CreditCard } from 'lucide-react';
 import { Language } from '../types';
 
 interface IntegrationsModalProps {
@@ -7,10 +7,10 @@ interface IntegrationsModalProps {
   language: Language;
 }
 
-export const IntegrationsModal: React.FC<IntegrationsModalProps> = ({
+export const IntegrationsModal = ({
   onClose,
   language,
-}) => {
+}: IntegrationsModalProps) => {
   const [supabaseConnected, setSupabaseConnected] = useState(true);
   const [githubConnected, setGithubConnected] = useState(false);
   const [stripeConnected, setStripeConnected] = useState(false);

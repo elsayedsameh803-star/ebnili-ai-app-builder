@@ -1,12 +1,9 @@
-import React, { useState } from 'react';
-import { 
-  Copy, 
-  Check, 
-  FileCode, 
-  GitCompare, 
-  Download, 
-  CheckCheck,
-  RotateCcw
+import { useState } from 'react';
+import {
+  Copy,
+  Check,
+  FileCode,
+  GitCompare
 } from 'lucide-react';
 import { Language } from '../types';
 
@@ -19,21 +16,21 @@ interface CodeEditorProps {
   language: Language;
 }
 
-export const CodeEditor: React.FC<CodeEditorProps> = ({
+export const CodeEditor = ({
   files,
   activeFile,
   onSelectFile,
   onUpdateCode,
   previousCode,
   language,
-}) => {
+}: CodeEditorProps) => {
   const [copied, setCopied] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
 
   const currentContent = files[activeFile] || '';
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(currentContent);
+    navigator.clipboard?.writeText(currentContent).catch(() => undefined);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

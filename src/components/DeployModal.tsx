@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Share2, X, Check, Copy, ExternalLink, QrCode, Globe, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import { Share2, X, Check, Copy, QrCode, Globe } from 'lucide-react';
 import { Language } from '../types';
 
 interface DeployModalProps {
@@ -8,17 +8,17 @@ interface DeployModalProps {
   language: Language;
 }
 
-export const DeployModal: React.FC<DeployModalProps> = ({
+export const DeployModal = ({
   projectName,
   onClose,
   language,
-}) => {
+}: DeployModalProps) => {
   const [copied, setCopied] = useState(false);
   const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'app';
   const publicUrl = `https://ibnili.app/p/${slug}`;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(publicUrl);
+    navigator.clipboard?.writeText(publicUrl).catch(() => undefined);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

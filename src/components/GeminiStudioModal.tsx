@@ -1,26 +1,16 @@
-import React, { useState } from 'react';
-import { 
-  Sparkles, 
-  Cpu, 
-  Zap, 
-  Layers, 
-  Code2, 
-  Terminal, 
-  Database, 
-  Check, 
-  Copy, 
-  RefreshCw, 
-  Sliders, 
-  Wand2, 
-  CheckCircle2, 
-  AlertCircle, 
-  FileCode, 
-  Download, 
-  ArrowRight,
-  ArrowLeft,
-  Crown,
-  Share2,
-  ExternalLink
+import { useState } from 'react';
+import {
+  Sparkles,
+  Cpu,
+  Zap,
+  Layers,
+  Check,
+  Copy,
+  RefreshCw,
+  Wand2,
+  CheckCircle2,
+  FileCode,
+  Crown
 } from 'lucide-react';
 import { Language, UserSubscription } from '../types';
 import { STARTER_TEMPLATES } from '../data/templates';
@@ -36,7 +26,7 @@ interface GeminiStudioModalProps {
   onOpenSubscription?: () => void;
 }
 
-export const GeminiStudioModal: React.FC<GeminiStudioModalProps> = ({
+export const GeminiStudioModal = ({
   isOpen,
   onClose,
   language,
@@ -44,7 +34,7 @@ export const GeminiStudioModal: React.FC<GeminiStudioModalProps> = ({
   onApplyGeneratedCode,
   subscription,
   onOpenSubscription,
-}) => {
+}: GeminiStudioModalProps) => {
   const [activeTab, setActiveTab] = useState<'generator' | 'architect' | 'doctor' | 'quota'>('generator');
   
   // Prompt Generator State
@@ -98,10 +88,10 @@ export const GeminiStudioModal: React.FC<GeminiStudioModalProps> = ({
           language,
         }),
       });
-      const data = await res.json();
-      if (data && data.enhancedPrompt) {
-        setPrompt(data.enhancedPrompt);
-        setSuggestedTags(data.suggestedTags || []);
+      const data = await res.json().catch(() => ({}));
+      if ((data as { enhancedPrompt?: string }).enhancedPrompt) {
+        setPrompt((data as { enhancedPrompt: string }).enhancedPrompt);
+        setSuggestedTags((data as { suggestedTags?: string[] }).suggestedTags || []);
         setEnhancedSuccess(true);
         setTimeout(() => setEnhancedSuccess(false), 4000);
       }
@@ -133,9 +123,13 @@ export const GeminiStudioModal: React.FC<GeminiStudioModalProps> = ({
           language,
         }),
       });
-      const data = await res.json();
-      if (data && data.code) {
-        onApplyGeneratedCode(data.code, data.appName, data.plan);
+      const data = await res.json().catch(() => ({}));
+      if ((data as { code?: string }).code) {
+        onApplyGeneratedCode(
+          (data as { code: string }).code,
+          (data as { appName?: string }).appName,
+          (data as { plan?: string[] }).plan,
+        );
         onClose();
       }
     } catch (err) {
@@ -159,7 +153,7 @@ export const GeminiStudioModal: React.FC<GeminiStudioModalProps> = ({
           language,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (data) {
         setArchitectResult(data);
       }
@@ -186,7 +180,7 @@ export const GeminiStudioModal: React.FC<GeminiStudioModalProps> = ({
           language,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (data) {
         setDoctorResult(data);
         setDoctorSuccess(true);
@@ -199,7 +193,7 @@ export const GeminiStudioModal: React.FC<GeminiStudioModalProps> = ({
   };
 
   const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard?.writeText(text).catch(() => undefined);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
   };

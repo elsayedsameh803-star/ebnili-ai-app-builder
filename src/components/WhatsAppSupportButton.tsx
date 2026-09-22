@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { MessageCircle, Phone, Sparkles, X, ExternalLink, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import { MessageCircle, X, ExternalLink, ShieldCheck } from 'lucide-react';
 import { Language } from '../types';
 
 interface WhatsAppSupportButtonProps {
@@ -7,10 +7,10 @@ interface WhatsAppSupportButtonProps {
   walletNumber?: string;
 }
 
-export const WhatsAppSupportButton: React.FC<WhatsAppSupportButtonProps> = ({
+export const WhatsAppSupportButton = ({
   language,
   walletNumber = '01207782741',
-}) => {
+}: WhatsAppSupportButtonProps) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const cleanPhone = walletNumber.replace(/\D/g, '');

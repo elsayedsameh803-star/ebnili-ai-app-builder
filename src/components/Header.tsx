@@ -1,21 +1,19 @@
-import React from 'react';
-import { 
-  Monitor, 
-  Tablet, 
-  Smartphone, 
-  Eye, 
-  Code2, 
-  Columns2, 
-  Download, 
-  Share2, 
-  Database, 
-  Plus, 
+import { useState, useEffect } from 'react';
+import {
+  Monitor,
+  Tablet,
+  Smartphone,
+  Eye,
+  Code2,
+  Columns2,
+  Download,
+  Share2,
+  Database,
+  Plus,
   Globe,
   Sparkles,
   MousePointerClick,
   Crown,
-  Zap,
-  ShieldCheck,
   Shield
 } from 'lucide-react';
 import { DeviceMode, ViewMode, Language, UserSubscription, AppProject } from '../types';
@@ -45,7 +43,7 @@ interface HeaderProps {
   onSelectProject?: (id: string) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
+export const Header = ({
   projectName,
   onRenameProject,
   isGenerating,
@@ -68,12 +66,12 @@ export const Header: React.FC<HeaderProps> = ({
   projects = [],
   activeProjectId,
   onSelectProject,
-}) => {
-  const [isEditingName, setIsEditingName] = React.useState(false);
-  const [nameInput, setNameInput] = React.useState(projectName);
-  const [showProjectsMenu, setShowProjectsMenu] = React.useState(false);
+}: HeaderProps) => {
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(projectName);
+  const [showProjectsMenu, setShowProjectsMenu] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setNameInput(projectName);
   }, [projectName]);
 

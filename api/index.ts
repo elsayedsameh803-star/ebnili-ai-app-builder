@@ -13,7 +13,7 @@
 //    ephemeral) and never throw.
 // ─────────────────────────────────────────────────────────────────────────────
 import express from "express";
-import type { Request, Response } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { GoogleGenAI } from "@google/genai";
 
 const app = express();
@@ -172,12 +172,13 @@ function getGeminiClient(): GoogleGenAI | null {
 
 const CANDIDATE_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
 
-async function generateWithGemini(ai: GoogleGenAI, contents: unknown) {
+async function generateWithGemini(ai: GoogleGenAI, prompt: string) {
   let lastError: unknown = null;
   for (const model of CANDIDATE_MODELS) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return await ai.models.generateContent({ model, contents: contents as any });
+      // NOTE: `contents` must be a plain string (not an array). Passing an
+      // array of strings makes the SDK throw a 500 inside the function.
+      return await ai.models.generateContent({ model, contents: prompt });
     } catch (e) {
       lastError = e;
     }
@@ -205,9 +206,10 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
     if (!ai) return res.status(500).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const { prompt, language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
     if (!prompt) return res.status(400).json({ success: false, message: "prompt مطلوب" });
-    const result = await generateWithGemini(ai, [
+    const result = await generateWithGemini(
+      ai,
       `Build a complete single-file HTML app for this request (lang: ${language}):\n${prompt}`,
-    ]);
+    );
     const code = extractText(result);
     if (!code) {
       console.error("generate-app: Gemini returned empty text");
@@ -231,9 +233,10 @@ app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
     const { prompt, currentCode, language = "ar" } = (req.body as { prompt?: string; currentCode?: string; language?: string }) ?? {};
     if (!prompt || !currentCode)
       return res.status(400).json({ success: false, message: "prompt و currentCode مطلوبان" });
-    const result = await generateWithGemini(ai, [
+    const result = await generateWithGemini(
+      ai,
       `Refine this HTML app (lang: ${language}). Instruction: ${prompt}\n\nCurrent code:\n${currentCode}`,
-    ]);
+    );
     const refined = extractText(result);
     if (!refined) {
       console.error("refine-app: Gemini returned empty text");
@@ -256,7 +259,7 @@ for (const p of ["/api/ai/gemini-enhance-prompt", "/api/ai/gemini-architect", "/
       const ai = getGeminiClient();
       if (!ai) return res.status(500).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
       const { prompt = "", language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
-      const result = await generateWithGemini(ai, [`(lang: ${language}) ${prompt}`]);
+      const result = await generateWithGemini(ai, `(lang: ${language}) ${prompt}`);
       const text = extractText(result);
       if (!text) {
         console.error(`${p}: Gemini returned empty text`);
@@ -281,8 +284,7 @@ app.use("/api", (_req: Request, res: Response) => {
 
 // ── Global error handler (last resort: always JSON) ─────────────────────────
 app.use(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  (err: unknown, _req: Request, res: Response, _next: unknown) => {
+  (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error("Unhandled API error:", err);
     if (!res.headersSent) res.status(500).json({ success: false, message: "Internal server error" });
   },

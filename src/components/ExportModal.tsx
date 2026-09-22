@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Download, X, Copy, Check, FileArchive, Terminal, Code } from 'lucide-react';
 import JSZip from 'jszip';
 import { Language } from '../types';
@@ -10,12 +10,12 @@ interface ExportModalProps {
   language: Language;
 }
 
-export const ExportModal: React.FC<ExportModalProps> = ({
+export const ExportModal = ({
   projectName,
   files,
   onClose,
   language,
-}) => {
+}: ExportModalProps) => {
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
 
@@ -78,7 +78,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   const handleCopySnippet = () => {
-    navigator.clipboard.writeText(embedSnippet);
+    navigator.clipboard?.writeText(embedSnippet).catch(() => undefined);
     setCopiedSnippet(true);
     setTimeout(() => setCopiedSnippet(false), 2000);
   };

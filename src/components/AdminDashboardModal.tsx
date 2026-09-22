@@ -1,27 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   ShieldAlert, 
   ShieldCheck, 
-  Users, 
   Cpu, 
   CreditCard, 
   Settings, 
   X, 
   Lock, 
-  Unlock, 
   RefreshCw, 
   CheckCircle, 
   AlertTriangle, 
   Search, 
-  Sliders, 
-  Smartphone, 
-  Sparkles,
+  Smartphone,
   DollarSign,
   TrendingUp,
-  UserCheck,
   Ban
 } from 'lucide-react';
-import { Language, PlatformRealStats, AdminSettings, DeviceProtectionInfo } from '../types';
+import { Language, PlatformRealStats, AdminSettings, DeviceProtectionInfo, OrangeCashTransaction } from '../types';
 
 interface AdminDashboardModalProps {
   isOpen: boolean;
@@ -29,11 +24,11 @@ interface AdminDashboardModalProps {
   language: Language;
 }
 
-export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
+export const AdminDashboardModal = ({
   isOpen,
   onClose,
   language,
-}) => {
+}: AdminDashboardModalProps) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -52,7 +47,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     adminEmail: 'elsayedsameh803@gmail.com',
   });
   const [devices, setDevices] = useState<DeviceProtectionInfo[]>([]);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<OrangeCashTransaction[]>([]);
 
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -66,7 +61,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     }
   }, [isOpen]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: import('react').FormEvent) => {
     e.preventDefault();
     setAuthError(null);
     setIsAuthenticating(true);
@@ -78,7 +73,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
         body: JSON.stringify({ pin: pinInput.trim() }),
       });
 
-      const data = await res.json();
+      const data: { error?: string } = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || 'رمز الدخول غير صحيح');
       }
@@ -86,8 +81,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       setIsAuthenticated(true);
       sessionStorage.setItem('ebnili_admin_auth', 'true');
       fetchAdminData();
-    } catch (err: any) {
-      setAuthError(err.message || 'فشل تسجيل الدخول كمسؤول');
+    } catch (err: unknown) {
+      setAuthError(err instanceof Error ? err.message : 'فشل تسجيل الدخول كمسؤول');
     } finally {
       setIsAuthenticating(false);
     }
@@ -97,7 +92,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setIsLoadingData(true);
     try {
       const res = await fetch('/api/admin/overview');
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.success) {
         setStats(data.stats);
         setSettings(data.settings);
@@ -123,7 +118,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           reason: !device.isBlocked ? 'حظر بواسطة صاحب الموقع لمخالفة الاستخدام' : '',
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.success) {
         setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
         showToast(device.isBlocked ? 'تم فك حظر الجهاز بنجاح' : 'تم حظر الجهاز بنجاح');
@@ -145,7 +140,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           newLimit: newLimit !== undefined ? newLimit : device.freeGenerationsLimit,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.success) {
         setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
         showToast('تم تصفير استهلاك الجهاز وتجديد رصيده بنجاح');
@@ -166,7 +161,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           tier,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.success) {
         setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
         showToast(`تم ترقية الجهاز إلى باقة: ${tier.toUpperCase()}`);
@@ -183,7 +178,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId: txId, status }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.success) {
         setTransactions(prev => prev.map(t => t.id === txId ? data.transaction : t));
         fetchAdminData();
@@ -194,7 +189,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     }
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: import('react').FormEvent) => {
     e.preventDefault();
     try {
       const res = await fetch('/api/admin/settings', {
@@ -202,7 +197,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.success) {
         showToast('تم حفظ إعدادات المنصة بنجاح!');
       }

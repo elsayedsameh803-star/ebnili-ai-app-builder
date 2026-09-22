@@ -1,15 +1,11 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { 
-  RotateCw, 
-  ExternalLink, 
-  Terminal, 
-  Maximize2, 
-  MousePointerClick, 
-  Check, 
+import { useRef, useEffect, useState, useMemo } from 'react';
+import {
+  RotateCw,
+  ExternalLink,
+  Terminal,
+  MousePointerClick,
+  Check,
   Copy,
-  AlertCircle,
-  Sparkles,
-  ShieldAlert,
   Crown
 } from 'lucide-react';
 import { DeviceMode, ConsoleLog, SelectedElementInfo, Language } from '../types';
@@ -24,7 +20,7 @@ interface PreviewFrameProps {
   onOpenSubscription?: () => void;
 }
 
-export const PreviewFrame: React.FC<PreviewFrameProps> = ({
+export const PreviewFrame = ({
   code,
   deviceMode,
   isInspectMode,
@@ -32,7 +28,7 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
   language,
   subscriptionTier = 'free',
   onOpenSubscription,
-}) => {
+}: PreviewFrameProps) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([]);
   const [showConsole, setShowConsole] = useState(false);
@@ -160,12 +156,12 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
+    navigator.clipboard?.writeText(window.location.href).catch(() => undefined);
     setCopiedUrl(true);
     setTimeout(() => setCopiedUrl(false), 2000);
   };
 
-  const injectedHtml = React.useMemo(() => {
+  const injectedHtml = useMemo(() => {
     return buildInjectedCode(code, isInspectMode);
   }, [code, isInspectMode, refreshKey]);
 
