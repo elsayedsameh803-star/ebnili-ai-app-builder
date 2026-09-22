@@ -12,3 +12,5 @@ package-lock.json
 
 .vercel
 .env*
+
+tsc-out.txt
