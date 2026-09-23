@@ -242,11 +242,22 @@ ${CORE_RULES}`;
 // code only (owner standard #1) without touching valid documents.
 function stripToCode(text: string): string {
   let t = (text || "").trim();
+  // Unwrap a response that is nothing but one fenced block.
   const fence = t.match(/^```[\w-]*\s*([\s\S]*?)\s*```$/);
   if (fence && typeof fence[1] === "string") t = fence[1].trim();
-  const idx = t.search(/<!DOCTYPE html>/i);
-  if (idx > 0) t = t.slice(idx);
-  return t;
+  // Cut any prose written before the document.
+  const start = t.search(/<!DOCTYPE html>/i);
+  if (start > 0) t = t.slice(start);
+  // Cut fences/commentary written after </html> (tail prose, change lists…).
+  const end = t.search(/<\/html>/i);
+  if (end >= 0) {
+    t = t.slice(0, end + "</html>".length);
+  } else {
+    // Truncated document: drop a trailing closing fence if present.
+    const closeFence = t.indexOf("```");
+    if (closeFence > 10) t = t.slice(0, closeFence);
+  }
+  return t.trim();
 }
 
 app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
