@@ -170,7 +170,15 @@ function getGeminiClient(): GoogleGenAI | null {
   return new GoogleGenAI({ apiKey });
 }
 
-const CANDIDATE_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+// Priority order mirrors the verified server.ts list (gemini-3.8-flash…),
+// keeping the older models as last-resort fallbacks.
+const CANDIDATE_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-flash-latest",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+];
 
 async function generateWithGemini(ai: GoogleGenAI, prompt: string) {
   let lastError: unknown = null;
@@ -181,6 +189,8 @@ async function generateWithGemini(ai: GoogleGenAI, prompt: string) {
       return await ai.models.generateContent({ model, contents: prompt });
     } catch (e) {
       lastError = e;
+      // Brief pause before the next candidate (mirrors server.ts behaviour).
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
   throw lastError ?? new Error("All candidate Gemini models are currently unavailable");
@@ -222,7 +232,8 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
     if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
       return res.status(500).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
-    res.status(500).json({ success: false, message: "فشل توليد التطبيق، حاول مرة أخرى" });
+    const short = msg.length > 160 ? `${msg.slice(0, 160)}…` : msg;
+    res.status(500).json({ success: false, message: `فشل توليد التطبيق، حاول مرة أخرى — السبب: ${short}` });
   }
 });
 
@@ -249,7 +260,8 @@ app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
     if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
       return res.status(500).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
-    res.status(500).json({ success: false, message: "فشل تحسين التطبيق، حاول مرة أخرى" });
+    const short = msg.length > 160 ? `${msg.slice(0, 160)}…` : msg;
+    res.status(500).json({ success: false, message: `فشل تحسين التطبيق، حاول مرة أخرى — السبب: ${short}` });
   }
 });
 

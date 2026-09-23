@@ -45,15 +45,17 @@ export const SubscriptionModal = ({
   onSubscriptionUpdated,
   language,
 }: SubscriptionModalProps) => {
-  const subscription = subProp || currSubProp || {
+  const subscription: UserSubscription = subProp || currSubProp || {
     tier: 'free',
     planName: 'Starter Free',
     status: 'active',
     generationsUsedToday: 0,
     generationsLimitToday: 5,
     canExportZip: false,
-    canUseCustomDomain: false,
+    canDeployCustomDomain: false,
     canUseVisualInspector: true,
+    priorityAiModel: false,
+    transactions: [],
   };
 
   const [activeTab, setActiveTab] = useState<'plans' | 'checkout' | 'history'>('plans');

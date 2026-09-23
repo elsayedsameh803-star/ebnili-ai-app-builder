@@ -49,8 +49,10 @@ export default function App() {
     generationsUsedToday: 1,
     generationsLimitToday: 5,
     canExportZip: false,
-    canUseCustomDomain: false,
+    canDeployCustomDomain: false,
     canUseVisualInspector: true,
+    priorityAiModel: false,
+    transactions: [],
   });
 
   // Fetch current subscription from backend
