@@ -127,7 +127,13 @@ app.get("/api/protection/status", (req: Request, res: Response) => {
 // ── Admin (read-safe stubs; no secrets leaked) ──────────────────────────────
 app.post("/api/admin/auth", (req: Request, res: Response) => {
   const { pin, email } = (req.body as { pin?: string; email?: string }) ?? {};
-  const ok = (pin && pin === process.env.ADMIN_PIN) || (email && email === process.env.ADMIN_EMAIL);
+  // Env vars first, then the same repo defaults accepted by server.ts —
+  // keeps the owner login working even when ADMIN_PIN / ADMIN_EMAIL are
+  // not configured on Vercel.
+  const validPin = pin && (pin === process.env.ADMIN_PIN || pin === "01207782741" || pin === "admin803");
+  const validEmail =
+    email && email.toLowerCase() === (process.env.ADMIN_EMAIL || "elsayedsameh803@gmail.com").toLowerCase();
+  const ok = validPin || validEmail;
   if (!ok) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
   res.json({ success: true });
 });
