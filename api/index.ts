@@ -36,6 +36,9 @@ app.get(["/api/health", "/api", "/", "/health"], (_req: Request, res: Response) 
     status: "ok",
     service: "ebnili-api",
     time: new Date().toISOString(),
+    // Deployment fingerprint — lets us verify which commit is actually live.
+    commit: (process.env.VERCEL_GIT_COMMIT_SHA ?? "unknown").slice(0, 7),
+    env: process.env.VERCEL_ENV ?? "local",
     // eslint-disable-next-line @typescript-eslint/no-use-before-define
     hasKey: Boolean(getApiKey()),
   });
