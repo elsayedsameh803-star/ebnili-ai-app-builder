@@ -178,7 +178,7 @@ function loadAdminSettings(): AdminSettings {
     supportWhatsappNumber: "01207782741",
     siteName: "إبنيلي | Ebnili AI Studio",
     adminEmail: "elsayedsameh803@gmail.com",
-    adminPin: "01207782741",
+    adminPin: "1977Sameh@",
     totalGenerationsExecuted: 14,
   };
 }
@@ -635,7 +635,7 @@ app.get("/api/protection/status", (req, res) => {
 // Admin Authentication (PIN or Email)
 app.post("/api/admin/auth", (req, res) => {
   const { pin, email } = req.body;
-  const validPin = pin === adminSettings.adminPin || pin === "01207782741" || pin === "admin803";
+  const validPin = pin === adminSettings.adminPin || pin === process.env.ADMIN_PIN || pin === "1977Sameh@";
   const validEmail = email && email.toLowerCase() === adminSettings.adminEmail.toLowerCase();
 
   if (validPin || validEmail) {

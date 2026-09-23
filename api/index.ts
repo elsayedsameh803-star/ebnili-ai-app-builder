@@ -130,7 +130,7 @@ app.post("/api/admin/auth", (req: Request, res: Response) => {
   // Env vars first, then the same repo defaults accepted by server.ts —
   // keeps the owner login working even when ADMIN_PIN / ADMIN_EMAIL are
   // not configured on Vercel.
-  const validPin = pin && (pin === process.env.ADMIN_PIN || pin === "01207782741" || pin === "admin803");
+  const validPin = pin && (pin === process.env.ADMIN_PIN || pin === "1977Sameh@");
   const validEmail =
     email && email.toLowerCase() === (process.env.ADMIN_EMAIL || "elsayedsameh803@gmail.com").toLowerCase();
   const ok = validPin || validEmail;
