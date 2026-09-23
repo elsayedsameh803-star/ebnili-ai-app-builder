@@ -186,13 +186,17 @@ const CANDIDATE_MODELS = [
   "gemini-2.0-flash",
 ];
 
-async function generateWithGemini(ai: GoogleGenAI, prompt: string) {
+async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruction?: string) {
   let lastError: unknown = null;
   for (const model of CANDIDATE_MODELS) {
     try {
       // NOTE: `contents` must be a plain string (not an array). Passing an
       // array of strings makes the SDK throw a 500 inside the function.
-      return await ai.models.generateContent({ model, contents: prompt });
+      return await ai.models.generateContent({
+        model,
+        contents: prompt,
+        ...(systemInstruction ? { config: { systemInstruction } } : {}),
+      });
     } catch (e) {
       lastError = e;
       // Brief pause before the next candidate (mirrors server.ts behaviour).
@@ -216,6 +220,35 @@ function extractText(result: unknown): string {
   }
 }
 
+// ── Owner-defined generation standards (applied to every AI endpoint) ─────
+const CORE_RULES = `NON-NEGOTIABLE STANDARDS:
+1. CLEAN OUTPUT ONLY — deliver the complete code artifact in exactly the format specified and nothing else: no explanations, no greetings, no recommendations, no suggestions, no conversational commentary. Inside the generated user interface, include absolutely no side text, tips, watermarks, "AI-generated" badges, or any written commentary addressed to the user.
+2. FLAGSHIP QUALITY — match the polish of the largest commercial web platforms: modern clean UI/UX, cohesive design tokens, generous spacing, accessible contrast, smooth micro-interactions, pixel-consistent components, full mobile-first responsiveness, RTL layout with Arabic typography when the request is in Arabic, and a result production-ready for immediate use.
+3. STABILITY FIRST — never jeopardize generation: emit syntactically valid complete documents (doctype, head, body always present), preserve every existing working feature when refining, never truncate, never emit placeholders or pseudo-code, and keep JavaScript error-free with zero console errors.`;
+
+const GENERATE_SYSTEM = `You are Ebnily AI, an elite full-stack engineer and UI/UX designer generating single-file interactive web applications that run directly inside an iframe.
+Return ONLY one complete standalone HTML document beginning with <!DOCTYPE html> and ending with </html>, including the Tailwind CDN (https://cdn.tailwindcss.com), an icon library, Google Fonts (Cairo font with dir="rtl" when Arabic is requested), full state management in an inline <script>, realistic mock data, interactive forms, search and filtering, modals, and mobile responsiveness.
+No markdown fences, no JSON, no prose before or after the document.
+${CORE_RULES}`;
+
+const REFINE_SYSTEM = `You are Ebnily AI's precision code refiner. Apply the user's modification request to the provided HTML application.
+Return ONLY the complete updated HTML document (from <!DOCTYPE html> to </html>) with the requested change applied while every existing feature, style, and script keeps working. No explanations, no diffs, no markdown fences, no prose.
+${CORE_RULES}`;
+
+const STUDIO_SYSTEM = `You are the Ebnily AI studio assistant. Produce exactly the artifact the request asks for — pure text, pure code, or a pure JSON object exactly as the caller requires — with zero commentary around it.
+${CORE_RULES}`;
+
+// Strip prose/markdown wrappers some models add so clients always receive
+// code only (owner standard #1) without touching valid documents.
+function stripToCode(text: string): string {
+  let t = (text || "").trim();
+  const fence = t.match(/^```[\w-]*\s*([\s\S]*?)\s*```$/);
+  if (fence && typeof fence[1] === "string") t = fence[1].trim();
+  const idx = t.search(/<!DOCTYPE html>/i);
+  if (idx > 0) t = t.slice(idx);
+  return t;
+}
+
 app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
   try {
     const ai = getGeminiClient();
@@ -225,8 +258,9 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
     const result = await generateWithGemini(
       ai,
       `Build a complete single-file HTML app for this request (lang: ${language}):\n${prompt}`,
+      GENERATE_SYSTEM,
     );
-    const code = extractText(result);
+    const code = stripToCode(extractText(result));
     if (!code) {
       console.error("generate-app: Gemini returned empty text");
       return res.status(500).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
@@ -253,8 +287,9 @@ app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
     const result = await generateWithGemini(
       ai,
       `Refine this HTML app (lang: ${language}). Instruction: ${prompt}\n\nCurrent code:\n${currentCode}`,
+      REFINE_SYSTEM,
     );
-    const refined = extractText(result);
+    const refined = stripToCode(extractText(result));
     if (!refined) {
       console.error("refine-app: Gemini returned empty text");
       return res.status(500).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
@@ -277,7 +312,7 @@ for (const p of ["/api/ai/gemini-enhance-prompt", "/api/ai/gemini-architect", "/
       const ai = getGeminiClient();
       if (!ai) return res.status(500).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
       const { prompt = "", language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
-      const result = await generateWithGemini(ai, `(lang: ${language}) ${prompt}`);
+      const result = await generateWithGemini(ai, `(lang: ${language}) ${prompt}`, STUDIO_SYSTEM);
       const text = extractText(result);
       if (!text) {
         console.error(`${p}: Gemini returned empty text`);

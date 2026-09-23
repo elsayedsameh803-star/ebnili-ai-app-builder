@@ -789,6 +789,14 @@ app.post("/api/admin/settings", (req, res) => {
 });
 
 
+// ── Owner-defined generation standards (owner requirement: clean output,
+// flagship UI quality, pipeline stability) ─────────────────────────────────
+const CORE_RULES = `NON-NEGOTIABLE STANDARDS:
+1. CLEAN OUTPUT ONLY — deliver only the requested artifact in the exact format specified; never add explanations, recommendations, suggestions, or conversational commentary. The generated user interface must contain no side text, tips, watermarks, AI badges, or any written commentary addressed to the user.
+2. FLAGSHIP QUALITY — match the largest commercial web platforms: modern clean UI/UX, cohesive design tokens, generous spacing, accessible contrast, smooth transitions, mobile-first responsiveness, RTL with Arabic typography when requested, production-ready immediately.
+3. STABILITY FIRST — keep generation structurally sound: complete valid documents (doctype/head/body), preserve every existing working feature when refining, no truncation, no placeholders, no pseudo-code, zero console errors.
+`;
+
 // Prompt-to-App Generation
 app.post("/api/ai/generate-app", async (req, res) => {
   try {
@@ -845,6 +853,7 @@ app.post("/api/ai/generate-app", async (req, res) => {
 
     const systemPrompt = `You are ابنيلي AI (Ibni-li AI), an expert full-stack engineer and UI/UX designer.
 Your mission is to generate a complete, stunning, single-file interactive web application (HTML/Tailwind CSS/JavaScript or React-compatible) that runs directly inside an iframe.
+${CORE_RULES}
 CRITICAL REQUIREMENTS:
 1. Return ONLY a single complete standalone HTML document with <!DOCTYPE html>, <html>, <head> with Tailwind CDN (<script src="https://cdn.tailwindcss.com"></script>) and FontAwesome / Lucide CDN or inline SVG icons, and a rich interactive script inside <script> with state management and dynamic UI.
 2. The UI MUST BE GORGEOUS: Clean modern aesthetic, high contrast, smooth transitions, real interactive forms, mock data, search/filter inputs, modals, stats, and mobile responsiveness.
@@ -991,6 +1000,7 @@ app.post("/api/ai/refine-app", async (req, res) => {
 
     const systemPrompt = `You are ابنيلي AI (Ibni-li AI)'s precision code refiner.
 You receive existing working HTML code of a web application and a user modification request.
+${CORE_RULES}
 If a selected element context is provided (selector, text, tag), focus changes specifically on that element or section.
 CRITICAL:
 1. Return ONLY the complete updated HTML document inside a JSON object:
@@ -1086,6 +1096,7 @@ app.post("/api/ai/gemini-enhance-prompt", async (req, res) => {
 
     const systemPrompt = `You are the prompt engineering copilot of Ebnili AI App Builder, powered by Gemini 3.8 Flash.
 The user provides a raw idea or brief prompt for a web application.
+${CORE_RULES}
 Transform it into a rich, enterprise-grade, comprehensive specification prompt in ${language === 'ar' ? 'Arabic' : 'English'}.
 Specify:
 1. Exact visual layout & UI style (clean, generous spacing, Tailwind classes)
@@ -1179,6 +1190,7 @@ app.post("/api/ai/gemini-architect", async (req, res) => {
 
     const systemPrompt = `You are the lead software architect at Ebnili SaaS, powered by Google DeepMind's Gemini 3.8 Flash.
 When given a user prompt, produce a comprehensive enterprise-ready solution package containing:
+${CORE_RULES}
 1. "appName": Creative clean name of the app
 2. "thinkingSteps": Array of 4-5 concise bullet points showing your architectural reasoning process
 3. "htmlCode": A complete single-file standalone interactive HTML/Tailwind CSS/JS application ready to mount into an iframe
@@ -1276,6 +1288,7 @@ app.post("/api/ai/gemini-code-doctor", async (req, res) => {
     }
 
     const systemPrompt = `You are Gemini 3.8 Flash Code Doctor. Inspect the provided HTML/JavaScript code, fix any bugs, improve responsiveness, ensure zero console errors, and enhance user experience.
+${CORE_RULES}
 Return valid JSON:
 \`\`\`json
 {
