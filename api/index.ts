@@ -348,41 +348,76 @@ async function withDeadline<T>(promise: Promise<T>, ms: number, label: string): 
   }
 }
 
+// A 404/"no longer available"/"is not found" failure means the model itself is
+// unusable for this API key — retrying it inside the same invocation is a waste.
+// Everything else (429 quota blips, 503 UNAVAILABLE high-demand spikes, SDK
+// timeouts, 5xx) is transient by nature and deserves another pass.
+function isRetryableModelError(raw: string): boolean {
+  if (/\b404\b|is not found|no longer available|not found for API key/i.test(raw)) return false;
+  if (/API key not valid|API_KEY_INVALID/i.test(raw)) return false;
+  return true;
+}
+
 async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruction?: string) {
   const deadline = Date.now() + GEMINI_TOTAL_BUDGET_MS;
   // Collect EVERY model's failure, not just the last one — when all candidates
   // fail we need the per-model reason in the response to diagnose remotely
   // (the 2026-09-24 outage was hidden behind a single trailing 404).
   const failures: string[] = [];
+  const deadModels = new Set<string>();
   let lastError: unknown = null;
-  for (const model of CANDIDATE_MODELS) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      failures.push(`${model}: budget exhausted`);
-      break;
+
+  // Up to 3 passes over the candidate list. Live diagnosis (2026-09-24) showed
+  // gemini-3.8-flash / gemini-flash-latest returning 429 (quota) while
+  // gemini-3.7-flash / gemini-3.6-flash returned 503 "high demand" — both are
+  // documented as temporary, so a single pass per model is not enough.
+  const MAX_PASSES = 3;
+  let budgetExhausted = false;
+
+  for (let pass = 1; pass <= MAX_PASSES && !budgetExhausted; pass++) {
+    let attempted = false;
+    for (const model of CANDIDATE_MODELS) {
+      if (deadModels.has(model)) continue;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        failures.push(`budget exhausted before pass ${pass}`);
+        budgetExhausted = true;
+        break;
+      }
+      attempted = true;
+      try {
+        // NOTE: `contents` must be a plain string (not an array). Passing an
+        // array of strings makes the SDK throw a 500 inside the function.
+        // Cap a single attempt so one hanging model can't eat the whole budget
+        // (a full HTML generation normally completes well within 30s).
+        return await withDeadline(
+          ai.models.generateContent({
+            model,
+            contents: prompt,
+            ...(systemInstruction ? { config: { systemInstruction } } : {}),
+          }),
+          Math.min(remaining, 30_000),
+          `Gemini model "${model}"`,
+        );
+      } catch (e) {
+        lastError = e;
+        const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ");
+        if (!isRetryableModelError(raw)) deadModels.add(model);
+        // Keep each entry short so the aggregate still fits the response body.
+        failures.push(`p${pass} ${model}: ${raw.slice(0, 160)}`);
+      }
     }
-    try {
-      // NOTE: `contents` must be a plain string (not an array). Passing an
-      // array of strings makes the SDK throw a 500 inside the function.
-      return await withDeadline(
-        ai.models.generateContent({
-          model,
-          contents: prompt,
-          ...(systemInstruction ? { config: { systemInstruction } } : {}),
-        }),
-        remaining,
-        `Gemini model "${model}"`,
-      );
-    } catch (e) {
-      lastError = e;
-      const raw = e instanceof Error ? e.message : String(e);
-      // Keep each entry short so the aggregate still fits the response body.
-      failures.push(`${model}: ${raw.replace(/\s+/g, " ").slice(0, 180)}`);
-      const pause = Math.min(250, Math.max(0, deadline - Date.now()));
-      if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
-    }
+    // Nothing left to try: every model is permanently dead, or no attempt ran.
+    if (!attempted || CANDIDATE_MODELS.every((m) => deadModels.has(m))) break;
+    // Exponential-ish backoff between passes, but always keep ~2s in reserve
+    // so the error response itself can still be delivered inside maxDuration.
+    const timeLeft = deadline - Date.now();
+    const pause = Math.min(700 * pass, Math.max(0, timeLeft - 2_000));
+    if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
+    if (deadline - Date.now() <= 0) budgetExhausted = true;
   }
-  const detail = failures.join(" | ");
+
+  const detail = failures.join(" | ").slice(0, 1800);
   console.error(`generateWithGemini: all models failed — ${detail}`);
   throw lastError
     ? new Error(`${lastError instanceof Error ? lastError.message : String(lastError)} [per-model: ${detail}]`)
