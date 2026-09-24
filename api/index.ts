@@ -316,15 +316,16 @@ function getGeminiClient(): GoogleGenAI | null {
 //   gemini-3.8-flash     → newest stable Flash, engineered for software engineering
 //   gemini-flash-latest  → Google's official hot-swapped "latest" alias
 //   gemini-3.7-flash     → stable previous-gen, strong at complex coding
-//   gemini-3.6-flash     → stable workhorse release
-//   gemini-2.5-flash     → older stable last resort
-// gemini-2.0-flash and gemini-3.1-flash-lite(-preview) are officially shut down.
+//   gemini-3.6-flash     → stable workhorse release (Google's own replacement
+//                          suggestion when older models 404)
+// gemini-2.5-flash is NOT a candidate anymore: production returned
+// 404 "no longer available to new users" (verified live 2026-09-24), and
+// gemini-2.0-flash / gemini-3.1-flash-lite(-preview) are officially shut down.
 const CANDIDATE_MODELS = [
   "gemini-3.8-flash",
   "gemini-flash-latest",
   "gemini-3.7-flash",
   "gemini-3.6-flash",
-  "gemini-2.5-flash",
 ];
 
 // Owner standard #3 (stability first): one Gemini call may never exceed the
@@ -349,10 +350,17 @@ async function withDeadline<T>(promise: Promise<T>, ms: number, label: string): 
 
 async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruction?: string) {
   const deadline = Date.now() + GEMINI_TOTAL_BUDGET_MS;
+  // Collect EVERY model's failure, not just the last one — when all candidates
+  // fail we need the per-model reason in the response to diagnose remotely
+  // (the 2026-09-24 outage was hidden behind a single trailing 404).
+  const failures: string[] = [];
   let lastError: unknown = null;
   for (const model of CANDIDATE_MODELS) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
+    if (remaining <= 0) {
+      failures.push(`${model}: budget exhausted`);
+      break;
+    }
     try {
       // NOTE: `contents` must be a plain string (not an array). Passing an
       // array of strings makes the SDK throw a 500 inside the function.
@@ -367,11 +375,18 @@ async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruc
       );
     } catch (e) {
       lastError = e;
+      const raw = e instanceof Error ? e.message : String(e);
+      // Keep each entry short so the aggregate still fits the response body.
+      failures.push(`${model}: ${raw.replace(/\s+/g, " ").slice(0, 180)}`);
       const pause = Math.min(250, Math.max(0, deadline - Date.now()));
       if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
     }
   }
-  throw lastError ?? new Error("All candidate Gemini models are currently unavailable");
+  const detail = failures.join(" | ");
+  console.error(`generateWithGemini: all models failed — ${detail}`);
+  throw lastError
+    ? new Error(`${lastError instanceof Error ? lastError.message : String(lastError)} [per-model: ${detail}]`)
+    : new Error(`All candidate Gemini models are currently unavailable [per-model: ${detail}]`);
 }
 
 // The @google/genai SDK returns `response.text` as a *getter property*, not a
@@ -521,8 +536,13 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
     if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
       return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
-    const short = msg.length > 160 ? `${msg.slice(0, 160)}…` : msg;
-    res.status(502).json({ success: false, message: `فشل توليد التطبيق، حاول مرة أخرى — السبب: ${short}` });
+    const short = msg.length > 400 ? `${msg.slice(0, 400)}…` : msg;
+    res.status(502).json({
+      success: false,
+      message: `فشل توليد التطبيق، حاول مرة أخرى — السبب: ${short}`,
+      // Full per-model diagnostics for the client/owner (not shown in UI).
+      debug: msg,
+    });
   }
 });
 
