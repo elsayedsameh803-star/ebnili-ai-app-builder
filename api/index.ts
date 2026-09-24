@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import crypto from "node:crypto";
 
 const app = express();
@@ -311,28 +311,31 @@ function getGeminiClient(): GoogleGenAI | null {
   return new GoogleGenAI({ apiKey });
 }
 
-// Model priority verified against the official Gemini models page
-// (ai.google.dev/gemini-api/docs/models — last updated 2026-09-23):
-//   gemini-3.8-flash     → newest stable Flash, engineered for software engineering
-//   gemini-flash-latest  → Google's official hot-swapped "latest" alias
-//   gemini-3.7-flash     → stable previous-gen, strong at complex coding
-//   gemini-3.6-flash     → stable workhorse release (Google's own replacement
-//                          suggestion when older models 404)
-// gemini-2.5-flash is NOT a candidate anymore: production returned
-// 404 "no longer available to new users" (verified live 2026-09-24), and
-// gemini-2.0-flash / gemini-3.1-flash-lite(-preview) are officially shut down.
+// Model priority is based on the official Gemini model catalogue and live
+// production behaviour. Keep concrete stable IDs instead of relying on a
+// moving alias: the alias can be unavailable for a particular API key.
+//   gemini-3.5-flash     → stable, fast, and strong for coding workflows
+//   gemini-3.5-flash-lite → stable low-latency fallback for text generation
+//   gemini-3.8-flash     → newest flagship Flash, kept after the stable 3.5
+//   gemini-flash-latest  → official hot-swapped alias
+//   gemini-3.7-flash     → previous-generation stable coding model
+//   gemini-3.6-flash     → last-resort stable model (can be slower)
+// gemini-2.5-flash remains excluded because the production key received a
+// 404 "no longer available to new users" response on 2026-09-24.
 const CANDIDATE_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
   "gemini-3.8-flash",
   "gemini-flash-latest",
   "gemini-3.7-flash",
   "gemini-3.6-flash",
 ];
 
-// Owner standard #3 (stability first): one Gemini call may never exceed the
-// Vercel function budget (maxDuration: 60s in vercel.json). A hanging model
-// would otherwise kill the invocation and surface as FUNCTION_INVOCATION_FAILED
-// (HTTP 500). The deadline below stays comfortably under that limit.
+// Keep the whole function below Vercel's 60-second limit with room for the
+// response to be serialized. A complete HTML document is more likely to finish
+// on the primary model, while a low-latency fallback gets a shorter slice.
 const GEMINI_TOTAL_BUDGET_MS = 45_000;
+const GEMINI_ATTEMPT_TIMEOUT_MS = 18_000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -348,73 +351,99 @@ async function withDeadline<T>(promise: Promise<T>, ms: number, label: string): 
   }
 }
 
-// A 404/"no longer available"/"is not found" failure means the model itself is
-// unusable for this API key — retrying it inside the same invocation is a waste.
-// Everything else (429 quota blips, 503 UNAVAILABLE high-demand spikes, SDK
-// timeouts, 5xx) is transient by nature and deserves another pass.
-function isRetryableModelError(raw: string): boolean {
-  if (/\b404\b|is not found|no longer available|not found for API key/i.test(raw)) return false;
-  if (/API key not valid|API_KEY_INVALID/i.test(raw)) return false;
-  return true;
+// A 404/"no longer available"/invalid-key failure means the model is unusable
+// for this API key. A timeout is also not useful to retry within the same
+// serverless request: it has already consumed its entire attempt budget.
+// Keep transient 429/503 failures eligible for one short second pass.
+function classifyModelError(raw: string): "permanent" | "timeout" | "transient" {
+  if (
+    /\b400\b|\b401\b|\b403\b|\b404\b|invalid argument|bad request|is not found|no longer available|not found for API key|API key not valid|API_KEY_INVALID/i.test(
+      raw,
+    )
+  ) {
+    return "permanent";
+  }
+  if (/timed out|deadline exceeded/i.test(raw)) return "timeout";
+  return "transient";
 }
 
 async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruction?: string) {
   const deadline = Date.now() + GEMINI_TOTAL_BUDGET_MS;
-  // Collect EVERY model's failure, not just the last one — when all candidates
-  // fail we need the per-model reason in the response to diagnose remotely
-  // (the 2026-09-24 outage was hidden behind a single trailing 404).
   const failures: string[] = [];
   const deadModels = new Set<string>();
+  const retryableModels = new Set<string>();
+  const attempts = new Map<string, number>();
   let lastError: unknown = null;
 
-  // Up to 3 passes over the candidate list. Live diagnosis (2026-09-24) showed
-  // gemini-3.8-flash / gemini-flash-latest returning 429 (quota) while
-  // gemini-3.7-flash / gemini-3.6-flash returned 503 "high demand" — both are
-  // documented as temporary, so a single pass per model is not enough.
-  const MAX_PASSES = 3;
-  let budgetExhausted = false;
+  // Retry only short-lived quota/capacity failures. Repeating a 404 or a
+  // timed-out request cannot make this response arrive any faster.
+  const MAX_PASSES = 2;
+  const MAX_ATTEMPTS_PER_MODEL = 2;
 
-  for (let pass = 1; pass <= MAX_PASSES && !budgetExhausted; pass++) {
+  for (let pass = 1; pass <= MAX_PASSES; pass++) {
     let attempted = false;
+
     for (const model of CANDIDATE_MODELS) {
-      if (deadModels.has(model)) continue;
+      if (deadModels.has(model) || (attempts.get(model) ?? 0) >= MAX_ATTEMPTS_PER_MODEL) continue;
+      if (pass > 1 && !retryableModels.has(model)) continue;
+
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
         failures.push(`budget exhausted before pass ${pass}`);
-        budgetExhausted = true;
         break;
       }
+
       attempted = true;
+      attempts.set(model, (attempts.get(model) ?? 0) + 1);
+      const attemptTimeout = Math.min(remaining, GEMINI_ATTEMPT_TIMEOUT_MS);
+      const usesThinkingLevel = model === "gemini-3.5-flash" || model === "gemini-3.5-flash-lite";
+      // `low` is supported by both stable 3.5 Flash variants. Avoid changing
+      // the shared config when there is no system instruction.
+      const config: {
+        systemInstruction?: string;
+        thinkingConfig?: { thinkingLevel: ThinkingLevel };
+      } = {
+        ...(systemInstruction ? { systemInstruction } : {}),
+        ...(usesThinkingLevel ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+      };
+
       try {
         // NOTE: `contents` must be a plain string (not an array). Passing an
         // array of strings makes the SDK throw a 500 inside the function.
-        // Cap a single attempt so one hanging model can't eat the whole budget
-        // (a full HTML generation normally completes well within 30s).
-        return await withDeadline(
+        const result = await withDeadline(
           ai.models.generateContent({
             model,
             contents: prompt,
-            ...(systemInstruction ? { config: { systemInstruction } } : {}),
+            ...(Object.keys(config).length > 0 ? { config } : {}),
           }),
-          Math.min(remaining, 30_000),
+          attemptTimeout,
           `Gemini model "${model}"`,
         );
+        if (!extractText(result).trim()) {
+          throw new Error(`Gemini model "${model}" returned an empty response`);
+        }
+        return result;
       } catch (e) {
         lastError = e;
         const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ");
-        if (!isRetryableModelError(raw)) deadModels.add(model);
-        // Keep each entry short so the aggregate still fits the response body.
+        const errorKind = classifyModelError(raw);
+        if (errorKind === "permanent") deadModels.add(model);
+        if (errorKind === "transient") retryableModels.add(model);
         failures.push(`p${pass} ${model}: ${raw.slice(0, 160)}`);
       }
     }
-    // Nothing left to try: every model is permanently dead, or no attempt ran.
-    if (!attempted || CANDIDATE_MODELS.every((m) => deadModels.has(m))) break;
-    // Exponential-ish backoff between passes, but always keep ~2s in reserve
-    // so the error response itself can still be delivered inside maxDuration.
-    const timeLeft = deadline - Date.now();
-    const pause = Math.min(700 * pass, Math.max(0, timeLeft - 2_000));
+
+    const canRetry = CANDIDATE_MODELS.some(
+      (model) =>
+        !deadModels.has(model) &&
+        retryableModels.has(model) &&
+        (attempts.get(model) ?? 0) < MAX_ATTEMPTS_PER_MODEL,
+    );
+    if (!attempted || !canRetry || deadline - Date.now() <= 0) break;
+
+    // Leave two seconds for JSON serialization and the Vercel response itself.
+    const pause = Math.min(700 * pass, Math.max(0, deadline - Date.now() - 2_000));
     if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
-    if (deadline - Date.now() <= 0) budgetExhausted = true;
   }
 
   const detail = failures.join(" | ").slice(0, 1800);
