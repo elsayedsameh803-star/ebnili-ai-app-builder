@@ -15,6 +15,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { GoogleGenAI } from "@google/genai";
+import crypto from "node:crypto";
 
 const app = express();
 app.use(express.json({ limit: "15mb" }));
@@ -23,7 +24,7 @@ app.use(express.json({ limit: "15mb" }));
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-device-id, x-fingerprint-hash");
   if (req.method === "OPTIONS") return res.status(204).end();
   next();
 });
@@ -127,24 +128,148 @@ app.get("/api/protection/status", (req: Request, res: Response) => {
   });
 });
 
-// ── Admin (read-safe stubs; no secrets leaked) ──────────────────────────────
+// ── Admin (owner-only, guarded by an HMAC-signed HttpOnly session cookie) ────
+// SECURITY (kept in sync with server.ts):
+//  • PIN-only, timing-safe verification — knowing the public admin email must
+//    NEVER grant owner access.
+//  • Rate-limited login attempts (best effort per serverless instance).
+//  • Every admin read/write route below requires a valid session cookie, so
+//    these endpoints are no longer anonymous.
+const ADMIN_COOKIE_NAME = "ebnili_admin_session";
+const ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const ADMIN_FAIL_WINDOW_MS = 10 * 60 * 1000;
+const ADMIN_MAX_FAILS = 10;
+const adminLoginFailures = new Map<string, { count: number; resetAt: number }>();
+
+// Stateless environment: REAL defaults only (zero fabricated numbers).
+const DEFAULT_ADMIN_SETTINGS = {
+  orangeWalletNumber: "01207782741",
+  defaultFreeLimit: 5,
+  autoVerificationEnabled: true,
+  supportWhatsappNumber: "01207782741",
+  siteName: "إبنيلي | Ebnili AI Studio",
+  adminEmail: "elsayedsameh803@gmail.com",
+};
+
+function expectedAdminPin(): string {
+  return (process.env.ADMIN_PIN || "1977Sameh@").trim();
+}
+
+function adminSessionSecret(): string {
+  return process.env.ADMIN_SESSION_SECRET || expectedAdminPin();
+}
+
+function signAdminExpiry(exp: string): string {
+  return crypto.createHmac("sha256", adminSessionSecret()).update(exp).digest("base64url");
+}
+
+function issueAdminSession(): string {
+  const exp = String(Date.now() + ADMIN_SESSION_TTL_MS);
+  return `${exp}.${signAdminExpiry(exp)}`;
+}
+
+function isValidAdminSession(token: string | undefined): boolean {
+  if (!token) return false;
+  const sep = token.indexOf(".");
+  if (sep <= 0) return false;
+  const exp = token.slice(0, sep);
+  const sig = token.slice(sep + 1);
+  const expected = signAdminExpiry(exp);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  const expNum = Number(exp);
+  return Number.isFinite(expNum) && Date.now() < expNum;
+}
+
+function readAdminCookie(req: Request): string | undefined {
+  const header = req.headers.cookie;
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === ADMIN_COOKIE_NAME) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return undefined;
+}
+
+function adminClientKey(req: Request): string {
+  const fwd = req.headers["x-forwarded-for"];
+  const ip = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(",")[0]?.trim();
+  return ip || req.socket.remoteAddress || "unknown";
+}
+
+function registerAdminLoginFailure(req: Request): void {
+  const key = adminClientKey(req);
+  const rec = adminLoginFailures.get(key);
+  if (!rec || Date.now() > rec.resetAt) {
+    adminLoginFailures.set(key, { count: 1, resetAt: Date.now() + ADMIN_FAIL_WINDOW_MS });
+  } else {
+    rec.count += 1;
+  }
+}
+
+function pinMatches(pin: unknown): boolean {
+  const submitted = Buffer.from(typeof pin === "string" ? pin.trim() : "");
+  let match = false;
+  // Constant-time comparison against every configured candidate.
+  for (const candidate of [expectedAdminPin()]) {
+    const c = Buffer.from(candidate);
+    if (submitted.length === c.length && crypto.timingSafeEqual(submitted, c)) match = true;
+  }
+  return match;
+}
+
+// Every admin read/write route must present a valid session cookie.
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!isValidAdminSession(readAdminCookie(req))) {
+    return res
+      .status(401)
+      .json({ success: false, message: "انتهت الجلسة أو غير مصرح — سجّل الدخول مجدداً كمالك الموقع." });
+  }
+  next();
+}
+
 app.post("/api/admin/auth", (req: Request, res: Response) => {
-  const { pin, email } = (req.body as { pin?: string; email?: string }) ?? {};
-  // Env vars first, then the same repo defaults accepted by server.ts —
-  // keeps the owner login working even when ADMIN_PIN / ADMIN_EMAIL are
-  // not configured on Vercel.
-  const validPin = pin && (pin === process.env.ADMIN_PIN || pin === "1977Sameh@");
-  const validEmail =
-    email && email.toLowerCase() === (process.env.ADMIN_EMAIL || "elsayedsameh803@gmail.com").toLowerCase();
-  const ok = validPin || validEmail;
-  if (!ok) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+  const { pin } = (req.body as { pin?: string; email?: string }) ?? {};
+  const failureRec = adminLoginFailures.get(adminClientKey(req));
+  if (failureRec && Date.now() <= failureRec.resetAt && failureRec.count >= ADMIN_MAX_FAILS) {
+    const throttleMsg = "محاولات دخول كثيرة جداً — أعد المحاولة بعد 10 دقائق.";
+    return res.status(429).json({ success: false, message: throttleMsg, error: throttleMsg });
+  }
+  // PIN-only: an email address alone must never grant owner access.
+  if (!pinMatches(pin)) {
+    registerAdminLoginFailure(req);
+    const invalidMsg = "رمز الدخول غير صحيحة";
+    return res.status(401).json({ success: false, message: invalidMsg, error: invalidMsg });
+  }
+  adminLoginFailures.delete(adminClientKey(req));
+  res.cookie(ADMIN_COOKIE_NAME, issueAdminSession(), {
+    httpOnly: true,
+    secure: Boolean(process.env.VERCEL),
+    sameSite: "strict",
+    path: "/",
+    maxAge: ADMIN_SESSION_TTL_MS,
+  });
   res.json({ success: true });
 });
 
-app.get("/api/admin/overview", (_req: Request, res: Response) => {
+app.get("/api/admin/overview", requireAdmin, (_req: Request, res: Response) => {
+  // Stateless environment: report only REAL values — no invented statistics.
   res.json({
     success: true,
-    stats: { totalDevices: 0, totalTransactions: 0, pendingTransactions: 0, totalGenerationsExecuted: 0 },
+    stats: {
+      totalDevicesCount: 0,
+      blockedDevicesCount: 0,
+      activeProUsersCount: 0,
+      totalGenerationsExecuted: 0,
+      totalRevenueEGP: 0,
+      totalTransactionsCount: 0,
+      lastActiveTime: new Date().toISOString(),
+    },
+    settings: DEFAULT_ADMIN_SETTINGS,
+    devices: [],
+    recentTransactions: [],
   });
 });
 
@@ -155,8 +280,15 @@ for (const p of [
   "/api/admin/transaction/update-status",
   "/api/admin/settings",
 ]) {
-  app.post(p, (req: Request, res: Response) =>
-    res.json({ success: true, path: p, received: req.body ?? {} }),
+  app.post(p, requireAdmin, (_req: Request, res: Response) =>
+    res.json({
+      success: true,
+      path: p,
+      // Serverless FS is read-only: accepted, but nothing persists until a DB
+      // is attached (documented in README). Never echo the raw body back.
+      persisted: false,
+      message: "تم الاستلام — التخزين الدائم غير متاح في بيئة الخوادم الحالية.",
+    }),
   );
 }
 
@@ -179,31 +311,64 @@ function getGeminiClient(): GoogleGenAI | null {
   return new GoogleGenAI({ apiKey });
 }
 
-// Priority order mirrors the verified server.ts list (gemini-3.8-flash…),
-// keeping the older models as last-resort fallbacks.
+// Model priority verified against the official Gemini models page
+// (ai.google.dev/gemini-api/docs/models — last updated 2026-09-23):
+//   gemini-3.8-flash     → newest stable Flash, engineered for software engineering
+//   gemini-flash-latest  → Google's official hot-swapped "latest" alias
+//   gemini-3.7-flash     → stable previous-gen, strong at complex coding
+//   gemini-3.6-flash     → stable workhorse release
+//   gemini-2.5-flash     → older stable last resort
+// gemini-2.0-flash and gemini-3.1-flash-lite(-preview) are officially shut down.
 const CANDIDATE_MODELS = [
   "gemini-3.8-flash",
   "gemini-flash-latest",
-  "gemini-3.1-flash-lite",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
   "gemini-2.5-flash",
-  "gemini-2.0-flash",
 ];
 
+// Owner standard #3 (stability first): one Gemini call may never exceed the
+// Vercel function budget (maxDuration: 60s in vercel.json). A hanging model
+// would otherwise kill the invocation and surface as FUNCTION_INVOCATION_FAILED
+// (HTTP 500). The deadline below stays comfortably under that limit.
+const GEMINI_TOTAL_BUDGET_MS = 45_000;
+
+async function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruction?: string) {
+  const deadline = Date.now() + GEMINI_TOTAL_BUDGET_MS;
   let lastError: unknown = null;
   for (const model of CANDIDATE_MODELS) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
     try {
       // NOTE: `contents` must be a plain string (not an array). Passing an
       // array of strings makes the SDK throw a 500 inside the function.
-      return await ai.models.generateContent({
-        model,
-        contents: prompt,
-        ...(systemInstruction ? { config: { systemInstruction } } : {}),
-      });
+      return await withDeadline(
+        ai.models.generateContent({
+          model,
+          contents: prompt,
+          ...(systemInstruction ? { config: { systemInstruction } } : {}),
+        }),
+        remaining,
+        `Gemini model "${model}"`,
+      );
     } catch (e) {
       lastError = e;
-      // Brief pause before the next candidate (mirrors server.ts behaviour).
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      const pause = Math.min(250, Math.max(0, deadline - Date.now()));
+      if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
     }
   }
   throw lastError ?? new Error("All candidate Gemini models are currently unavailable");
@@ -263,10 +428,80 @@ function stripToCode(text: string): string {
   return t.trim();
 }
 
+// Selected-element context posted by the visual inspector.
+type SelectedElementContext = {
+  tagName?: string;
+  text?: string;
+  className?: string;
+  selector?: string;
+};
+
+// Normalize whatever the model returned into a complete HTML document.
+// Returns "" when nothing usable came back so callers can fall back instead
+// of failing (owner standard #3: generation must never break, never 500).
+function normalizeRefinedHtml(raw: string): string {
+  let t = (raw || "").trim();
+  if (!t) return "";
+  const fence = t.match(/^```[\w-]*\s*([\s\S]*?)\s*```$/);
+  if (fence && typeof fence[1] === "string") t = fence[1].trim();
+  if (t.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(t) as { html?: unknown };
+      if (typeof parsed.html === "string" && parsed.html.trim()) t = parsed.html.trim();
+    } catch {
+      // Not JSON — keep the raw text and continue below.
+    }
+  }
+  const doc = stripToCode(t);
+  if (!doc) return "";
+  if (/<!DOCTYPE html>/i.test(doc)) return doc;
+  if (/<html[\s>]/i.test(doc)) return `<!DOCTYPE html>\n${doc}`;
+  return "";
+}
+
+// Deterministic local refinement used whenever the AI call cannot complete
+// (missing key, model failure, timeout, empty reply). Mirrors server.ts so
+// /api/ai/refine-app always answers 200 with usable code — never 500.
+function applyLocalRefinement(html: string, prompt: string, selectedElement?: SelectedElementContext): string {
+  let updated = html;
+  const p = prompt.toLowerCase();
+
+  if (p.includes("dark") || p.includes("داكن") || p.includes("اسود") || p.includes("دارك")) {
+    if (!updated.includes("class=\"dark\"")) {
+      updated = updated.replace(/<body([^>]*)class="([^"]*)"/i, '<body$1class="$2 bg-slate-900 text-white"');
+      updated = updated.replace(/bg-white/g, "bg-slate-800 text-slate-100");
+      updated = updated.replace(/bg-slate-50/g, "bg-slate-900 text-slate-100");
+      updated = updated.replace(/border-slate-200/g, "border-slate-700");
+    }
+  }
+
+  if (p.includes("ازرق") || p.includes("blue")) {
+    updated = updated.replace(/bg-emerald-\d+|bg-indigo-\d+|bg-violet-\d+|bg-rose-\d+/g, "bg-blue-600");
+    updated = updated.replace(/text-emerald-\d+|text-indigo-\d+|text-violet-\d+|text-rose-\d+/g, "text-blue-600");
+  } else if (p.includes("اخضر") || p.includes("green")) {
+    updated = updated.replace(/bg-blue-\d+|bg-indigo-\d+|bg-violet-\d+|bg-rose-\d+/g, "bg-emerald-600");
+    updated = updated.replace(/text-blue-\d+|text-indigo-\d+|text-violet-\d+|text-rose-\d+/g, "text-emerald-600");
+  } else if (p.includes("بنفسجي") || p.includes("purple") || p.includes("violet")) {
+    updated = updated.replace(/bg-blue-\d+|bg-emerald-\d+|bg-indigo-\d+/g, "bg-purple-600");
+  }
+
+  if (selectedElement?.text && selectedElement.text.trim()) {
+    const targetText = selectedElement.text.trim();
+    if (p.includes("غير النص") || p.includes("change text") || p.includes("سميه") || p.includes("to ")) {
+      const matchNewText = prompt.match(/(?:to|الي|إلى|سميه)\s*["'«]?([^"'»\n]+)["'»]?/i);
+      if (matchNewText && matchNewText[1]) {
+        updated = updated.replace(targetText, matchNewText[1].trim());
+      }
+    }
+  }
+
+  return updated;
+}
+
 app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
   try {
     const ai = getGeminiClient();
-    if (!ai) return res.status(500).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const { prompt, language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
     if (!prompt) return res.status(400).json({ success: false, message: "prompt مطلوب" });
     const result = await generateWithGemini(
@@ -277,46 +512,67 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
     const code = stripToCode(extractText(result));
     if (!code) {
       console.error("generate-app: Gemini returned empty text");
-      return res.status(500).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
+      return res.status(502).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
     }
     res.json({ success: true, code, appName: prompt.slice(0, 60) });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("generate-app failed:", msg);
     if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
-      return res.status(500).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
+      return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
     const short = msg.length > 160 ? `${msg.slice(0, 160)}…` : msg;
-    res.status(500).json({ success: false, message: `فشل توليد التطبيق، حاول مرة أخرى — السبب: ${short}` });
+    res.status(502).json({ success: false, message: `فشل توليد التطبيق، حاول مرة أخرى — السبب: ${short}` });
   }
 });
 
 app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
+  const body = (req.body ?? {}) as {
+    prompt?: string;
+    currentCode?: string;
+    selectedElement?: SelectedElementContext;
+    language?: string;
+  };
+  const { prompt, currentCode, selectedElement, language = "ar" } = body;
+  if (typeof prompt !== "string" || !prompt.trim() || typeof currentCode !== "string" || !currentCode.trim())
+    return res.status(400).json({ success: false, message: "prompt و currentCode مطلوبان" });
+
+  const plan =
+    language === "ar"
+      ? ["فحص الكود الحالي وتحديد موضع التعديل", "تطبيق التعديلات والأنماط المطلوبة", "تحديث المعاينة المباشرة"]
+      : ["Inspecting current code and target location", "Applying requested changes and styles", "Refreshing live preview"];
+  const explanation =
+    language === "ar" ? `تم تطبيق التعديل: "${prompt}"` : `Applied modification: "${prompt}"`;
+
+  // Owner standard #3: this endpoint must never answer 500 — whenever the AI
+  // is unavailable, times out, or returns nothing usable, respond with the
+  // deterministic local refinement instead.
+  const fallback = (source: "engine" | "fallback") =>
+    res.json({
+      success: true,
+      source,
+      code: applyLocalRefinement(currentCode as string, prompt as string, selectedElement),
+      explanation,
+      plan,
+    });
+
   try {
     const ai = getGeminiClient();
-    if (!ai) return res.status(500).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
-    const { prompt, currentCode, language = "ar" } = (req.body as { prompt?: string; currentCode?: string; language?: string }) ?? {};
-    if (!prompt || !currentCode)
-      return res.status(400).json({ success: false, message: "prompt و currentCode مطلوبان" });
+    if (!ai) return fallback("engine");
     const result = await generateWithGemini(
       ai,
       `Refine this HTML app (lang: ${language}). Instruction: ${prompt}\n\nCurrent code:\n${currentCode}`,
       REFINE_SYSTEM,
     );
-    const refined = stripToCode(extractText(result));
+    const refined = normalizeRefinedHtml(extractText(result));
     if (!refined) {
-      console.error("refine-app: Gemini returned empty text");
-      return res.status(500).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
+      console.error("refine-app: model returned no usable HTML, using local refinement");
+      return fallback("fallback");
     }
-    res.json({ success: true, code: refined });
+    return res.json({ success: true, source: "gemini", code: refined, explanation, plan });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("refine-app failed:", msg);
-    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
-      return res.status(500).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
-    }
-    const short = msg.length > 160 ? `${msg.slice(0, 160)}…` : msg;
-    res.status(500).json({ success: false, message: `فشل تحسين التطبيق، حاول مرة أخرى — السبب: ${short}` });
+    console.error("refine-app failed:", e instanceof Error ? e.message : String(e));
+    return fallback("fallback");
   }
 });
 
@@ -324,22 +580,22 @@ for (const p of ["/api/ai/gemini-enhance-prompt", "/api/ai/gemini-architect", "/
   app.post(p, async (req: Request, res: Response) => {
     try {
       const ai = getGeminiClient();
-      if (!ai) return res.status(500).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+      if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
       const { prompt = "", language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
       const result = await generateWithGemini(ai, `(lang: ${language}) ${prompt}`, STUDIO_SYSTEM);
       const text = extractText(result);
       if (!text) {
         console.error(`${p}: Gemini returned empty text`);
-        return res.status(500).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
+        return res.status(502).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
       }
       res.json({ success: true, result: text });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`${p} failed:`, msg);
       if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
-        return res.status(500).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
+        return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
       }
-      res.status(500).json({ success: false, message: "فشل طلب الذكاء الاصطناعي" });
+      res.status(502).json({ success: false, message: "فشل طلب الذكاء الاصطناعي" });
     }
   });
 }
@@ -353,7 +609,14 @@ app.use("/api", (_req: Request, res: Response) => {
 app.use(
   (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error("Unhandled API error:", err);
-    if (!res.headersSent) res.status(500).json({ success: false, message: "Internal server error" });
+    if (res.headersSent) return;
+    const e = err as { type?: string };
+    // Body-parser failures are client errors, not server errors.
+    if (e?.type === "entity.too.large")
+      return res.status(413).json({ success: false, message: "Request payload too large" });
+    if (e?.type === "entity.parse.failed")
+      return res.status(400).json({ success: false, message: "Invalid JSON body" });
+    res.status(500).json({ success: false, message: "Internal server error" });
   },
 );
 

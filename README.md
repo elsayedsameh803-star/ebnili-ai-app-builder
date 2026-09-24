@@ -38,7 +38,7 @@ All API routes are served through the Vercel serverless function at `api/index.t
 | POST     | `/api/subscriptions/submit-orange-cash` | Submit payment & activate sub       |
 | POST     | `/api/subscriptions/reset-free`       | Reset to free tier                   |
 | GET      | `/api/protection/status`              | Device fingerprint / quota status    |
-| POST     | `/api/admin/auth`                     | Admin PIN / email authentication     |
+| POST     | `/api/admin/auth`                     | Admin PIN auth (signed HttpOnly session cookie)     |
 | GET      | `/api/admin/overview`                 | Admin dashboard statistics           |
 | POST     | `/api/admin/device/toggle-block`      | Block / unblock a device             |
 | POST     | `/api/admin/device/reset-quota`       | Reset device generation quota        |

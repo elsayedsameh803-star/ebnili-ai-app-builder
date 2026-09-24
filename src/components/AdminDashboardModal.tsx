@@ -73,9 +73,9 @@ export const AdminDashboardModal = ({
         body: JSON.stringify({ pin: pinInput.trim() }),
       });
 
-      const data: { error?: string } = await res.json().catch(() => ({}));
+      const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || 'رمز الدخول غير صحيح');
+        throw new Error(data.message || data.error || 'رمز الدخول غير صحيح');
       }
 
       setIsAuthenticated(true);
@@ -88,16 +88,30 @@ export const AdminDashboardModal = ({
     }
   };
 
+  const handleSessionExpired = () => {
+    sessionStorage.removeItem('ebnili_admin_auth');
+    setIsAuthenticated(false);
+    setPinInput('');
+    setAuthError('انتهت الجلسة — يرجى تسجيل الدخول مجدداً.');
+  };
+
   const fetchAdminData = async () => {
     setIsLoadingData(true);
     try {
       const res = await fetch('/api/admin/overview');
+      if (res.status === 401) {
+        handleSessionExpired();
+        return;
+      }
       const data = await res.json().catch(() => ({}));
       if (data.success) {
-        setStats(data.stats);
-        setSettings(data.settings);
-        setDevices(data.devices || []);
-        setTransactions(data.recentTransactions || []);
+        // Defensive: never overwrite local state with missing sections — the
+        // serverless backend answers without `settings`, which previously
+        // crashed the dashboard (`settings.x` of undefined).
+        if (data.stats) setStats(data.stats);
+        if (data.settings) setSettings((prev) => ({ ...prev, ...data.settings }));
+        setDevices(Array.isArray(data.devices) ? data.devices : []);
+        setTransactions(Array.isArray(data.recentTransactions) ? data.recentTransactions : []);
       }
     } catch (err) {
       console.error('Failed to load admin data:', err);
@@ -118,9 +132,12 @@ export const AdminDashboardModal = ({
           reason: !device.isBlocked ? 'حظر بواسطة صاحب الموقع لمخالفة الاستخدام' : '',
         }),
       });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
       if (data.success) {
-        setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
+        // Only replace when the server returned the updated device (stateless
+        // serverless backend answers without one — never store undefined).
+        if (data.device) setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
         showToast(device.isBlocked ? 'تم فك حظر الجهاز بنجاح' : 'تم حظر الجهاز بنجاح');
       }
     } catch (err) {
@@ -140,9 +157,10 @@ export const AdminDashboardModal = ({
           newLimit: newLimit !== undefined ? newLimit : device.freeGenerationsLimit,
         }),
       });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
       if (data.success) {
-        setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
+        if (data.device) setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
         showToast('تم تصفير استهلاك الجهاز وتجديد رصيده بنجاح');
       }
     } catch (err) {
@@ -161,9 +179,10 @@ export const AdminDashboardModal = ({
           tier,
         }),
       });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
       if (data.success) {
-        setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
+        if (data.device) setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
         showToast(`تم ترقية الجهاز إلى باقة: ${tier.toUpperCase()}`);
       }
     } catch (err) {
@@ -178,9 +197,10 @@ export const AdminDashboardModal = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId: txId, status }),
       });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
       if (data.success) {
-        setTransactions(prev => prev.map(t => t.id === txId ? data.transaction : t));
+        if (data.transaction) setTransactions(prev => prev.map(t => t.id === txId ? data.transaction : t));
         fetchAdminData();
         showToast(status === 'confirmed' ? 'تم تأكيد وتفعيل المعاملة بنجاح' : 'تم رفض المعاملة');
       }
@@ -197,6 +217,7 @@ export const AdminDashboardModal = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
       if (data.success) {
         showToast('تم حفظ إعدادات المنصة بنجاح!');
@@ -258,7 +279,7 @@ export const AdminDashboardModal = ({
             </div>
             <h3 className="text-lg font-bold text-white mb-1">تسجيل دخول صاحب الموقع</h3>
             <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-              هذه الصفحة مخصصة لمالك المنصة فقط لإدارة الاشتراكات وفحص حماية الأجهزة. يرجى إدخال رمز PIN أو رقم محفظة أورانج كاش الخاص بك.
+              هذه الصفحة مخصصة لمالك المنصة فقط لإدارة الاشتراكات وفحص حماية الأجهزة. يرجى إدخال رمز PIN الخاص بك.
             </p>
 
             <form onSubmit={handleLogin} className="w-full space-y-4">
@@ -267,7 +288,7 @@ export const AdminDashboardModal = ({
                   type="password"
                   value={pinInput}
                   onChange={(e) => setPinInput(e.target.value)}
-                  placeholder="أدخل رمز PIN أو رقم المحفظة (01207782741)..."
+                  placeholder="أدخل رمز PIN الخاص بمالك الموقع..."
                   className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-white text-sm text-center tracking-widest focus:outline-none focus:border-rose-500 transition"
                   autoFocus
                   required
@@ -393,7 +414,7 @@ export const AdminDashboardModal = ({
                         <Cpu className="w-4 h-4 text-amber-400" />
                       </div>
                       <div className="text-2xl font-black text-white font-mono">
-                        {stats?.totalGenerationsExecuted || 14}
+                        {stats?.totalGenerationsExecuted ?? 0}
                       </div>
                       <p className="text-[11px] text-slate-500 mt-1">عمليات بناء وتعديل حقيقية تمت</p>
                     </div>

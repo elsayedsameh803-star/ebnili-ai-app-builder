@@ -3,7 +3,12 @@ import path from "path";
 import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import crypto from "crypto";
 
+// The README tells users to create `.env.local`, while classic dotenv only
+// reads `.env` — load both so GEMINI_API_KEY is picked up either way.
+// Earlier entries win; existing process.env values are never overridden.
+dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 const appRootDir = process.cwd();
@@ -291,31 +296,27 @@ function recordDeviceGeneration(device: DeviceRecord) {
 }
 
 // Watermark Injection Helper
-function injectWatermark(html: string, tier: "free" | "pro" | "business"): string {
-  if (tier === "pro" || tier === "business") {
-    // Pro/Business users get 100% white-label without watermark
-    return html;
-  }
-  if (html.includes("ebnili-platform-watermark")) {
-    return html;
-  }
-  const watermarkBadge = `
-<!-- Ebnili Platform Attribution Watermark -->
-<div id="ebnili-platform-watermark" style="position:fixed;bottom:14px;left:14px;z-index:999999;background:rgba(15,23,42,0.94);color:#f8fafc;padding:7px 16px;border-radius:9999px;font-family:'Cairo',system-ui,-apple-system,sans-serif;font-size:11px;font-weight:700;display:flex;align-items:center;gap:8px;box-shadow:0 10px 25px -3px rgba(0,0,0,0.5);border:1px solid rgba(244,63,94,0.4);backdrop-filter:blur(12px);pointer-events:auto;direction:rtl;transition:transform 0.2s;" onmouseover="this.style.transform='scale(1.04)'" onmouseout="this.style.transform='scale(1)'">
-  <span style="display:inline-block;width:8px;height:8px;border-radius:9999px;background:#f43f5e;box-shadow:0 0 10px #f43f5e;"></span>
-  <span style="color:#cbd5e1;">صُنع بواسطة</span>
-  <a href="https://ebnili.ai" target="_blank" style="color:#fbbf24;text-decoration:none;font-weight:800;letter-spacing:-0.2px;">منصة إبنيلي AI</a>
-</div>
-`;
-  if (html.includes("</body>")) {
-    return html.replace("</body>", `${watermarkBadge}</body>`);
-  }
-  return html + watermarkBadge;
+// Owner standard #1 (clean output only): generated interfaces must contain
+// absolutely no side text, badges, or watermarks — injection stays disabled.
+function injectWatermark(html: string, _tier: "free" | "pro" | "business"): string {
+  return html;
+}
+
+// Accepts GEMINI_API_KEY plus common aliases (same list as api/index.ts)
+// so a key configured under any known variable name still works locally.
+function getGeminiApiKey(): string {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    ""
+  ).trim();
 }
 
 // Lazy initialize Gemini client
 function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
   return new GoogleGenAI({
     apiKey,
@@ -329,8 +330,17 @@ function getGeminiClient(): GoogleGenAI | null {
 
 // Resilient Gemini Generator with Gemini 3.8 Flash priority & high-availability fallbacks
 async function generateWithGeminiResilient(ai: GoogleGenAI, options: { contents: any; config?: any }) {
-  // Official verified Gemini model candidates in priority order
-  const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+  // Gemini candidates verified against ai.google.dev (2026-09-23):
+  // gemini-3.8-flash (newest stable Flash for software engineering),
+  // gemini-flash-latest (official alias), gemini-3.7/3.6-flash (stable),
+  // gemini-2.5-flash (older stable last resort). Shut-down models excluded.
+  const candidateModels = [
+    "gemini-3.8-flash",
+    "gemini-flash-latest",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-2.5-flash",
+  ];
   let lastError: any = null;
 
   for (let i = 0; i < candidateModels.length; i++) {
@@ -357,7 +367,7 @@ async function generateWithGeminiResilient(ai: GoogleGenAI, options: { contents:
 
 // Health & Status
 app.get("/api/health", (req, res) => {
-  const hasKey = Boolean(process.env.GEMINI_API_KEY);
+  const hasKey = Boolean(getGeminiApiKey());
   res.json({
     status: "ok",
     hasApiKey: hasKey,
@@ -631,29 +641,136 @@ app.get("/api/protection/status", (req, res) => {
 // ==========================================
 // Admin Portal Endpoints (Owner Portal)
 // ==========================================
+// SECURITY (kept in sync with api/index.ts):
+//  • PIN-only, timing-safe verification — the public admin email never grants access.
+//  • A successful login issues an HMAC-signed, expiring, HttpOnly session cookie;
+//    every admin read/write route below is guarded by `requireAdmin`.
+//  • The dev server binds to 0.0.0.0, so this protection matters on LANs too.
+const ADMIN_COOKIE_NAME = "ebnili_admin_session";
+const ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const ADMIN_FAIL_WINDOW_MS = 10 * 60 * 1000;
+const ADMIN_MAX_FAILS = 10;
+const adminLoginFailures = new Map<string, { count: number; resetAt: number }>();
 
-// Admin Authentication (PIN or Email)
+function adminSessionSecret(): string {
+  return (
+    process.env.ADMIN_SESSION_SECRET ||
+    process.env.ADMIN_PIN ||
+    adminSettings.adminPin ||
+    "1977Sameh@"
+  );
+}
+
+function signAdminExpiry(exp: string): string {
+  return crypto.createHmac("sha256", adminSessionSecret()).update(exp).digest("base64url");
+}
+
+function issueAdminSession(): string {
+  const exp = String(Date.now() + ADMIN_SESSION_TTL_MS);
+  return `${exp}.${signAdminExpiry(exp)}`;
+}
+
+function isValidAdminSession(token: unknown): boolean {
+  if (typeof token !== "string" || !token) return false;
+  const sep = token.indexOf(".");
+  if (sep <= 0) return false;
+  const exp = token.slice(0, sep);
+  const sig = token.slice(sep + 1);
+  const expected = signAdminExpiry(exp);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  const expNum = Number(exp);
+  return Number.isFinite(expNum) && Date.now() < expNum;
+}
+
+function readAdminCookie(req: express.Request): string | undefined {
+  const header = req.headers.cookie;
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === ADMIN_COOKIE_NAME) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return undefined;
+}
+
+function adminClientKey(req: express.Request): string {
+  const fwd = req.headers["x-forwarded-for"];
+  const ip = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(",")[0]?.trim();
+  return ip || req.socket.remoteAddress || "unknown";
+}
+
+function registerAdminLoginFailure(req: express.Request): void {
+  const key = adminClientKey(req);
+  const rec = adminLoginFailures.get(key);
+  if (!rec || Date.now() > rec.resetAt) {
+    adminLoginFailures.set(key, { count: 1, resetAt: Date.now() + ADMIN_FAIL_WINDOW_MS });
+  } else {
+    rec.count += 1;
+  }
+}
+
+function pinMatches(pin: unknown): boolean {
+  const submitted = Buffer.from(typeof pin === "string" ? pin.trim() : "");
+  const candidates = [adminSettings.adminPin, process.env.ADMIN_PIN, "1977Sameh@"].filter(
+    (v): v is string => Boolean(v),
+  );
+  let match = false;
+  // Constant-time comparison against every configured candidate.
+  for (const candidate of candidates) {
+    const c = Buffer.from(candidate.trim());
+    if (submitted.length === c.length && crypto.timingSafeEqual(submitted, c)) match = true;
+  }
+  return match;
+}
+
+// Every admin read/write route must present a valid session cookie.
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!isValidAdminSession(readAdminCookie(req))) {
+    return res
+      .status(401)
+      .json({ success: false, message: "انتهت الجلسة أو غير مصرح — سجّل الدخول مجدداً كمالك الموقع." });
+  }
+  next();
+}
+
+// Admin Authentication (PIN-only; issues signed HttpOnly session cookie)
 app.post("/api/admin/auth", (req, res) => {
-  const { pin, email } = req.body;
-  const validPin = pin === adminSettings.adminPin || pin === process.env.ADMIN_PIN || pin === "1977Sameh@";
-  const validEmail = email && email.toLowerCase() === adminSettings.adminEmail.toLowerCase();
-
-  if (validPin || validEmail) {
-    return res.json({
-      success: true,
-      token: `admin_${Date.now()}`,
-      adminEmail: adminSettings.adminEmail,
-      walletNumber: adminSettings.orangeWalletNumber,
-      whatsappNumber: adminSettings.supportWhatsappNumber,
-      siteName: adminSettings.siteName,
-    });
+  const { pin } = req.body ?? {};
+  const failureRec = adminLoginFailures.get(adminClientKey(req));
+  if (failureRec && Date.now() <= failureRec.resetAt && failureRec.count >= ADMIN_MAX_FAILS) {
+    const throttleMsg = "محاولات دخول كثيرة جداً — أعد المحاولة بعد 10 دقائق.";
+    return res.status(429).json({ error: throttleMsg, message: throttleMsg });
   }
 
-  return res.status(401).json({ error: "رمز PIN أو البريد الإلكتروني غير صحيح. الدخول مصرح لصاحب الموقع فقط." });
+  if (!pinMatches(pin)) {
+    registerAdminLoginFailure(req);
+    const invalidMsg = "رمز PIN غير صحيح. الدخول مصرح لصاحب الموقع فقط.";
+    return res.status(401).json({ error: invalidMsg, message: invalidMsg });
+  }
+
+  adminLoginFailures.delete(adminClientKey(req));
+  res.cookie(ADMIN_COOKIE_NAME, issueAdminSession(), {
+    httpOnly: true,
+    secure: Boolean(process.env.VERCEL),
+    sameSite: "strict",
+    path: "/",
+    maxAge: ADMIN_SESSION_TTL_MS,
+  });
+
+  return res.json({
+    success: true,
+    token: `admin_${Date.now()}`,
+    adminEmail: adminSettings.adminEmail,
+    walletNumber: adminSettings.orangeWalletNumber,
+    whatsappNumber: adminSettings.supportWhatsappNumber,
+    siteName: adminSettings.siteName,
+  });
 });
 
 // Admin Overview & Real Statistics (Zero Fake Numbers)
-app.get("/api/admin/overview", (req, res) => {
+app.get("/api/admin/overview", requireAdmin, (req, res) => {
   const devicesList = Object.values(devicesDb);
   const totalDevices = devicesList.length;
   const blockedDevices = devicesList.filter((d) => d.isBlocked).length;
@@ -682,7 +799,7 @@ app.get("/api/admin/overview", (req, res) => {
 });
 
 // Admin: Toggle Device Block
-app.post("/api/admin/device/toggle-block", (req, res) => {
+app.post("/api/admin/device/toggle-block", requireAdmin, (req, res) => {
   const { deviceId, fingerprintHash, block, reason } = req.body;
   const recordKey = Object.keys(devicesDb).find(
     (k) => (deviceId && devicesDb[k].deviceId === deviceId) || (fingerprintHash && devicesDb[k].fingerprintHash === fingerprintHash)
@@ -702,7 +819,7 @@ app.post("/api/admin/device/toggle-block", (req, res) => {
 });
 
 // Admin: Reset Device Quota or Add Credits
-app.post("/api/admin/device/reset-quota", (req, res) => {
+app.post("/api/admin/device/reset-quota", requireAdmin, (req, res) => {
   const { deviceId, fingerprintHash, newLimit, resetUsed } = req.body;
   const recordKey = Object.keys(devicesDb).find(
     (k) => (deviceId && devicesDb[k].deviceId === deviceId) || (fingerprintHash && devicesDb[k].fingerprintHash === fingerprintHash)
@@ -725,7 +842,7 @@ app.post("/api/admin/device/reset-quota", (req, res) => {
 });
 
 // Admin: Set Tier for Device (e.g. Grant PRO)
-app.post("/api/admin/device/set-tier", (req, res) => {
+app.post("/api/admin/device/set-tier", requireAdmin, (req, res) => {
   const { deviceId, fingerprintHash, tier } = req.body;
   const recordKey = Object.keys(devicesDb).find(
     (k) => (deviceId && devicesDb[k].deviceId === deviceId) || (fingerprintHash && devicesDb[k].fingerprintHash === fingerprintHash)
@@ -743,7 +860,7 @@ app.post("/api/admin/device/set-tier", (req, res) => {
 });
 
 // Admin: Update Transaction Status (Approve/Reject)
-app.post("/api/admin/transaction/update-status", (req, res) => {
+app.post("/api/admin/transaction/update-status", requireAdmin, (req, res) => {
   const { transactionId, status } = req.body;
   const txn = currentSubscription.transactions.find((t) => t.id === transactionId);
   if (!txn) {
@@ -765,7 +882,7 @@ app.post("/api/admin/transaction/update-status", (req, res) => {
 });
 
 // Admin: Update Settings (Wallet number, Free limit, Whatsapp, etc.)
-app.post("/api/admin/settings", (req, res) => {
+app.post("/api/admin/settings", requireAdmin, (req, res) => {
   const {
     orangeWalletNumber,
     defaultFreeLimit,
@@ -950,7 +1067,7 @@ ${templateId ? `Based on base template: ${templateId}` : ""}`;
 // App Refinement & Visual Edit
 app.post("/api/ai/refine-app", async (req, res) => {
   try {
-    const { prompt, currentCode, selectedElement, language = "ar" } = req.body;
+    const { prompt, currentCode, selectedElement, language = "ar" } = req.body ?? {};
     if (!prompt || !currentCode) {
       return res.status(400).json({ error: "Prompt and current code are required" });
     }
@@ -1054,7 +1171,14 @@ ${currentCode}`;
     });
   } catch (err) {
     console.error("Refine error:", err);
-    const { prompt, currentCode, selectedElement } = req.body;
+    const { prompt = "", currentCode = "", selectedElement } = (req.body ?? {}) as {
+      prompt?: string;
+      currentCode?: string;
+      selectedElement?: { tagName?: string; text?: string; className?: string; selector?: string };
+    };
+    if (!prompt || !currentCode) {
+      return res.status(400).json({ error: "Prompt and current code are required" });
+    }
     const updated = applyLocalRefinement(currentCode, prompt, selectedElement);
     const finalHtml = injectWatermark(updated, currentSubscription.tier);
 
@@ -2264,6 +2388,26 @@ if (isProductionBuild) {
     });
   });
 }
+
+// Unknown /api paths → JSON 404 (never an HTML page, never a crash).
+app.use("/api", (_req: express.Request, res: express.Response) => {
+  res.status(404).json({ success: false, message: "API endpoint not found" });
+});
+
+// Global error handler (last resort): always JSON, never an HTML stack trace.
+app.use(
+  (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error("Unhandled server error:", err);
+    if (res.headersSent) return;
+    const e = err as { type?: string };
+    // Body-parser failures are client errors, not server errors.
+    if (e?.type === "entity.too.large")
+      return res.status(413).json({ success: false, message: "Request payload too large" });
+    if (e?.type === "entity.parse.failed")
+      return res.status(400).json({ success: false, message: "Invalid JSON body" });
+    res.status(500).json({ success: false, message: "Internal server error" });
+  },
+);
 
 // Vite middleware setup (local development only)
 async function startServer() {

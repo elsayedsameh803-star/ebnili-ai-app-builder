@@ -6,7 +6,11 @@
   }
 }
 
-/* Custom scrollbar for clean IDE look */
+/* Studio-grade polish: dark IDE scrollbars (the whole app is dark by default) */
+html {
+  color-scheme: dark;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -17,18 +21,39 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #334155;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: #334155;
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
   background: #475569;
+}
+
+/* Accessibility: visible keyboard focus without overriding component styles */
+:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+/* Crisp text rendering, matching leading commercial dashboards */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(99, 102, 241, 0.35);
+  color: #f8fafc;
+}
+
+/* Respect users who prefer reduced motion (WCAG) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

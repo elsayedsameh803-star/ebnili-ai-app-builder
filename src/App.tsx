@@ -69,6 +69,11 @@ export default function App() {
       });
   }, []);
 
+  // Keep <html lang> in sync with the active language (a11y & font selection).
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
+
   const [currentPlanSteps, setCurrentPlanSteps] = useState<string[]>([]);
 
   // Active Project State
@@ -243,7 +248,7 @@ CREATE TABLE records (
         code: updatedCode,
         files: {
           'index.html': updatedCode,
-          'App.tsx': `// App.tsx\nimport React from 'react';\n\nexport default function App() {\n  return <main>/* Generated with Lovable */</main>;\n}`,
+          'App.tsx': `// App.tsx\nimport React from 'react';\n\nexport default function App() {\n  return <main>/* Generated with Ebnili */</main>;\n}`,
           'schema.sql': `-- Supabase Schema\nCREATE TABLE records (id SERIAL PRIMARY KEY, data JSONB);`,
         },
       };
