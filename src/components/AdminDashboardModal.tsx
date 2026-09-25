@@ -24,6 +24,85 @@ interface AdminDashboardModalProps {
   language: Language;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const toFiniteNumber = (value: unknown, fallback: number): number =>
+  typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+
+const toText = (value: unknown, fallback = ''): string =>
+  typeof value === 'string' ? value : fallback;
+
+const EMPTY_STATS: PlatformRealStats = {
+  totalDevicesCount: 0,
+  blockedDevicesCount: 0,
+  totalGenerationsExecuted: 0,
+  totalRevenueEGP: 0,
+  activeProUsersCount: 0,
+  lastActiveTime: '',
+  totalTransactionsCount: 0,
+};
+
+// The admin API is stateless on Vercel and may return a partial payload during a
+// cold start. Never let a missing/null row reach JSX: `null.isBlocked` used to
+// throw inside React and the global ErrorBoundary replaced the whole app with a
+// white screen.
+const normalizeDevices = (value: unknown): DeviceProtectionInfo[] => {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((device, index) => ({
+    deviceId: toText(device.deviceId, `unknown-device-${index}`),
+    fingerprintHash: toText(device.fingerprintHash),
+    ipAddress: toText(device.ipAddress) || undefined,
+    userAgent: toText(device.userAgent) || undefined,
+    freeGenerationsUsed: toFiniteNumber(device.freeGenerationsUsed, 0),
+    freeGenerationsLimit: toFiniteNumber(device.freeGenerationsLimit, 5),
+    isBlocked: device.isBlocked === true,
+    blockReason: toText(device.blockReason) || undefined,
+    registeredEmails: Array.isArray(device.registeredEmails)
+      ? device.registeredEmails.filter((email): email is string => typeof email === 'string')
+      : [],
+    lastSeen: toText(device.lastSeen) || undefined,
+  }));
+};
+
+const normalizeTransactions = (value: unknown): OrangeCashTransaction[] => {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((transaction, index) => ({
+    id: toText(transaction.id, `unknown-transaction-${index}`),
+    senderPhone: toText(transaction.senderPhone),
+    recipientWallet: toText(transaction.recipientWallet),
+    transactionReference: toText(transaction.transactionReference),
+    amount: toFiniteNumber(transaction.amount, 0),
+    currency: toText(transaction.currency, 'EGP'),
+    planId: toText(transaction.planId, 'free') as OrangeCashTransaction['planId'],
+    planName: toText(transaction.planName),
+    billingCycle: toText(transaction.billingCycle, 'monthly') as OrangeCashTransaction['billingCycle'],
+    userName: toText(transaction.userName) || undefined,
+    userEmail: toText(transaction.userEmail) || undefined,
+    submittedAt: toText(transaction.submittedAt, new Date(0).toISOString()),
+    status: transaction.status === 'confirmed' || transaction.status === 'pending'
+      ? transaction.status
+      : 'rejected',
+    verifiedAt: toText(transaction.verifiedAt) || undefined,
+    receiptImage: toText(transaction.receiptImage) || undefined,
+    notes: toText(transaction.notes) || undefined,
+  }));
+};
+
+const normalizeStats = (value: unknown): PlatformRealStats => {
+  if (!isRecord(value)) return EMPTY_STATS;
+  return {
+    totalDevicesCount: toFiniteNumber(value.totalDevicesCount, 0),
+    blockedDevicesCount: toFiniteNumber(value.blockedDevicesCount, 0),
+    totalGenerationsExecuted: toFiniteNumber(value.totalGenerationsExecuted, 0),
+    totalRevenueEGP: toFiniteNumber(value.totalRevenueEGP, 0),
+    activeProUsersCount: toFiniteNumber(value.activeProUsersCount, 0),
+    lastActiveTime: toText(value.lastActiveTime),
+    totalTransactionsCount: toFiniteNumber(value.totalTransactionsCount, 0),
+  };
+};
+
+
 export const AdminDashboardModal = ({
   isOpen,
   onClose,
@@ -37,7 +116,11 @@ export const AdminDashboardModal = ({
   // Admin Data State
   const [activeTab, setActiveTab] = useState<'overview' | 'devices' | 'transactions' | 'settings'>('overview');
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [stats, setStats] = useState<PlatformRealStats | null>(null);
+  const [isDataReady, setIsDataReady] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
+  // Never start the authenticated view with nullable stats. A valid cookie can
+  // outlive the data request, and `stats.*` must never reach React as null.
+  const [stats, setStats] = useState<PlatformRealStats>(EMPTY_STATS);
   const [settings, setSettings] = useState<AdminSettings>({
     orangeWalletNumber: '01207782741',
     defaultFreeLimit: 5,
@@ -48,17 +131,84 @@ export const AdminDashboardModal = ({
   });
   const [devices, setDevices] = useState<DeviceProtectionInfo[]>([]);
   const [transactions, setTransactions] = useState<OrangeCashTransaction[]>([]);
+  const [isCheckingSession, setIsCheckingSession] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState('');
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
 
-  // Auto-login if previously verified in session
+  // Verify the HttpOnly session cookie whenever the modal opens. The legacy
+  // sessionStorage flag is only a hint and can survive an expired cookie.
   useEffect(() => {
-    if (sessionStorage.getItem('ebnili_admin_auth') === 'true') {
-      setIsAuthenticated(true);
-      fetchAdminData();
-    }
+    if (!isOpen) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const requestController = new AbortController();
+    setIsAuthenticated(false);
+    setIsCheckingSession(true);
+    setIsLoadingData(true);
+    setIsDataReady(false);
+    setDataError(null);
+    setSessionError(null);
+    setAuthError(null);
+
+    // The overview response is both session verification and dashboard data.
+    // Use one request so opening the modal cannot race two state transitions.
+    const verifySessionAndLoadData = async () => {
+      try {
+        const res = await fetch('/api/admin/overview', {
+          credentials: 'include',
+          cache: 'no-store',
+          signal: requestController.signal,
+        });
+        if (res.status === 401) {
+          try { window.sessionStorage.removeItem('ebnili_admin_auth'); } catch { /* noop */ }
+          return;
+        }
+        if (!res.ok) throw new Error(`تعذر التحقق من الجلسة (${res.status})`);
+
+        const data: unknown = await res.json().catch(() => null);
+        if (!isRecord(data) || data.success !== true) {
+          throw new Error('استجابة بيانات لوحة الإدارة غير صالحة.');
+        }
+        if (cancelled) return;
+
+        setStats(normalizeStats(data.stats));
+        if (isRecord(data.settings)) {
+          setSettings((prev) => ({ ...prev, ...(data.settings as Partial<AdminSettings>) }));
+        }
+        setDevices(normalizeDevices(data.devices));
+        setTransactions(normalizeTransactions(data.recentTransactions));
+        setIsDataReady(true);
+        setIsAuthenticated(true);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setSessionError('انتهت مهلة تحميل اللوحة. حاول مرة أخرى.');
+        } else {
+          setSessionError(err instanceof Error ? err.message : 'تعذر التحقق من جلسة الإدارة');
+        }
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        if (!cancelled) {
+          setIsCheckingSession(false);
+          setIsLoadingData(false);
+        }
+      }
+    };
+
+    timer = setTimeout(() => {
+      if (!cancelled) requestController.abort();
+    }, 20_000);
+
+    void verifySessionAndLoadData();
+    return () => {
+      cancelled = true;
+      requestController.abort();
+      if (timer !== undefined) clearTimeout(timer);
+    };
   }, [isOpen]);
 
   const handleLogin = async (e: import('react').FormEvent) => {
@@ -70,6 +220,7 @@ export const AdminDashboardModal = ({
       const res = await fetch('/api/admin/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ pin: pinInput.trim() }),
       });
 
@@ -78,9 +229,13 @@ export const AdminDashboardModal = ({
         throw new Error(data.message || data.error || 'رمز الدخول غير صحيح');
       }
 
-      setIsAuthenticated(true);
-      sessionStorage.setItem('ebnili_admin_auth', 'true');
-      fetchAdminData();
+      try { window.sessionStorage.setItem('ebnili_admin_auth', 'true'); } catch { /* noop */ }
+      const loaded = await fetchAdminData();
+      if (loaded) {
+        setIsAuthenticated(true);
+      } else {
+        setAuthError('تم التحقق من الرمز، لكن تعذر تحميل بيانات اللوحة. حاول مرة أخرى.');
+      }
     } catch (err: unknown) {
       setAuthError(err instanceof Error ? err.message : 'فشل تسجيل الدخول كمسؤول');
     } finally {
@@ -89,32 +244,46 @@ export const AdminDashboardModal = ({
   };
 
   const handleSessionExpired = () => {
-    sessionStorage.removeItem('ebnili_admin_auth');
+    try { window.sessionStorage.removeItem('ebnili_admin_auth'); } catch { /* noop */ }
     setIsAuthenticated(false);
     setPinInput('');
     setAuthError('انتهت الجلسة — يرجى تسجيل الدخول مجدداً.');
   };
 
-  const fetchAdminData = async () => {
+  const fetchAdminData = async (): Promise<boolean> => {
     setIsLoadingData(true);
+    setDataError(null);
+    setIsDataReady(false);
     try {
-      const res = await fetch('/api/admin/overview');
+      const res = await fetch('/api/admin/overview', {
+        credentials: 'include',
+        cache: 'no-store',
+      });
       if (res.status === 401) {
         handleSessionExpired();
-        return;
+        return false;
       }
-      const data = await res.json().catch(() => ({}));
-      if (data.success) {
-        // Defensive: never overwrite local state with missing sections — the
-        // serverless backend answers without `settings`, which previously
-        // crashed the dashboard (`settings.x` of undefined).
-        if (data.stats) setStats(data.stats);
-        if (data.settings) setSettings((prev) => ({ ...prev, ...data.settings }));
-        setDevices(Array.isArray(data.devices) ? data.devices : []);
-        setTransactions(Array.isArray(data.recentTransactions) ? data.recentTransactions : []);
+      if (!res.ok) throw new Error(`تعذر تحميل بيانات اللوحة (${res.status})`);
+
+      const data: unknown = await res.json().catch(() => null);
+      if (!isRecord(data) || data.success !== true) {
+        throw new Error('استجابة بيانات لوحة الإدارة غير صالحة.');
       }
+
+      setStats(normalizeStats(data.stats));
+      if (isRecord(data.settings)) {
+        setSettings((prev) => ({ ...prev, ...(data.settings as Partial<AdminSettings>) }));
+      }
+      setDevices(normalizeDevices(data.devices));
+      setTransactions(normalizeTransactions(data.recentTransactions));
+      setIsDataReady(true);
+      return true;
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'تعذر تحميل بيانات لوحة الإدارة.';
       console.error('Failed to load admin data:', err);
+      setDataError(message);
+      setIsDataReady(false);
+      return false;
     } finally {
       setIsLoadingData(false);
     }
@@ -296,10 +465,10 @@ export const AdminDashboardModal = ({
                 <span className="text-[10px] text-slate-500 mt-1 block">رمز PIN الافتراضي: 01207782741 أو admin803</span>
               </div>
 
-              {authError && (
+              {(authError || sessionError) && (
                 <div className="p-3 bg-rose-500/20 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>{authError}</span>
+                  <span>{authError || sessionError}</span>
                 </div>
               )}
 
@@ -311,6 +480,26 @@ export const AdminDashboardModal = ({
                 {isAuthenticating ? 'جاري التحقق...' : 'دخول لوحة الإدارة'}
               </button>
             </form>
+          </div>
+        ) : isCheckingSession || isLoadingData || !isDataReady ? (
+          <div className="p-10 sm:p-14 flex flex-col items-center justify-center text-center max-w-md mx-auto my-auto" role="status" aria-live="polite">
+            <RefreshCw className={`w-8 h-8 text-amber-400 mb-4 ${isLoadingData || isCheckingSession ? 'animate-spin' : ''}`} />
+            <h3 className="text-base font-bold text-white mb-2">جارٍ تجهيز لوحة الإدارة</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              {dataError || (isCheckingSession ? 'يتم التحقق من الجلسة.' : 'يتم تحميل البيانات بأمان.')}
+            </p>
+            {dataError && !isLoadingData && !isCheckingSession && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const loaded = await fetchAdminData();
+                  if (loaded) setIsAuthenticated(true);
+                }}
+                className="mt-5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg transition"
+              >
+                إعادة المحاولة
+              </button>
+            )}
           </div>
         ) : (
           /* Main Authenticated Admin View */
