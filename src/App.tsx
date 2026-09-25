@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { ChatSidebar } from './components/ChatSidebar';
 import { PreviewFrame } from './components/PreviewFrame';
@@ -11,8 +11,10 @@ import { SubscriptionModal } from './components/SubscriptionModal';
 import { GeminiStudioModal } from './components/GeminiStudioModal';
 import { NewProjectHero } from './components/NewProjectHero';
 import { AdminDashboardModal } from './components/AdminDashboardModal';
+import { AuthModal } from './components/AuthModal';
 import { WhatsAppSupportButton } from './components/WhatsAppSupportButton';
 import { getDeviceFingerprint } from './utils/fingerprint';
+import { fetchCurrentUser, logout as authLogout } from './lib/auth';
 import { 
   AppProject, 
   ChatMessage, 
@@ -21,7 +23,8 @@ import {
   Language, 
   SelectedElementInfo, 
   VersionHistoryItem,
-  UserSubscription
+  UserSubscription,
+  AuthUser
 } from './types';
 
 export default function App() {
@@ -40,6 +43,38 @@ export default function App() {
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
   const [showGeminiStudio, setShowGeminiStudio] = useState<boolean>(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+
+  // ── User authentication (Google / GitHub) ─────────────────────────────────
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchCurrentUser().then(setAuthUser);
+  }, []);
+
+  // The server redirects back to `/?auth=success` or `/?auth_error=<code>`.
+  // Read it once, surface the outcome, then scrub it from the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get('auth_error');
+    const success = params.get('auth');
+    if (!error && !success) return;
+
+    if (error) setAuthError(error);
+    if (success) {
+      setAuthError(null);
+      fetchCurrentUser().then(setAuthUser);
+    }
+    setShowAuthModal(Boolean(error));
+
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await authLogout();
+    setAuthUser(null);
+  }, []);
 
   // Subscription State with Orange Cash support
   const [subscription, setSubscription] = useState<UserSubscription>({
@@ -567,6 +602,9 @@ CREATE TABLE records (
         onOpenSubscription={() => setShowSubscription(true)}
         onOpenGeminiStudio={() => setShowGeminiStudio(true)}
         onOpenAdmin={() => setShowAdminDashboard(true)}
+        authUser={authUser}
+        onOpenAuth={() => setShowAuthModal(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main Studio Body: Left Sidebar + Right Workspace */}
@@ -695,6 +733,17 @@ CREATE TABLE records (
         isOpen={showAdminDashboard}
         onClose={() => setShowAdminDashboard(false)}
         language={language}
+      />
+
+      {/* Google / GitHub sign-in modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => {
+          setShowAuthModal(false);
+          setAuthError(null);
+        }}
+        language={language}
+        errorCode={authError}
       />
 
       {/* Floating WhatsApp Support Button */}

@@ -137,6 +137,21 @@ export interface DeviceProtectionInfo {
   lastSeen?: string;
 }
 
+export type AuthProviderId = 'google' | 'github';
+
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  picture: string;
+  provider: AuthProviderId;
+}
+
+export interface AuthProviderInfo {
+  id: AuthProviderId;
+  configured: boolean;
+}
+
 export interface AdminSettings {
   orangeWalletNumber: string;
   defaultFreeLimit: number;

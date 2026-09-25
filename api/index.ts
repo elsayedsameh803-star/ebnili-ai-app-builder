@@ -292,6 +292,348 @@ for (const p of [
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// User authentication — Google & GitHub (OAuth 2.0 authorization-code flow)
+// ─────────────────────────────────────────────────────────────────────────────
+// SECURITY NOTES:
+//  • The client secret NEVER reaches the browser. The code → token exchange and
+//    the profile lookup both happen here, server-side.
+//  • `state` is a single-use random nonce kept in a short-lived HttpOnly cookie
+//    and compared on the way back, which blocks CSRF / login-injection.
+//  • The session is a stateless HMAC-SHA256 signed HttpOnly cookie, so it works
+//    on Vercel's stateless serverless runtime with no database attached.
+//  • Both providers are OPTIONAL. When their env vars are missing,
+//    `/api/auth/providers` reports `configured: false` and the UI hides them —
+//    the rest of the app keeps working exactly as before.
+// Env vars: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GITHUB_CLIENT_ID /
+//           GITHUB_CLIENT_SECRET / AUTH_SESSION_SECRET / APP_URL
+// ─────────────────────────────────────────────────────────────────────────────
+
+type AuthReq = Request;
+type AuthRes = Response;
+type AuthProviderId = "google" | "github";
+
+interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  picture: string;
+  provider: AuthProviderId;
+}
+
+interface ProviderCredentials {
+  clientId: string;
+  clientSecret: string;
+  configured: boolean;
+}
+
+const AUTH_COOKIE_NAME = "ebnili_user_session";
+const AUTH_STATE_COOKIE = "ebnili_oauth_state";
+const AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const AUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function authSessionSecret(): string {
+  return (
+    process.env.AUTH_SESSION_SECRET ||
+    process.env.ADMIN_SESSION_SECRET ||
+    process.env.ADMIN_PIN ||
+    "ebnili-insecure-dev-secret"
+  );
+}
+
+function hmacB64(input: string): string {
+  return crypto.createHmac("sha256", authSessionSecret()).update(input).digest("base64url");
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function readCookie(req: AuthReq, name: string): string | undefined {
+  const header = req.headers.cookie;
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return undefined;
+}
+
+// Absolute origin of THIS request — correct behind Vercel / any reverse proxy.
+function requestBaseUrl(req: AuthReq): string {
+  const configured = (process.env.APP_URL || "").trim().replace(/\/+$/, "");
+  if (configured) return configured;
+  const fwdProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
+  const fwdHost = (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim();
+  const proto = fwdProto || req.protocol || "http";
+  const host = fwdHost || req.headers.host || "localhost:3000";
+  return `${proto}://${host}`;
+}
+
+function authCallbackUrl(req: AuthReq, provider: AuthProviderId): string {
+  return `${requestBaseUrl(req)}/api/auth/callback/${provider}`;
+}
+
+function providerConfig(provider: AuthProviderId): ProviderCredentials {
+  if (provider === "google") {
+    const clientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
+    const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || "").trim();
+    return { clientId, clientSecret, configured: Boolean(clientId && clientSecret) };
+  }
+  const clientId = (process.env.GITHUB_CLIENT_ID || "").trim();
+  const clientSecret = (process.env.GITHUB_CLIENT_SECRET || "").trim();
+  return { clientId, clientSecret, configured: Boolean(clientId && clientSecret) };
+}
+
+function issueAuthSession(user: AuthUser): string {
+  const body = Buffer.from(
+    JSON.stringify({ ...user, iat: Date.now(), exp: Date.now() + AUTH_SESSION_TTL_MS }),
+  ).toString("base64url");
+  return `${body}.${hmacB64(body)}`;
+}
+
+function readAuthSession(req: AuthReq): AuthUser | null {
+  const token = readCookie(req, AUTH_COOKIE_NAME);
+  if (!token) return null;
+  const sep = token.indexOf(".");
+  if (sep <= 0) return null;
+  const body = token.slice(0, sep);
+  const sig = token.slice(sep + 1);
+  if (!safeEqual(sig, hmacB64(body))) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as {
+      id?: string;
+      name?: string;
+      email?: string;
+      picture?: string;
+      provider?: string;
+      exp?: number;
+    };
+    if (!parsed?.id || !parsed?.provider) return null;
+    if (typeof parsed.exp !== "number" || Date.now() > parsed.exp) return null;
+    return {
+      id: String(parsed.id),
+      name: String(parsed.name || parsed.email || "Ebnili User"),
+      email: String(parsed.email || ""),
+      picture: String(parsed.picture || ""),
+      provider: parsed.provider === "github" ? "github" : "google",
+    };
+  } catch {
+    return null;
+  }
+}
+// ── Provider token exchange + profile fetch (no SDK, plain fetch) ────────────
+async function exchangeGoogleCode(code: string, redirectUri: string): Promise<AuthUser | null> {
+  const { clientId, clientSecret } = providerConfig("google");
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    }).toString(),
+  });
+  if (!tokenRes.ok) return null;
+  const tokenJson = (await tokenRes.json()) as { access_token?: string };
+  if (!tokenJson.access_token) return null;
+
+  const infoRes = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+    headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+  });
+  if (!infoRes.ok) return null;
+  const info = (await infoRes.json()) as {
+    sub?: string;
+    name?: string;
+    email?: string;
+    picture?: string;
+  };
+  if (!info.sub) return null;
+  return {
+    id: String(info.sub),
+    name: String(info.name || info.email || "Google User"),
+    email: String(info.email || ""),
+    picture: String(info.picture || ""),
+    provider: "google",
+  };
+}
+
+async function exchangeGitHubCode(code: string, redirectUri: string): Promise<AuthUser | null> {
+  const { clientId, clientSecret } = providerConfig("github");
+  const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: new URLSearchParams({
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+    }).toString(),
+  });
+  if (!tokenRes.ok) return null;
+  const tokenJson = (await tokenRes.json()) as { access_token?: string };
+  if (!tokenJson.access_token) return null;
+
+  const ghHeaders = {
+    Authorization: `Bearer ${tokenJson.access_token}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "Ebnili-App",
+  };
+  const userRes = await fetch("https://api.github.com/user", { headers: ghHeaders });
+  if (!userRes.ok) return null;
+  const ghUser = (await userRes.json()) as {
+    id?: number;
+    login?: string;
+    name?: string;
+    email?: string | null;
+    avatar_url?: string;
+  };
+  if (!ghUser.id) return null;
+
+  // GitHub users may hide their email — fall back to the verified primary one.
+  let email = ghUser.email || "";
+  if (!email) {
+    try {
+      const emailsRes = await fetch("https://api.github.com/user/emails", { headers: ghHeaders });
+      if (emailsRes.ok) {
+        const emails = (await emailsRes.json()) as {
+          email?: string;
+          primary?: boolean;
+          verified?: boolean;
+        }[];
+        const match = emails.find((e) => e?.primary && e?.verified) || emails.find((e) => e?.verified);
+        email = match?.email || "";
+      }
+    } catch {
+      /* email stays empty — login still succeeds */
+    }
+  }
+
+  return {
+    id: String(ghUser.id),
+    name: String(ghUser.name || ghUser.login || "GitHub User"),
+    email,
+    picture: ghUser.avatar_url || "",
+    provider: "github",
+  };
+}
+// ── Auth routes ─────────────────────────────────────────────────────────────
+// NOTE: the literal paths below are registered BEFORE `/api/auth/:provider`,
+// otherwise Express would treat "me" / "logout" / "providers" as a provider id.
+
+// Which providers can actually be used right now (drives the UI).
+app.get("/api/auth/providers", (_req: AuthReq, res: AuthRes) => {
+  const ids: AuthProviderId[] = ["google", "github"];
+  res.json({
+    success: true,
+    providers: ids.map((id) => ({ id, configured: providerConfig(id).configured })),
+  });
+});
+
+// Who am I? Returns `{ authenticated: false }` for guests — never an error.
+app.get("/api/auth/me", (req: AuthReq, res: AuthRes) => {
+  const user = readAuthSession(req);
+  res.json({ success: true, authenticated: Boolean(user), user });
+});
+
+app.post("/api/auth/logout", (_req: AuthReq, res: AuthRes) => {
+  res.clearCookie(AUTH_COOKIE_NAME, { path: "/" });
+  res.clearCookie(AUTH_STATE_COOKIE, { path: "/" });
+  res.json({ success: true, authenticated: false });
+});
+
+// Step 1 — bounce the browser to the provider's consent screen.
+app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
+  const provider = String(req.params.provider || "").toLowerCase() as AuthProviderId;
+  const home = requestBaseUrl(req);
+
+  if (provider !== "google" && provider !== "github") {
+    return res.status(404).json({ success: false, message: "Unknown auth provider" });
+  }
+  const cfg = providerConfig(provider);
+  if (!cfg.configured) {
+    return res.redirect(`${home}/?auth_error=not_configured`);
+  }
+
+  const state = crypto.randomBytes(24).toString("hex");
+  res.cookie(AUTH_STATE_COOKIE, `${provider}.${state}`, {
+    httpOnly: true,
+    secure: Boolean(process.env.VERCEL),
+    sameSite: "lax", // the provider returns via a top-level GET navigation
+    path: "/",
+    maxAge: AUTH_STATE_TTL_MS,
+  });
+
+  const redirectUri = authCallbackUrl(req, provider);
+  const url =
+    provider === "google"
+      ? new URL("https://accounts.google.com/o/oauth2/v2/auth")
+      : new URL("https://github.com/login/oauth/authorize");
+  url.searchParams.set("client_id", cfg.clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("state", state);
+  url.searchParams.set("scope", provider === "google" ? "openid email profile" : "read:user user:email");
+  if (provider === "google") url.searchParams.set("prompt", "select_account");
+
+  return res.redirect(url.toString());
+});
+
+// Step 2 — the provider redirects back here with ?code=…&state=…
+app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
+  const provider = String(req.params.provider || "").toLowerCase() as AuthProviderId;
+  const home = requestBaseUrl(req);
+  const fail = (reason: string) => res.redirect(`${home}/?auth_error=${encodeURIComponent(reason)}`);
+
+  if (provider !== "google" && provider !== "github") return fail("unknown_provider");
+
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  const oauthError = typeof req.query.error === "string" ? req.query.error : "";
+  if (oauthError) return fail(oauthError);
+  if (!code || !state) return fail("missing_code");
+
+  // Single-use CSRF nonce: the cookie is cleared on first read, so a replayed
+  // callback URL can never mint a second session.
+  const expected = readCookie(req, AUTH_STATE_COOKIE);
+  res.clearCookie(AUTH_STATE_COOKIE, { path: "/" });
+  if (!expected) return fail("state_cookie_missing");
+  const sep = expected.indexOf(".");
+  if (sep <= 0) return fail("state_cookie_invalid");
+  if (expected.slice(0, sep) !== provider) return fail("state_provider_mismatch");
+  if (!safeEqual(expected.slice(sep + 1), state)) return fail("state_mismatch");
+
+  const cfg = providerConfig(provider);
+  if (!cfg.configured) return fail("not_configured");
+
+  try {
+    const redirectUri = authCallbackUrl(req, provider);
+    const user =
+      provider === "google"
+        ? await exchangeGoogleCode(code, redirectUri)
+        : await exchangeGitHubCode(code, redirectUri);
+    if (!user) return fail("profile_failed");
+
+    res.cookie(AUTH_COOKIE_NAME, issueAuthSession(user), {
+      httpOnly: true,
+      secure: Boolean(process.env.VERCEL),
+      sameSite: "lax",
+      path: "/",
+      maxAge: AUTH_SESSION_TTL_MS,
+    });
+    return res.redirect(`${home}/?auth=success`);
+  } catch (e) {
+    console.error("auth callback failed:", e instanceof Error ? e.message : String(e));
+    return fail("exchange_failed");
+  }
+});
+
 // ── Gemini AI proxy ─────────────────────────────────────────────────────────
 // Accepts GEMINI_API_KEY plus common aliases so the function works no matter
 // which exact variable name was configured in the Vercel dashboard.

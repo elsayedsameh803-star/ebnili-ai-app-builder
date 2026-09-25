@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Monitor,
   Tablet,
@@ -14,9 +14,12 @@ import {
   Sparkles,
   MousePointerClick,
   Crown,
-  Shield
+  Shield,
+  LogIn,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
-import { DeviceMode, ViewMode, Language, UserSubscription, AppProject } from '../types';
+import { DeviceMode, ViewMode, Language, UserSubscription, AppProject, AuthUser } from '../types';
 
 interface HeaderProps {
   projectName: string;
@@ -38,6 +41,9 @@ interface HeaderProps {
   onOpenSubscription?: () => void;
   onOpenGeminiStudio?: () => void;
   onOpenAdmin?: () => void;
+  authUser?: AuthUser | null;
+  onOpenAuth?: () => void;
+  onLogout?: () => void;
   projects?: AppProject[];
   activeProjectId?: string;
   onSelectProject?: (id: string) => void;
@@ -63,6 +69,9 @@ export const Header = ({
   onOpenSubscription,
   onOpenGeminiStudio,
   onOpenAdmin,
+  authUser = null,
+  onOpenAuth,
+  onLogout,
   projects = [],
   activeProjectId,
   onSelectProject,
@@ -70,6 +79,20 @@ export const Header = ({
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(projectName);
   const [showProjectsMenu, setShowProjectsMenu] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the account dropdown on any outside click.
+  useEffect(() => {
+    if (!showUserMenu) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showUserMenu]);
 
   useEffect(() => {
     setNameInput(projectName);
@@ -313,6 +336,88 @@ export const Header = ({
               <Crown className="w-3.5 h-3.5 text-slate-950" />
               <span>{language === 'ar' ? 'ترقية الباقة' : 'Upgrade'}</span>
               <span className="hidden lg:inline text-[10px] bg-slate-950/20 text-slate-950 px-1 rounded font-bold">Orange Cash</span>
+            </button>
+          )
+        )}
+
+        {/* User account: sign-in button (guest) or avatar menu (signed in) */}
+        {authUser ? (
+          <div className="relative" ref={userMenuRef}>
+            <button
+              onClick={() => setShowUserMenu((v) => !v)}
+              className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 transition cursor-pointer"
+              title={authUser.name}
+            >
+              {authUser.picture ? (
+                <img
+                  src={authUser.picture}
+                  alt={authUser.name}
+                  referrerPolicy="no-referrer"
+                  className="w-6 h-6 rounded-full object-cover ring-1 ring-rose-500/40"
+                />
+              ) : (
+                <span className="w-6 h-6 rounded-full bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center">
+                  <UserIcon className="w-3.5 h-3.5 text-white" />
+                </span>
+              )}
+              <span className="hidden lg:inline text-[11px] font-bold text-slate-200 max-w-[110px] truncate">
+                {authUser.name}
+              </span>
+            </button>
+
+            {showUserMenu && (
+              <div className="absolute top-full left-0 mt-1.5 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1.5">
+                <div className="px-2.5 py-2 border-b border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    {authUser.picture ? (
+                      <img
+                        src={authUser.picture}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="w-9 h-9 rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="w-9 h-9 rounded-full bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center">
+                        <UserIcon className="w-4 h-4 text-white" />
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate">{authUser.name}</div>
+                      {authUser.email && (
+                        <div className="text-[10px] text-slate-400 truncate" dir="ltr">
+                          {authUser.email}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-2 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                    {authUser.provider === 'google' ? 'Google' : 'GitHub'}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    onLogout?.();
+                  }}
+                  className="w-full text-left px-2.5 py-2 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 transition mt-1"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>{language === 'ar' ? 'تسجيل الخروج' : 'Sign out'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          onOpenAuth && (
+            <button
+              onClick={onOpenAuth}
+              className="flex items-center gap-1.5 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-700/60 transition cursor-pointer"
+              title={language === 'ar' ? 'تسجيل الدخول بجوجل أو جيت هاب' : 'Sign in with Google or GitHub'}
+            >
+              <LogIn className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden md:inline font-bold">
+                {language === 'ar' ? 'تسجيل الدخول' : 'Sign in'}
+              </span>
             </button>
           )
         )}
