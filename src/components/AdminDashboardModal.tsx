@@ -43,6 +43,37 @@ const EMPTY_STATS: PlatformRealStats = {
   totalTransactionsCount: 0,
 };
 
+const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
+  orangeWalletNumber: '01207782741',
+  defaultFreeLimit: 5,
+  autoVerificationEnabled: true,
+  supportWhatsappNumber: '01207782741',
+  siteName: 'إبنيلي | Ebnili AI Studio',
+  adminEmail: 'elsayedsameh803@gmail.com',
+};
+
+const normalizeAdminSettings = (value: unknown, previous?: AdminSettings | null): AdminSettings => {
+  const source = isRecord(value) ? value : {};
+  const previousSource = isRecord(previous) ? previous : {};
+  const base = {
+    ...DEFAULT_ADMIN_SETTINGS,
+    ...previousSource,
+  } as AdminSettings;
+  const rawLimit = toFiniteNumber(source.defaultFreeLimit, base.defaultFreeLimit);
+
+  return {
+    orangeWalletNumber: toText(source.orangeWalletNumber, base.orangeWalletNumber),
+    defaultFreeLimit: Math.min(50, Math.max(1, rawLimit)),
+    autoVerificationEnabled:
+      typeof source.autoVerificationEnabled === 'boolean'
+        ? source.autoVerificationEnabled
+        : base.autoVerificationEnabled,
+    supportWhatsappNumber: toText(source.supportWhatsappNumber, base.supportWhatsappNumber),
+    siteName: toText(source.siteName, base.siteName),
+    adminEmail: toText(source.adminEmail, base.adminEmail),
+  };
+};
+
 // The admin API is stateless on Vercel and may return a partial payload during a
 // cold start. Never let a missing/null row reach JSX: `null.isBlocked` used to
 // throw inside React and the global ErrorBoundary replaced the whole app with a
@@ -121,14 +152,12 @@ export const AdminDashboardModal = ({
   // Never start the authenticated view with nullable stats. A valid cookie can
   // outlive the data request, and `stats.*` must never reach React as null.
   const [stats, setStats] = useState<PlatformRealStats>(EMPTY_STATS);
-  const [settings, setSettings] = useState<AdminSettings>({
-    orangeWalletNumber: '01207782741',
-    defaultFreeLimit: 5,
-    autoVerificationEnabled: true,
-    supportWhatsappNumber: '01207782741',
-    siteName: 'إبنيلي | Ebnili AI Studio',
-    adminEmail: 'elsayedsameh803@gmail.com',
-  });
+  const [settingsState, setSettings] = useState<AdminSettings>(DEFAULT_ADMIN_SETTINGS);
+  // Always render from a fully-populated object. Never access an optional or
+  // stale settings value directly from JSX.
+  const settings = normalizeAdminSettings(settingsState, DEFAULT_ADMIN_SETTINGS);
+
+
   const [devices, setDevices] = useState<DeviceProtectionInfo[]>([]);
   const [transactions, setTransactions] = useState<OrangeCashTransaction[]>([]);
   const [isCheckingSession, setIsCheckingSession] = useState(false);
@@ -176,9 +205,7 @@ export const AdminDashboardModal = ({
         if (cancelled) return;
 
         setStats(normalizeStats(data.stats));
-        if (isRecord(data.settings)) {
-          setSettings((prev) => ({ ...prev, ...(data.settings as Partial<AdminSettings>) }));
-        }
+        setSettings((prev) => normalizeAdminSettings(data.settings, prev));
         setDevices(normalizeDevices(data.devices));
         setTransactions(normalizeTransactions(data.recentTransactions));
         setIsDataReady(true);
@@ -271,9 +298,7 @@ export const AdminDashboardModal = ({
       }
 
       setStats(normalizeStats(data.stats));
-      if (isRecord(data.settings)) {
-        setSettings((prev) => ({ ...prev, ...(data.settings as Partial<AdminSettings>) }));
-      }
+      setSettings((prev) => normalizeAdminSettings(data.settings, prev));
       setDevices(normalizeDevices(data.devices));
       setTransactions(normalizeTransactions(data.recentTransactions));
       setIsDataReady(true);
@@ -293,6 +318,7 @@ export const AdminDashboardModal = ({
     try {
       const res = await fetch('/api/admin/device/toggle-block', {
         method: 'POST',
+
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId: device.deviceId,
@@ -918,7 +944,7 @@ export const AdminDashboardModal = ({
                       <input
                         type="text"
                         value={settings.orangeWalletNumber}
-                        onChange={(e) => setSettings({ ...settings, orangeWalletNumber: e.target.value })}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, orangeWalletNumber: e.target.value }))}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white text-xs font-mono focus:border-rose-500 focus:outline-none"
                         required
                       />
@@ -931,7 +957,7 @@ export const AdminDashboardModal = ({
                       <input
                         type="text"
                         value={settings.supportWhatsappNumber}
-                        onChange={(e) => setSettings({ ...settings, supportWhatsappNumber: e.target.value })}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, supportWhatsappNumber: e.target.value }))}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white text-xs font-mono focus:border-rose-500 focus:outline-none"
                         required
                       />
@@ -946,7 +972,7 @@ export const AdminDashboardModal = ({
                         min="1"
                         max="50"
                         value={settings.defaultFreeLimit}
-                        onChange={(e) => setSettings({ ...settings, defaultFreeLimit: Number(e.target.value) })}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, defaultFreeLimit: Number(e.target.value) }))}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white text-xs font-mono focus:border-rose-500 focus:outline-none"
                         required
                       />
@@ -962,7 +988,7 @@ export const AdminDashboardModal = ({
                       <input
                         type="checkbox"
                         checked={settings.autoVerificationEnabled}
-                        onChange={(e) => setSettings({ ...settings, autoVerificationEnabled: e.target.checked })}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, autoVerificationEnabled: e.target.checked }))}
                         className="w-5 h-5 accent-rose-500 rounded cursor-pointer"
                       />
                     </div>
