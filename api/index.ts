@@ -403,14 +403,16 @@ interface SupabaseConfig {
 }
 
 function supabaseConfig(): SupabaseConfig {
-  const url = (
+  const raw = (
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
     process.env.VITE_SUPABASE_URL ||
     ""
-  )
-    .trim()
-    .replace(/\/+$/, "");
+  ).trim();
+  // The dashboard hands out both `https://<ref>.supabase.co` and
+  // `https://<ref>.supabase.co/rest/v1` (the PostgREST endpoint). Only the
+  // project root builds a valid /auth/v1/... URL, so strip any API path.
+  const url = raw.replace(/\/+$/, "").replace(/\/(rest|auth)\/v1$/, "").replace(/\/+$/, "");
   const anonKey = (
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     process.env.SUPABASE_ANON_KEY ||
