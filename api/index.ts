@@ -554,6 +554,16 @@ app.post("/api/auth/logout", (_req: AuthReq, res: AuthRes) => {
 // provider id. Exposes no secrets — only public redirect URIs.
 app.get("/api/auth/config", (req: AuthReq, res: AuthRes) => {
   const base = requestBaseUrl(req);
+  const describe = (id: AuthProviderId) => {
+    const cfg = providerConfig(id);
+    return {
+      configured: cfg.configured,
+      // The shape of the id only — never the secret itself.
+      clientIdSuffix: cfg.clientId.slice(-12),
+      clientIdLooksValid: /^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(cfg.clientId),
+      hasSecret: Boolean(cfg.clientSecret),
+    };
+  };
   res.json({
     success: true,
     baseUrl: base,
@@ -561,6 +571,8 @@ app.get("/api/auth/config", (req: AuthReq, res: AuthRes) => {
       google: `${base}/api/auth/callback/google`,
       github: `${base}/api/auth/callback/github`,
     },
+    google: describe("google"),
+    github: describe("github"),
   });
 });
 
