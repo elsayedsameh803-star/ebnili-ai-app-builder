@@ -49,6 +49,10 @@ export const AUTH_ERROR_MESSAGES: Record<string, { ar: string; en: string }> = {
     ar: 'تم إلغاء عملية الدخول.',
     en: 'Sign-in was cancelled.',
   },
+  redirect_uri_mismatch: {
+    ar: 'رابط الرجوع غير مسجّل. أضف رابط الرجوع الظاهر في أسفل هذه الرسالة إلى إعدادات تطبيق Google أو GitHub.',
+    en: 'The callback URL is not registered. Add the exact URL shown below to your Google or GitHub OAuth app settings.',
+  },
 };
 
 export function getAuthErrorMessage(code: string, language: 'ar' | 'en'): string {
@@ -86,6 +90,22 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
 /** Full-page redirect into the provider's consent screen. */
 export function startOAuth(provider: AuthProviderId): void {
   window.location.href = `/api/auth/${provider}`;
+}
+
+/**
+ * The exact callback URLs the server redirects to. Shown in the UI so a
+ * redirect_uri mismatch can be fixed by copying the value, rather than
+ * guessing at the path.
+ */
+export async function fetchAuthCallbacks(): Promise<{ google: string; github: string } | null> {
+  try {
+    const res = await fetch('/api/auth/config');
+    if (!res.ok) return null;
+    const data = (await res.json()) as { callbacks?: { google: string; github: string } };
+    return data.callbacks ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function logout(): Promise<void> {

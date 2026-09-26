@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Sparkles } from 'lucide-react';
 import { Header } from './components/Header';
 import { ChatSidebar } from './components/ChatSidebar';
 import { PreviewFrame } from './components/PreviewFrame';
@@ -12,6 +13,7 @@ import { GeminiStudioModal } from './components/GeminiStudioModal';
 import { NewProjectHero } from './components/NewProjectHero';
 import { AdminDashboardModal } from './components/AdminDashboardModal';
 import { AuthModal } from './components/AuthModal';
+import { AuthGate } from './components/AuthGate';
 import { WhatsAppSupportButton } from './components/WhatsAppSupportButton';
 import { getDeviceFingerprint } from './utils/fingerprint';
 import { fetchCurrentUser, logout as authLogout } from './lib/auth';
@@ -48,9 +50,15 @@ export default function App() {
   // ── User authentication (Google / GitHub) ─────────────────────────────────
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  // `null` until /api/auth/me answers, so the gate doesn't flash for a
+  // returning user who already has a valid session cookie.
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
 
   useEffect(() => {
-    fetchCurrentUser().then(setAuthUser);
+    fetchCurrentUser().then((user) => {
+      setAuthUser(user);
+      setAuthChecked(true);
+    });
   }, []);
 
   // The server redirects back to `/?auth=success` or `/?auth_error=<code>`.
@@ -64,7 +72,10 @@ export default function App() {
     if (error) setAuthError(error);
     if (success) {
       setAuthError(null);
-      fetchCurrentUser().then(setAuthUser);
+      fetchCurrentUser().then((user) => {
+        setAuthUser(user);
+        setAuthChecked(true);
+      });
     }
     setShowAuthModal(Boolean(error));
 
@@ -572,6 +583,26 @@ CREATE TABLE records (
         )}
       </>
     );
+  }
+
+  // ── Gate: nobody reaches the studio without a session ─────────────────────
+  // While /api/auth/me is still in flight we show a neutral splash rather than
+  // the gate, otherwise a signed-in user would see the login wall flash.
+  if (!authChecked) {
+    return (
+      <div className="h-screen bg-slate-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-white" />
+          </div>
+          <div className="w-6 h-6 rounded-full border-2 border-slate-800 border-t-indigo-400 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return <AuthGate language={language} errorCode={authError} />;
   }
 
   return (

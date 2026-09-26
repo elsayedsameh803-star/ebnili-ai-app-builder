@@ -580,9 +580,31 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
   url.searchParams.set("response_type", "code");
   url.searchParams.set("state", state);
   url.searchParams.set("scope", provider === "google" ? "openid email profile" : "read:user user:email");
-  if (provider === "google") url.searchParams.set("prompt", "select_account");
+
+  // Force the provider's consent screen into English so it matches the app,
+  // instead of inheriting the browser's locale.
+  if (provider === "google") {
+    url.searchParams.set("prompt", "select_account");
+    url.searchParams.set("hl", "en");
+  } else {
+    url.searchParams.set("allow_signup", "true");
+  }
 
   return res.redirect(url.toString());
+});
+
+// Exposes the exact callback URLs that must be registered with each provider.
+// Purely a setup aid — it reveals no secrets, only the public redirect URIs.
+app.get("/api/auth/config", (req: AuthReq, res: AuthRes) => {
+  const base = requestBaseUrl(req);
+  res.json({
+    success: true,
+    baseUrl: base,
+    callbacks: {
+      google: `${base}/api/auth/callback/google`,
+      github: `${base}/api/auth/callback/github`,
+    },
+  });
 });
 
 // Step 2 — the provider redirects back here with ?code=…&state=…
