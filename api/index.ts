@@ -389,6 +389,88 @@ function providerConfig(provider: AuthProviderId): ProviderCredentials {
   return { clientId, clientSecret, configured: Boolean(clientId && clientSecret) };
 }
 
+// ── Supabase as the OAuth broker ─────────────────────────────────────────────
+// The Google/GitHub OAuth apps in this project are managed by Supabase, so the
+// redirect URI registered with Google is Supabase's own
+// `https://<ref>.supabase.co/auth/v1/callback` — NOT anything we control.
+// A direct code exchange with Google therefore always fails with
+// redirect_uri_mismatch. Supabase can complete that exchange for us, so we send
+// the browser to Supabase's authorize endpoint and receive a short-lived code.
+interface SupabaseConfig {
+  url: string;
+  anonKey: string;
+  configured: boolean;
+}
+
+function supabaseConfig(): SupabaseConfig {
+  const url = (
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    ""
+  )
+    .trim()
+    .replace(/\/+$/, "");
+  const anonKey = (
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    ""
+  ).trim();
+  return { url, anonKey, configured: Boolean(url && anonKey) };
+}
+
+/** PKCE verifier/challenge, so the browser never carries a usable credential. */
+const AUTH_PKCE_COOKIE = "ebnili_oauth_pkce";
+
+function base64url(buf: Buffer): string {
+  return buf.toString("base64url");
+}
+
+function createPkcePair(): { verifier: string; challenge: string } {
+  const verifier = base64url(crypto.randomBytes(48));
+  const challenge = base64url(crypto.createHash("sha256").update(verifier).digest());
+  return { verifier, challenge };
+}
+
+interface SupabaseIdentity {
+  id: string;
+  email: string;
+  name: string;
+  picture: string;
+  provider: AuthProviderId;
+}
+
+/** Maps a Supabase user record onto our own session shape. */
+function mapSupabaseUser(raw: {
+  id?: string;
+  email?: string;
+  user_metadata?: Record<string, unknown>;
+  app_metadata?: Record<string, unknown>;
+}): SupabaseIdentity | null {
+  if (!raw?.id) return null;
+  const meta = raw.user_metadata || {};
+  const appMeta = raw.app_metadata || {};
+
+  // Supabase records the OAuth provider in app_metadata.provider.
+  const providerRaw = String(appMeta.provider || "google").toLowerCase();
+  const provider: AuthProviderId = providerRaw === "github" ? "github" : "google";
+
+  const fullName =
+    (typeof meta.full_name === "string" && meta.full_name) ||
+    (typeof meta.name === "string" && meta.name) ||
+    (typeof meta.preferred_username === "string" && meta.preferred_username) ||
+    raw.email ||
+    (provider === "github" ? "GitHub User" : "Google User");
+
+  const picture =
+    (typeof meta.avatar_url === "string" && meta.avatar_url) ||
+    (typeof meta.picture === "string" && meta.picture) ||
+    "";
+
+  return { id: String(raw.id), name: String(fullName), email: raw.email || "", picture, provider };
+}
+
 function issueAuthSession(user: AuthUser): string {
   const body = Buffer.from(
     JSON.stringify({ ...user, iat: Date.now(), exp: Date.now() + AUTH_SESSION_TTL_MS }),
@@ -528,11 +610,17 @@ async function exchangeGitHubCode(code: string, redirectUri: string): Promise<Au
 // otherwise Express would treat "me" / "logout" / "providers" as a provider id.
 
 // Which providers can actually be used right now (drives the UI).
+// With Supabase configured we broker both providers through it, so both are
+// offered even though our own Google/GitHub credentials may be absent.
 app.get("/api/auth/providers", (_req: AuthReq, res: AuthRes) => {
   const ids: AuthProviderId[] = ["google", "github"];
+  const sb = supabaseConfig().configured;
   res.json({
     success: true,
-    providers: ids.map((id) => ({ id, configured: providerConfig(id).configured })),
+    providers: ids.map((id) => ({
+      id,
+      configured: sb || providerConfig(id).configured,
+    })),
   });
 });
 
@@ -564,6 +652,7 @@ app.get("/api/auth/config", (req: AuthReq, res: AuthRes) => {
       hasSecret: Boolean(cfg.clientSecret),
     };
   };
+  const sb = supabaseConfig();
   res.json({
     success: true,
     baseUrl: base,
@@ -571,12 +660,25 @@ app.get("/api/auth/config", (req: AuthReq, res: AuthRes) => {
       google: `${base}/api/auth/callback/google`,
       github: `${base}/api/auth/callback/github`,
     },
+    // When true, sign-in is brokered by Supabase and the URLs above are NOT
+    // what Google/GitHub must know — Supabase's own callback is.
+    supabase: {
+      configured: sb.configured,
+      // Host only: the anon key is public but there is no reason to echo it.
+      host: sb.configured ? sb.url.replace(/^https?:\/\//, "") : "",
+    },
     google: describe("google"),
     github: describe("github"),
   });
 });
 
 // Step 1 — bounce the browser to the provider's consent screen.
+//
+// Two possible routes:
+//  A) Supabase broker (preferred when configured). Supabase owns the OAuth app
+//     whose redirect URI Google/GitHub actually know, so it must perform the
+//     code→token exchange. We use PKCE and receive only a short-lived code.
+//  B) Direct to the provider — used when this project owns the OAuth app.
 app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
   const provider = String(req.params.provider || "").toLowerCase() as AuthProviderId;
   const home = requestBaseUrl(req);
@@ -584,6 +686,37 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
   if (provider !== "google" && provider !== "github") {
     return res.status(404).json({ success: false, message: "Unknown auth provider" });
   }
+
+  const sb = supabaseConfig();
+  if (sb.configured) {
+    const { verifier, challenge } = createPkcePair();
+
+    // The verifier stays server-side in an HttpOnly cookie; only the derived
+    // challenge ever goes to the browser, so a stolen callback code is useless.
+    res.cookie(AUTH_PKCE_COOKIE, `${provider}.${verifier}`, {
+      httpOnly: true,
+      secure: Boolean(process.env.VERCEL),
+      sameSite: "lax",
+      path: "/",
+      maxAge: AUTH_STATE_TTL_MS,
+    });
+
+    const url = new URL(`${sb.url}/auth/v1/authorize`);
+    url.searchParams.set("provider", provider);
+    url.searchParams.set("redirect_to", `${home}/api/auth/callback/supabase`);
+    url.searchParams.set("code_challenge", challenge);
+    url.searchParams.set("code_challenge_method", "s256");
+    url.searchParams.set("skip_http_redirect", "true");
+    if (provider === "google") {
+      url.searchParams.set("prompt", "select_account");
+      // Supabase forwards `query_params` to Google; `hl` keeps the consent
+      // screen in English instead of following the browser's locale.
+      url.searchParams.set("query_params", "hl=en");
+    }
+
+    return res.redirect(url.toString());
+  }
+
   const cfg = providerConfig(provider);
   if (!cfg.configured) {
     return res.redirect(`${home}/?auth_error=not_configured`);
@@ -621,7 +754,77 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
   return res.redirect(url.toString());
 });
 
+// Step 2 (Supabase route) — Supabase has completed the provider handshake and
+// hands back a short-lived PKCE code. Registered ABOVE `/callback/:provider`,
+// otherwise Express would treat "supabase" as a provider id.
+// This must exist before that route to win the match.
+app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
+  const home = requestBaseUrl(req);
+  const fail = (reason: string) => res.redirect(`${home}/?auth_error=${encodeURIComponent(reason)}`);
+
+  const sb = supabaseConfig();
+  if (!sb.configured) return fail("supabase_not_configured");
+
+  // Supabase reports its own errors (e.g. a user denied consent) in the query.
+  const errDesc = typeof req.query.error_description === "string" ? req.query.error_description : "";
+  if (errDesc) return fail("oauth_denied");
+  const errCode = typeof req.query.error === "string" ? req.query.error : "";
+  if (errCode) return fail("oauth_denied");
+
+  // Single-use: clear the verifier cookie on read so a replayed callback fails.
+  const stored = readCookie(req, AUTH_PKCE_COOKIE);
+  res.clearCookie(AUTH_PKCE_COOKIE, { path: "/" });
+  if (!stored) return fail("pkce_missing");
+  const sep = stored.indexOf(".");
+  if (sep <= 0) return fail("pkce_invalid");
+  const provider = stored.slice(0, sep) as AuthProviderId;
+  const verifier = stored.slice(sep + 1);
+  if (provider !== "google" && provider !== "github") return fail("pkce_invalid");
+
+  // The code comes back in the query string (skip_http_redirect) or, for some
+  // providers, in the URL fragment — which never reaches the server.
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  if (!code) return fail("missing_code");
+
+  try {
+    // Trade the code + our verifier for the signed-in user.
+    const tokenRes = await fetch(`${sb.url}/auth/v1/token?grant_type=pkce`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: sb.anonKey,
+        Authorization: `Bearer ${sb.anonKey}`,
+      },
+      body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
+    });
+
+    if (!tokenRes.ok) {
+      console.error("supabase pkce exchange failed:", tokenRes.status);
+      return fail("exchange_failed");
+    }
+
+    const tokenJson = (await tokenRes.json()) as {
+      user?: Parameters<typeof mapSupabaseUser>[0];
+    };
+    const identity = mapSupabaseUser(tokenJson.user || {});
+    if (!identity) return fail("profile_failed");
+
+    res.cookie(AUTH_COOKIE_NAME, issueAuthSession(identity), {
+      httpOnly: true,
+      secure: Boolean(process.env.VERCEL),
+      sameSite: "lax",
+      path: "/",
+      maxAge: AUTH_SESSION_TTL_MS,
+    });
+    return res.redirect(`${home}/?auth=success`);
+  } catch (e) {
+    console.error("supabase callback failed:", e instanceof Error ? e.message : String(e));
+    return fail("exchange_failed");
+  }
+});
+
 // Step 2 — the provider redirects back here with ?code=…&state=…
+// (direct-provider route, used when this project owns the OAuth app)
 app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
   const provider = String(req.params.provider || "").toLowerCase() as AuthProviderId;
   const home = requestBaseUrl(req);

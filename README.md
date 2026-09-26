@@ -89,6 +89,38 @@ The app runs on `http://localhost:3000`.
 | `GEMINI_API_KEY`  | Google Gemini API key for AI calls       | Yes      |
 | `APP_URL`         | Public URL of the deployed app           | No       |
 
+### Sign-in (Google / GitHub)
+
+The app gates the whole studio behind a login wall. Sign-in is **brokered by
+Supabase**, because Supabase owns the OAuth apps in this project — Google and
+GitHub only know Supabase's callback
+(`https://<ref>.supabase.co/auth/v1/callback`), so a direct code exchange from
+this server always fails with `redirect_uri_mismatch`.
+
+| Variable                            | Description                                | Required                                   |
+| ----------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| `NEXT_PUBLIC_SUPABASE_URL`          | Supabase project URL                        | Yes, for sign-in                           |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`     | Supabase anon key                           | Yes, for sign-in                           |
+| `AUTH_SESSION_SECRET`               | HMAC secret signing the session cookie      | Yes, for sign-in                           |
+| `APP_URL`                           | Public origin, e.g. `https://ebnily.vercel.app` | Yes, for sign-in                      |
+| `GOOGLE_CLIENT_ID` / `_SECRET`      | Only for a **directly owned** Google app    | No — Supabase route is used when present   |
+| `GITHUB_CLIENT_ID` / `_SECRET`      | Only for a **directly owned** GitHub app    | No — Supabase route is used when present   |
+
+**Flow:** `/api/auth/google` → PKCE pair (verifier in an HttpOnly cookie) →
+Supabase `/auth/v1/authorize` → Google → Supabase → back to
+`/api/auth/callback/supabase?code=…` → we redeem the code and issue our own
+signed session cookie. The Supabase tokens never reach the browser.
+
+**One required setting in Supabase:** Authentication → URL Configuration →
+**Redirect URLs** must include:
+
+```
+https://ebnily.vercel.app/api/auth/callback/supabase
+```
+
+and the **Site URL** should be `https://ebnily.vercel.app`. Supabase silently
+refuses to redirect to any host that is not on that allowlist.
+
 ## Project Structure
 
 ```

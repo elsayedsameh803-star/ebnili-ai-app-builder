@@ -53,6 +53,22 @@ export const AUTH_ERROR_MESSAGES: Record<string, { ar: string; en: string }> = {
     ar: 'رابط الرجوع غير مسجّل. أضف رابط الرجوع الظاهر في أسفل هذه الرسالة إلى إعدادات تطبيق Google أو GitHub.',
     en: 'The callback URL is not registered. Add the exact URL shown below to your Google or GitHub OAuth app settings.',
   },
+  supabase_not_configured: {
+    ar: 'مصدر تسجيل الدخول (Supabase) غير مُهيّأ على الخادم.',
+    en: 'The Supabase sign-in provider is not configured on the server.',
+  },
+  pkce_missing: {
+    ar: 'انتهت صلاحية محاولة الدخول. حاول مرة أخرى من البداية.',
+    en: 'Your sign-in attempt expired. Please start again.',
+  },
+  pkce_invalid: {
+    ar: 'تعذّر التحقق من محاولة الدخول. حاول مرة أخرى.',
+    en: 'Could not verify the sign-in attempt. Please try again.',
+  },
+  oauth_denied: {
+    ar: 'لم تكتمل عملية الدخول. ربما أُلغيت أو رُفض الإذن.',
+    en: 'Sign-in was not completed. It may have been cancelled or denied.',
+  },
 };
 
 export function getAuthErrorMessage(code: string, language: 'ar' | 'en'): string {
