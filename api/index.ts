@@ -409,17 +409,37 @@ function supabaseConfig(): SupabaseConfig {
     process.env.VITE_SUPABASE_URL ||
     ""
   ).trim();
-  // The dashboard hands out both `https://<ref>.supabase.co` and
-  // `https://<ref>.supabase.co/rest/v1` (the PostgREST endpoint). Only the
-  // project root builds a valid /auth/v1/... URL, so strip any API path.
-  const url = raw.replace(/\/+$/, "").replace(/\/(rest|auth)\/v1$/, "").replace(/\/+$/, "");
+
+  // The dashboard hands out several shapes of the same value:
+  //   https://<ref>.supabase.co
+  //   https://<ref>.supabase.co/rest/v1   (PostgREST)
+  //   https://<ref>.supabase.co/auth/v1    (GoTrue)
+  //   ...each of the above with a trailing slash.
+  // Only the project root builds a valid /auth/v1/... URL. Appending a path to
+  // any of the other shapes yields e.g. /rest/v1/auth/v1/authorize, which is
+  // routed to PostgREST instead of GoTrue and answers 401 "No API key found in
+  // request" — the browser then shows a blocked/error page instead of the
+  // provider's consent screen. So normalise down to the origin + project ref
+  // and refuse to build a URL that still carries an API segment.
+  const url = raw
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/(rest|auth|pg|storage|functions|realtime|analytics)\/v1$/i, "")
+    .replace(/\/+$/, "");
+
+  // Defence in depth: if anything API-shaped survived, the project root is the
+  // only safe thing to keep — take everything up to the first known segment.
+  const cleaned =
+    url.split("/rest/")[0].split("/auth/")[0].split("/pg/")[0].split("/storage/")[0];
+
   const anonKey = (
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     process.env.SUPABASE_ANON_KEY ||
     process.env.VITE_SUPABASE_ANON_KEY ||
     ""
   ).trim();
-  return { url, anonKey, configured: Boolean(url && anonKey) };
+
+  return { url: cleaned, anonKey, configured: Boolean(cleaned && anonKey) };
 }
 
 /** PKCE verifier/challenge, so the browser never carries a usable credential. */
@@ -704,11 +724,23 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
     });
 
     const url = new URL(`${sb.url}/auth/v1/authorize`);
+    // Never emit a URL that still carries a PostgREST/GoTrue API segment —
+    // those resolve to the wrong service and surface to the user as a blocked
+    // page. If the base was misconfigured, fail loudly with a readable message
+    // instead of redirecting the browser into a 401.
+    if (/\/(rest|pg|storage|functions)\/v1/i.test(url.pathname)) {
+      console.error("supabase base url still carries an API path:", sb.url);
+      return res.redirect(`${home}/?auth_error=supabase_not_configured`);
+    }
     url.searchParams.set("provider", provider);
     url.searchParams.set("redirect_to", `${home}/api/auth/callback/supabase`);
     url.searchParams.set("code_challenge", challenge);
     url.searchParams.set("code_challenge_method", "s256");
     url.searchParams.set("skip_http_redirect", "true");
+    // The anon key is public by design. Sending it as a query param keeps the
+    // authorize call valid even when Supabase's gateway is configured to demand
+    // an API key on this route.
+    if (sb.anonKey) url.searchParams.set("apikey", sb.anonKey);
     if (provider === "google") {
       url.searchParams.set("prompt", "select_account");
       // Supabase forwards `query_params` to Google; `hl` keeps the consent
