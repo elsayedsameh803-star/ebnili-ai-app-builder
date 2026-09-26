@@ -548,6 +548,22 @@ app.post("/api/auth/logout", (_req: AuthReq, res: AuthRes) => {
   res.json({ success: true, authenticated: false });
 });
 
+// The exact callback URLs this server redirects to. A setup aid so a
+// redirect_uri mismatch can be fixed by copying the value instead of guessing.
+// Registered here, above `/api/auth/:provider`, so it is not treated as a
+// provider id. Exposes no secrets — only public redirect URIs.
+app.get("/api/auth/config", (req: AuthReq, res: AuthRes) => {
+  const base = requestBaseUrl(req);
+  res.json({
+    success: true,
+    baseUrl: base,
+    callbacks: {
+      google: `${base}/api/auth/callback/google`,
+      github: `${base}/api/auth/callback/github`,
+    },
+  });
+});
+
 // Step 1 — bounce the browser to the provider's consent screen.
 app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
   const provider = String(req.params.provider || "").toLowerCase() as AuthProviderId;
@@ -591,20 +607,6 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
   }
 
   return res.redirect(url.toString());
-});
-
-// Exposes the exact callback URLs that must be registered with each provider.
-// Purely a setup aid — it reveals no secrets, only the public redirect URIs.
-app.get("/api/auth/config", (req: AuthReq, res: AuthRes) => {
-  const base = requestBaseUrl(req);
-  res.json({
-    success: true,
-    baseUrl: base,
-    callbacks: {
-      google: `${base}/api/auth/callback/google`,
-      github: `${base}/api/auth/callback/github`,
-    },
-  });
 });
 
 // Step 2 — the provider redirects back here with ?code=…&state=…
