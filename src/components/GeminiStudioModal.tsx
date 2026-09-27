@@ -107,7 +107,7 @@ export const GeminiStudioModal = ({
     if (!prompt.trim() || isGenerating) return;
     setIsGenerating(true);
     setThinkingSteps([
-      language === 'ar' ? 'تهيئة نموذج Gemini 3.8 Flash وتحليل متطلبات التطبيق' : 'Initializing Gemini 3.8 Flash & parsing prompt specifications',
+      language === 'ar' ? 'تهيئة محرك إبنيلي الذكي وتحليل متطلبات التطبيق' : 'Initializing the Ebnili engine & parsing prompt specifications',
       language === 'ar' ? 'صياغة نظام الألوان والتصميم المتجاوب بنظام Tailwind CSS' : 'Synthesizing responsive visual layout with Tailwind CSS',
       language === 'ar' ? 'توليد منطق التفاعل وحفظ البيانات في الذاكرة المحلية' : 'Writing dynamic interactive state & event handlers',
       language === 'ar' ? 'تجهيز المعاينة الحية للاستخدام الفوري' : 'Finalizing single-page interactive bundle for live preview',
@@ -211,7 +211,7 @@ export const GeminiStudioModal = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                  {language === 'ar' ? 'استوديو ومولد جيميناي 3.8 Flash' : 'Gemini 3.8 Flash AI Studio'}
+                  {language === 'ar' ? 'استوديو ومولد إبنيلي الذكي' : 'Ebnili AI Studio'}
                 </h3>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -221,7 +221,7 @@ export const GeminiStudioModal = ({
               <p className="text-xs text-slate-400">
                 {language === 'ar' 
                   ? 'محرك الذكاء الاصطناعي الفائق لتوليد التطبيقات الكاملة وهندسة البرمجيات المتعددة'
-                  : 'DeepMind Gemini 3.8 Flash engine for full-stack code synthesis and architectural design'}
+                  : 'Ebnili advanced engine for full-stack code synthesis and architectural design'}
               </p>
             </div>
           </div>
@@ -239,7 +239,7 @@ export const GeminiStudioModal = ({
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1.5 text-slate-300 font-mono text-[11px]">
               <Cpu className="w-3.5 h-3.5 text-rose-400" />
-              <span>Model: gemini-3.8-flash</span>
+              <span>{language === 'ar' ? 'المحرك: إبنيلي AI' : 'Engine: Ebnili AI'}</span>
             </span>
             <span className="flex items-center gap-1 text-slate-400 text-[11px]">
               <Zap className="w-3 h-3 text-amber-400" />
@@ -359,7 +359,7 @@ export const GeminiStudioModal = ({
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-bold text-slate-300">
-                    {language === 'ar' ? '2. صف تطبيقك بالتفصيل (أو اطلب تحسينه بـ Gemini 3.8):' : '2. Describe Your Application:'}
+                    {language === 'ar' ? '2. صف تطبيقك بالتفصيل (أو اطلب تحسينه):' : '2. Describe Your Application:'}
                   </label>
 
                   {/* AI Prompt Optimizer Button */}
@@ -376,8 +376,8 @@ export const GeminiStudioModal = ({
                     <Sparkles className={`w-3.5 h-3.5 ${isEnhancing ? 'animate-spin' : 'text-amber-300'}`} />
                     <span>
                       {isEnhancing
-                        ? language === 'ar' ? 'جاري التحسين بـ Gemini 3.8...' : 'Optimizing with Gemini 3.8...'
-                        : language === 'ar' ? '⚡ تحسين البرومبت بـ Gemini 3.8' : '⚡ Enhance Prompt with Gemini'}
+                        ? language === 'ar' ? 'جارٍ التحسين...' : 'Optimizing...'
+                        : language === 'ar' ? '⚡ تحسين البرومبت' : '⚡ Enhance Prompt'}
                     </span>
                   </button>
                 </div>
@@ -398,7 +398,7 @@ export const GeminiStudioModal = ({
                   {enhancedSuccess && (
                     <div className="absolute top-2 left-2 bg-emerald-500/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" />
-                      <span>{language === 'ar' ? 'تم تحسين البرومبت بنجاح بواسطة Gemini 3.8' : 'Prompt Enhanced by Gemini 3.8'}</span>
+                      <span>{language === 'ar' ? 'تم تحسين البرومبت بنجاح' : 'Prompt Enhanced'}</span>
                     </div>
                   )}
                 </div>
@@ -423,7 +423,7 @@ export const GeminiStudioModal = ({
                 <div className="p-4 rounded-xl bg-slate-950/80 border border-rose-500/30 space-y-2.5 animate-pulse">
                   <div className="flex items-center gap-2 text-rose-400 text-xs font-bold">
                     <Sparkles className="w-4 h-4 animate-spin" />
-                    <span>{language === 'ar' ? 'Gemini 3.8 Flash يقوم ببناء وتجميع تطبيقك الآن...' : 'Gemini 3.8 Flash is crafting your application...'}</span>
+                    <span>{language === 'ar' ? 'جارٍ بناء تطبيقك وتجميعه الآن...' : 'Crafting and assembling your application...'}</span>
                   </div>
                   <div className="space-y-1 text-xs text-slate-300 pl-6">
                     {thinkingSteps.map((step, idx) => (
@@ -459,7 +459,7 @@ export const GeminiStudioModal = ({
                   <Wand2 className="w-4 h-4" />
                   <span>
                     {isGenerating 
-                      ? language === 'ar' ? 'جاري التوليد بـ Gemini 3.8...' : 'Generating with Gemini 3.8...'
+                      ? language === 'ar' ? 'جارٍ التوليد...' : 'Generating...'
                       : language === 'ar' ? '🚀 توليد التطبيق وتطبيقه في المعاينة' : '🚀 Build & Mount into Live Preview'}
                   </span>
                 </button>
@@ -609,8 +609,8 @@ export const GeminiStudioModal = ({
                   </h4>
                   <p className="text-xs text-slate-400 mt-0.5">
                     {language === 'ar'
-                      ? 'يقوم نموذج Gemini 3.8 بفحص الكود وتصحيح أي أخطاء في الاستجابة أو التنسيق أو منطق العمليات.'
-                      : 'Gemini 3.8 scans and remedies syntax errors, layout shifts, and event listener discrepancies.'}
+                      ? 'يقوم محرك إبنيلي الذكي بفحص الكود وتصحيح أي أخطاء في الاستجابة أو التنسيق أو منطق العمليات.'
+                      : 'The Ebnili engine scans and remedies syntax errors, layout shifts, and event listener discrepancies.'}
                   </p>
                 </div>
 
@@ -707,7 +707,7 @@ export const GeminiStudioModal = ({
                   </div>
                   <ul className="text-xs text-slate-400 space-y-1.5">
                     <li>✓ 5 أوامر توليد يومياً</li>
-                    <li>✓ محرك Gemini 3.8 Flash الأساسي</li>
+                    <li>✓ محرك إبنيلي الذكي الأساسي</li>
                     <li>✓ معاينة حية ومحرر الكود</li>
                   </ul>
                 </div>
@@ -722,7 +722,7 @@ export const GeminiStudioModal = ({
                   </div>
                   <ul className="text-xs text-slate-300 space-y-1.5">
                     <li>✓ توليد غير محدود بالذكاء الاصطناعي</li>
-                    <li>✓ أولوية قصوى على محرك Gemini 3.8 Flash</li>
+                    <li>✓ أولوية قصوى على محرك إبنيلي الذكي</li>
                     <li>✓ تصدير كامل لملفات المشروع ZIP & Git</li>
                     <li>✓ مهندس الأكواد الشامل (React + Express + SQL)</li>
                   </ul>

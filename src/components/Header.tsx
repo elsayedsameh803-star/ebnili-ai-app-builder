@@ -305,13 +305,13 @@ export const Header = ({
           <button
             onClick={onOpenGeminiStudio}
             className="flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-purple-600 via-rose-500 to-amber-500 hover:from-purple-500 hover:to-amber-400 px-3 py-1.5 rounded-lg shadow-sm shadow-purple-500/20 transition cursor-pointer border border-white/10"
-            title={language === 'ar' ? 'فتح استوديو ومولد جيميناي 3.8 Flash المتطور' : 'Open Gemini 3.8 Flash AI Studio'}
+            title={language === 'ar' ? 'فتح استوديو الذكاء الاصطناعي المتطور' : 'Open Ebnili AI Studio'}
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin-slow" />
             <span className="hidden sm:inline font-['Cairo',sans-serif]">
-              {language === 'ar' ? 'استوديو Gemini 3.8' : 'Gemini 3.8 Studio'}
+              {language === 'ar' ? 'استوديو إبنيلي' : 'Ebnili Studio'}
             </span>
-            <span className="sm:hidden font-mono font-bold">3.8</span>
+            <span className="sm:hidden font-mono font-bold">AI</span>
           </button>
         )}
 

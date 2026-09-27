@@ -337,10 +337,10 @@ export const ChatSidebar = ({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-rose-400 text-xs font-bold">
                     <Sparkles className="w-4 h-4 animate-spin text-rose-400" />
-                    <span>{language === 'ar' ? 'جاري التفكير والتوليد عبر ابنيلي...' : 'Ibni-li AI Generating...'}</span>
+                    <span>{language === 'ar' ? 'جارٍ التوليد...' : 'Generating...'}</span>
                   </div>
                   <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full font-mono">
-                    gemini-3.8-flash
+                    {language === 'ar' ? 'إبنيلي AI' : 'Ebnili AI'}
                   </span>
                 </div>
 
@@ -601,7 +601,7 @@ export const ChatSidebar = ({
             className="text-[10px] font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30 transition flex items-center gap-1 shrink-0"
           >
             <Sparkles className="w-2.5 h-2.5" />
-            <span>Gemini 3.8 Studio</span>
+            <span>{language === 'ar' ? 'استوديو إبنيلي' : 'Ebnili Studio'}</span>
           </button>
         )}
       </div>
@@ -613,7 +613,7 @@ export const ChatSidebar = ({
           <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
             <div className="flex items-center gap-1 font-mono text-[10px] text-emerald-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Gemini 3.8 Flash (DeepMind)</span>
+              <span>{language === 'ar' ? 'محرك إبنيلي الذكي' : 'Ebnili AI Engine'}</span>
             </div>
 
             {inputText.trim() && (
@@ -622,7 +622,7 @@ export const ChatSidebar = ({
                 onClick={handleEnhanceCurrentPrompt}
                 disabled={isEnhancingPrompt}
                 className="text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 transition"
-                title={language === 'ar' ? 'تحسين صياغة البرومبت بذكاء Gemini 3.8' : 'Enhance prompt with Gemini 3.8'}
+                title={language === 'ar' ? 'تحسين صياغة البرومبت بالذكاء الاصطناعي' : 'Enhance prompt with AI'}
               >
                 <Sparkles className={`w-2.5 h-2.5 ${isEnhancingPrompt ? 'animate-spin' : ''}`} />
                 <span>{isEnhancingPrompt ? (language === 'ar' ? 'جاري التحسين...' : 'Optimizing...') : (language === 'ar' ? '⚡ تحسين البرومبت' : '⚡ Enhance')}</span>

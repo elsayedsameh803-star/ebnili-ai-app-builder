@@ -138,7 +138,7 @@ export const NewProjectHero = ({
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs text-rose-300">
             <Sparkles className="w-3.5 h-3.5 text-rose-400" />
             <span>
-              {language === 'ar' ? 'مدعوم بنموذج الذكاء الاصطناعي الفائق Gemini' : 'Powered by Gemini 3.8 Flash AI'}
+              {language === 'ar' ? 'مدعوم بنموذج الذكاء الاصطناعي الفائق من إبنيلي' : 'Powered by Ebnili Advanced AI'}
             </span>
           </div>
 
@@ -201,7 +201,7 @@ export const NewProjectHero = ({
                 </button>
 
                 <span className="hidden sm:inline text-xs text-slate-500 font-mono bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
-                  ⚡ gemini-3.8-flash
+                  ⚡ {language === 'ar' ? 'إبنيلي AI' : 'Ebnili AI'}
                 </span>
               </div>
 

@@ -52,7 +52,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       'تعديل بصري مباشر على أي عنصر بنقرة زر (Visual Inspector Pro)',
       'ربط قواعد بيانات Supabase و PostgreSQL و APIs خارجية',
       'نشر مباشر على نطاقات مخصصة وتضمين (Embed) في المواقع',
-      'أولوية معالجة قصوى وسرعة استجابة فائقة بمحركات Gemini Flash',
+      'أولوية معالجة قصوى وسرعة استجابة فائقة بمحرك إبنيلي الذكي',
       'حفظ ومزامنة لا محدودة لسجل الإصدارات والتراجع',
       'تفعيل فوري ومباشر عبر فودافون كاش أو أورانج كاش (01207782741)'
     ],
@@ -62,7 +62,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       'Advanced Visual Inspector: Click & modify any element directly',
       'Connect Supabase, PostgreSQL schemas & external APIs',
       'Deploy to live global preview & embed iframe widgets',
-      'Priority Gemini processing pipeline with zero wait times',
+      'Priority Ebnili AI processing pipeline with zero wait times',
       'Unlimited revision history and rollback checkpoints',
       'Fast activation via Orange Cash wallet (01207782741) after transfer review'
     ],

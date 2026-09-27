@@ -525,8 +525,8 @@ CREATE TABLE records (
       id: String(Date.now()),
       version: nextVer,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      title: appName || (language === 'ar' ? 'توليد عبر Gemini 3.8' : 'Synthesized via Gemini 3.8'),
-      prompt: appName ? `توليد تطبيق ${appName} عبر Gemini 3.8 Flash` : 'Gemini 3.8 Flash Code Synthesis',
+      title: appName || (language === 'ar' ? 'توليد عبر إبنيلي' : 'Synthesized via Ebnili'),
+      prompt: appName ? `توليد تطبيق ${appName} عبر محرك إبنيلي الذكي` : 'Ebnili AI Code Synthesis',
       code,
       files: {
         ...project.files,
@@ -553,8 +553,8 @@ CREATE TABLE records (
       id: String(Date.now() + 1),
       sender: 'assistant',
       text: language === 'ar'
-        ? `⚡ تم بناء وتطبيق كود "${appName || project.name}" بنجاح بواسطة أحدث محرك ذكاء اصطناعي Google Gemini 3.8 Flash!`
-        : `⚡ Successfully synthesized and deployed "${appName || project.name}" via the latest Google Gemini 3.8 Flash engine!`,
+        ? `⚡ تم بناء وتطبيق كود "${appName || project.name}" بنجاح بواسطة محرك إبنيلي الذكي!`
+        : `⚡ Successfully synthesized and deployed "${appName || project.name}" via the Ebnili AI engine!`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       versionTag: nextVer,
       plan: plan || (language === 'ar' ? ['توليد الكود التفاعلي بنظام Tailwind', 'تجهيز المعاينة المباشرة'] : ['Interactive Tailwind Synthesis', 'Live Preview Setup']),
