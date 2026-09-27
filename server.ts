@@ -18,15 +18,12 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "15mb" }));
 
-// Direct Download endpoint for project ZIP
-app.get("/download-project-zip", (req, res) => {
-  const zipPath = path.join(appRootDir, "public", "project-source.zip");
-  if (fs.existsSync(zipPath)) {
-    res.download(zipPath, "project-source.zip");
-  } else {
-    res.status(404).send("File not found");
-  }
-});
+// NOTE: the old `/download-project-zip` route was removed on purpose. It served a
+// pre-built `public/project-source.zip` that no longer exists, so the SPA
+// fallback returned `index.html` with a 200 — visitors clicked "Download ZIP"
+// and got a web page instead of an archive. The export modal now builds the
+// ZIP in the browser from the user's own generated files (see ExportModal.tsx),
+// which also means the platform's own source code is never downloadable.
 
 // Orange Cash & Subscription In-Memory & File Persistence
 const DB_FILE = path.join(appRootDir, "subscriptions_db.json");
@@ -2357,11 +2354,7 @@ if (isProductionBuild) {
     }
     const requestPath = req.path || "/";
     // Never intercept backend endpoints.
-    if (
-      requestPath === "/api" ||
-      requestPath.startsWith("/api/") ||
-      requestPath.startsWith("/download-project-zip")
-    ) {
+    if (requestPath === "/api" || requestPath.startsWith("/api/")) {
       return next();
     }
     res.sendFile(path.join(distDir, "index.html"), (err) => {

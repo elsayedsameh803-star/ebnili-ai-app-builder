@@ -20,6 +20,7 @@ import {
   User as UserIcon
 } from 'lucide-react';
 import { DeviceMode, ViewMode, Language, UserSubscription, AppProject, AuthUser } from '../types';
+import { isOwnerAccount } from '../lib/auth';
 
 interface HeaderProps {
   projectName: string;
@@ -81,6 +82,10 @@ export const Header = ({
   const [showProjectsMenu, setShowProjectsMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Owner-only controls (admin dashboard, backend console) stay hidden from
+  // ordinary users. Server-side `requireAdmin` remains the real boundary.
+  const isOwner = isOwnerAccount(authUser);
 
   // Close the account dropdown on any outside click.
   useEffect(() => {
@@ -422,8 +427,8 @@ export const Header = ({
           )
         )}
 
-        {/* Owner Admin Button */}
-        {onOpenAdmin && (
+        {/* Owner Admin Button — owner accounts only */}
+        {isOwner && onOpenAdmin && (
           <button
             onClick={onOpenAdmin}
             className="flex items-center gap-1.5 text-xs text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/20 px-2.5 py-1.5 rounded-lg border border-rose-500/30 transition cursor-pointer"
@@ -434,15 +439,17 @@ export const Header = ({
           </button>
         )}
 
-        {/* Integrations (Supabase / DB / Auth) */}
-        <button
-          onClick={onOpenIntegrations}
-          className="hidden sm:flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-700/60 transition"
-          title={language === 'ar' ? 'قواعد البيانات والتكاملات' : 'Integrations & Supabase'}
-        >
-          <Database className="w-3.5 h-3.5 text-indigo-400" />
-          <span className="hidden lg:inline">{language === 'ar' ? 'قاعدة البيانات' : 'Backend'}</span>
-        </button>
+        {/* Integrations (Supabase / DB / Auth) — owner accounts only */}
+        {isOwner && (
+          <button
+            onClick={onOpenIntegrations}
+            className="hidden sm:flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-700/60 transition"
+            title={language === 'ar' ? 'قواعد البيانات والتكاملات' : 'Integrations & Supabase'}
+          >
+            <Database className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden lg:inline">{language === 'ar' ? 'قاعدة البيانات' : 'Backend'}</span>
+          </button>
+        )}
 
         {/* Export ZIP */}
         <button

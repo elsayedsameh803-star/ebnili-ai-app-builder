@@ -50,7 +50,10 @@ All API routes are served through the Vercel serverless function at `api/index.t
 | POST     | `/api/ai/gemini-enhance-prompt`       | Enhance a prompt with Gemini         |
 | POST     | `/api/ai/gemini-architect`            | Multi-target code architect          |
 | POST     | `/api/ai/gemini-code-doctor`          | Optimize & fix code with Gemini      |
-| GET      | `/download-project-zip`               | Download generated project ZIP       |
+
+> **Export:** the ZIP is generated in the browser from the user's own project
+> files (see `src/components/ExportModal.tsx`). There is no server route that
+> serves the platform's source code.
 
 ## Local Development
 

@@ -59,8 +59,14 @@ export const ExportModal = ({
       const readme = `# ${projectName}\n\nThis application was generated using [ابنيلي AI App Builder](https://ibnili.app).\n\n## Getting Started\n\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n\nOpen http://localhost:3000 to preview.\n`;
       zip.file('README.md', readme);
 
-      // Generate blob
-      const content = await zip.generateAsync({ type: 'blob' });
+      // Generate blob — compression keeps large projects fast to build and small
+      // to download. `streamFiles: true` is the default, but being explicit
+      // documents the intent and avoids holding every entry in memory.
+      const content = await zip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      });
       const url = URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
@@ -114,24 +120,29 @@ export const ExportModal = ({
             <FileArchive className="w-8 h-8 text-rose-400 shrink-0" />
             <div>
               <h4 className="font-bold text-xs text-white">
-                {language === 'ar' ? 'تحميل كود المنصة بالكامل لـ GitHub و Vercel' : 'Full Project Archive (ZIP)'}
+                {language === 'ar' ? 'تحميل كود مشروعك كملف ZIP' : 'Download Your Project as ZIP'}
               </h4>
               <p className="text-[11px] text-slate-400">
                 {language === 'ar'
-                  ? 'ملف مضغوط جاهز للرفع على GitHub ثم Vercel مباشرة (يتضمن vercel.json و server.ts)'
-                  : 'Complete package with vercel.json, backend, and frontend ready for Vercel'}
+                  ? 'ملف مضغوط يحتوي على ملفات مشروعك التي أنشأتها، جاهز للتشغيل محلياً'
+                  : 'A compressed archive of the project files you generated, ready to run locally'}
               </p>
             </div>
           </div>
           <div className="flex flex-col gap-1.5 shrink-0">
-            <a
-              href="/download-project-zip"
-              download="project-source.zip"
-              className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-sm flex items-center justify-center gap-1.5 cursor-pointer text-center"
+            <button
+              type="button"
+              onClick={handleDownloadZip}
+              disabled={isZipping}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white transition shadow-sm flex items-center justify-center gap-1.5 cursor-pointer text-center"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>{language === 'ar' ? 'تحميل ملف ZIP الكامل' : 'Download ZIP'}</span>
-            </a>
+              <Download className={`w-3.5 h-3.5 ${isZipping ? 'animate-bounce' : ''}`} />
+              <span>
+                {isZipping
+                  ? (language === 'ar' ? 'جارٍ التحضير...' : 'Preparing...')
+                  : (language === 'ar' ? 'تحميل ملف ZIP' : 'Download ZIP')}
+              </span>
+            </button>
           </div>
         </div>
 

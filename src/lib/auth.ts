@@ -1,6 +1,24 @@
 import type { AuthProviderId, AuthProviderInfo, AuthUser } from '../types';
 
 /**
+ * OWNER-ONLY UI GATING
+ * ────────────────────
+ * The header exposes a few controls that belong to the site owner and must not
+ * be shown to ordinary users (owner dashboard, backend/database console, …).
+ * Hiding them in the client is a UX measure, NOT a security boundary: the real
+ * protection lives on the server, where every admin route requires a valid
+ * owner session (see `requireAdmin` in `api/index.ts`). The account check below
+ * is only so the buttons do not appear to everyone.
+ */
+const OWNER_EMAILS = ['elsayedsameh803@gmail.com'];
+
+/** True when the signed-in account is the site owner. */
+export function isOwnerAccount(user: AuthUser | null | undefined): boolean {
+  const email = (user?.email ?? '').trim().toLowerCase();
+  return Boolean(email) && OWNER_EMAILS.includes(email);
+}
+
+/**
  * Thin client for the server-side OAuth flow implemented in `api/index.ts`.
  *
  * The client secret and the code→token exchange never reach the browser: we only
