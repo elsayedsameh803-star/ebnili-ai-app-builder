@@ -64,7 +64,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       'Deploy to live global preview & embed iframe widgets',
       'Priority Gemini processing pipeline with zero wait times',
       'Unlimited revision history and rollback checkpoints',
-      'Instant activation via Orange Cash wallet (01207782741)'
+      'Fast activation via Orange Cash wallet (01207782741) after transfer review'
     ],
     limitsAr: 'توليد غير محدود + تصدير كامل',
     limitsEn: 'Unlimited prompts + Full code export'

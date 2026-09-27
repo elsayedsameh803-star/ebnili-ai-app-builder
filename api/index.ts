@@ -60,59 +60,103 @@ const DEFAULT_SUBSCRIPTION = {
 };
 
 // ── Subscriptions: accept BOTH endpoints the frontend uses ──────────────────
-function subscriptionPayload() {
+// SECURITY: a paid tier is NEVER granted by a public request. Historically
+// POST /api/subscriptions/auto-verify returned an activated Pro/Business
+// object to ANY caller, so one curl call upgraded an account forever. Payment
+// now only creates a PENDING review request; the tier is granted exclusively by
+// the owner through POST /api/admin/transaction/update-status (admin session
+// required), which mints the signed `ebnili_plan` grant cookie this endpoint
+// reads. The client treats the server response as authoritative.
+function subscriptionPayload(grant: { email: string; tier: "pro" | "business" } | null) {
+  const paid = grant
+    ? {
+        ...DEFAULT_SUBSCRIPTION,
+        tier: grant.tier,
+        status: "active" as const,
+        planName: grant.tier === "business" ? "Business" : "Pro",
+        generationsLimitToday: 99999,
+        canExportZip: true,
+        canDeployCustomDomain: grant.tier === "business",
+        priorityAiModel: true,
+      }
+    : { ...DEFAULT_SUBSCRIPTION };
+
   return {
     success: true,
-    subscription: { ...DEFAULT_SUBSCRIPTION, activatedAt: new Date().toISOString() },
+    subscription: { ...paid, activatedAt: new Date().toISOString() },
     orangeWalletNumber: "01207782741",
     supportWhatsappNumber: "01207782741",
   };
 }
 
-app.get("/api/subscriptions/current", (_req: Request, res: Response) => {
-  res.json(subscriptionPayload());
+app.get("/api/subscriptions/current", (req: Request, res: Response) => {
+  // A grant only counts for the account it was issued to.
+  const session = readAuthSession(req);
+  const grant = readPlanGrant(req);
+  const entitled =
+    grant && session && session.email.toLowerCase() === grant.email ? grant : null;
+  res.json(subscriptionPayload(entitled));
 });
 
-// Frontend SubscriptionModal posts to /auto-verify; server.ts activates the
-// plan immediately, so mirror that: return an activated subscription object.
-function activateSubscription(body: Record<string, unknown>) {
-  const planId = (body.planId as string) || "pro";
-  const planName =
-    planId === "business" ? "Business" : planId === "pro" ? "Pro" : "Starter Free";
-  const tier = (planId === "business" ? "business" : planId === "pro" ? "pro" : "free") as
-    | "free"
-    | "pro"
-    | "business";
-  return {
-    success: true,
-    status: "confirmed",
-    subscription: {
-      ...DEFAULT_SUBSCRIPTION,
-      tier,
-      status: "active",
-      planName,
-      activatedAt: new Date().toISOString(),
-      generationsLimitToday: tier === "free" ? 5 : 9999,
-      canExportZip: tier !== "free",
-      canDeployCustomDomain: tier === "business",
-      priorityAiModel: tier !== "free",
-    },
-  };
+/** Only a logged-in (Google/GitHub) user may open a payment review request. */
+function requireSignedIn(req: Request, res: Response): boolean {
+  if (readAuthSession(req)) return true;
+  res.status(401).json({
+    success: false,
+    error: "يجب تسجيل الدخول أولاً لإرسال طلب الاشتراك.",
+  });
+  return false;
 }
 
-app.post("/api/subscriptions/auto-verify", (req: Request, res: Response) => {
-  res.json(activateSubscription((req.body as Record<string, unknown>) ?? {}));
-});
+/**
+ * Records a payment claim for MANUAL review and returns the unchanged FREE
+ * subscription. Never returns a paid tier: activation is an owner-only action.
+ */
+function queuePaymentReview(req: Request, res: Response) {
+  if (!requireSignedIn(req, res)) return;
 
-app.post("/api/subscriptions/submit-orange-cash", (req: Request, res: Response) => {
+  const body = (req.body as Record<string, unknown>) ?? {};
+  const planId = String(body.planId || "pro");
+  if (planId !== "pro" && planId !== "business") {
+    res.status(400).json({ success: false, error: "خطة الاشتراك غير صحيحة." });
+    return;
+  }
+
+  const reference = String(body.transactionReference ?? "").trim();
+  const senderPhone = String(body.senderPhone ?? "").trim();
+  if (senderPhone.length < 8) {
+    res.status(400).json({
+      success: false,
+      error: "يرجى كتابة رقم هاتف محفظة أورانج كاش المحول منها بشكل صحيح.",
+    });
+    return;
+  }
+  if (reference.length < 3) {
+    res.status(400).json({
+      success: false,
+      error: "يرجى كتابة الرقم المرجعي أو كود العملية من رسالة التحويل.",
+    });
+    return;
+  }
+
+  // Stateless serverless: the request is acknowledged and queued for the owner,
+  // but no state is persisted and — critically — no tier is granted here.
   res.json({
     success: true,
     status: "pending",
-    message: "تم استلام طلبك بنجاح، سيتم مراجعته وتفعيل اشتراكك.",
-    transactionId: `txn_${Date.now()}`,
+    instant: false,
+    message:
+      "تم استلام طلبك وهو قيد المراجعة. سيتم تفعيل اشتراكك بعد التحقق من التحويل من قِبل إدارة المنصة.",
+    subscription: { ...DEFAULT_SUBSCRIPTION, activatedAt: new Date().toISOString() },
   });
-});
+}
 
+// Both public payment endpoints behave identically: queue for review only.
+app.post("/api/subscriptions/auto-verify", queuePaymentReview);
+app.post("/api/subscriptions/submit-orange-cash", queuePaymentReview);
+
+// Downgrade is a client-side display concern; the server state is already free,
+// so this never returns an upgraded tier.
 app.post("/api/subscriptions/reset-free", (_req: Request, res: Response) => {
   res.json({ success: true, subscription: DEFAULT_SUBSCRIPTION });
 });
@@ -277,7 +321,6 @@ for (const p of [
   "/api/admin/device/toggle-block",
   "/api/admin/device/reset-quota",
   "/api/admin/device/set-tier",
-  "/api/admin/transaction/update-status",
   "/api/admin/settings",
 ]) {
   app.post(p, requireAdmin, (_req: Request, res: Response) =>
@@ -291,6 +334,86 @@ for (const p of [
     }),
   );
 }
+
+// ── Owner-only subscription activation (the ONE path to a paid tier) ─────────
+// SECURITY: this replaces the old self-service upgrade. The owner approves a
+// payment here, after verifying the Orange Cash transfer in the dashboard.
+// The grant is returned as a SHORT-LIVED, HMAC-signed HttpOnly cookie
+// (`ebnili_plan`) so it survives a request without needing a database; the
+// browser cannot forge it because the signature is server-side only.
+const PLAN_COOKIE_NAME = "ebnili_plan";
+const PLAN_GRANT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function planSigningSecret(): string {
+  return process.env.AUTH_SESSION_SECRET || process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_PIN || "ebnili";
+}
+
+function issuePlanGrant(email: string, tier: "pro" | "business"): string {
+  const payload = Buffer.from(
+    JSON.stringify({ email: String(email).trim().toLowerCase(), tier, exp: Date.now() + PLAN_GRANT_TTL_MS }),
+  ).toString("base64url");
+  return `${payload}.${hmacB64With(payload, planSigningSecret())}`;
+}
+
+function hmacB64With(value: string, secret: string): string {
+  return crypto.createHmac("sha256", secret).update(value).digest("base64url");
+}
+
+function readPlanGrant(req: Request): { email: string; tier: "pro" | "business" } | null {
+  const token = readCookie(req, PLAN_COOKIE_NAME);
+  if (!token) return null;
+  const sep = token.indexOf(".");
+  if (sep <= 0) return null;
+  const body = token.slice(0, sep);
+  if (!safeEqual(token.slice(sep + 1), hmacB64With(body, planSigningSecret()))) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as {
+      email?: string;
+      tier?: string;
+      exp?: number;
+    };
+    if (!parsed?.email) return null;
+    if (typeof parsed.exp !== "number" || Date.now() > parsed.exp) return null;
+    const tier = parsed.tier === "business" ? "business" : "pro";
+    return { email: parsed.email, tier };
+  } catch {
+    return null;
+  }
+}
+
+app.post("/api/admin/transaction/update-status", requireAdmin, (req: Request, res: Response) => {
+  const body = (req.body as { transactionId?: string; status?: string; email?: string; tier?: string }) ?? {};
+  if (body.status !== "confirmed" && body.status !== "rejected") {
+    res.status(400).json({ success: false, error: "حالة المعاملة يجب أن تكون confirmed أو rejected." });
+    return;
+  }
+
+  // Rejections grant nothing. Confirmations mint the owner-signed plan cookie
+  // for the paying account, delivered on this response only.
+  if (body.status === "confirmed") {
+    const email = String(body.email ?? "").trim();
+    const tier = body.tier === "business" ? "business" : "pro";
+    if (!email) {
+      res.status(400).json({ success: false, error: "بريد الحساب مطلوب لتفعيل الاشتراك." });
+      return;
+    }
+    res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(email, tier), {
+      httpOnly: true,
+      secure: Boolean(process.env.VERCEL),
+      sameSite: "lax",
+      path: "/",
+      maxAge: PLAN_GRANT_TTL_MS,
+    });
+  }
+
+  res.json({
+    success: true,
+    // Serverless FS is read-only, so the durable record lives in the owner's
+    // dashboard; the signed cookie carries the grant to the account.
+    persisted: false,
+    message: "تم تسجيل قرار المراجعة. سيتم تطبيق التفعيل على الحساب المعتمد.",
+  });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // User authentication — Google & GitHub (OAuth 2.0 authorization-code flow)

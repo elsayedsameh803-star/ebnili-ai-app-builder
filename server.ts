@@ -389,7 +389,11 @@ app.get("/api/subscriptions/current", (req, res) => {
   });
 });
 
-// Automated Orange Cash Instant Verification Endpoint
+// Automated Orange Cash Payment Review Endpoint
+// SECURITY: this used to grant the paid tier INSTANTLY to whoever posted to it,
+// so any anonymous caller could type a random reference and become Pro forever.
+// A payment is now only QUEUED for manual review; the tier is granted solely by
+// the owner via POST /api/admin/transaction/update-status (requireAdmin).
 app.post("/api/subscriptions/auto-verify", (req, res) => {
   try {
     const {
@@ -429,10 +433,10 @@ app.post("/api/subscriptions/auto-verify", (req, res) => {
 
     const numericAmount = Number(amount) || (planId === "business" ? (billingCycle === "yearly" ? 5990 : 599) : (billingCycle === "yearly" ? 2490 : 249));
     const planTitle = planId === "business" ? "باقة الأعمال والشركات" : "باقة المحترفين (Pro)";
-    const durationDays = billingCycle === "yearly" ? 365 : 30;
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
 
+    // Recorded as PENDING. The account keeps its current tier untouched until
+    // the owner confirms the transfer in the admin dashboard.
     const newTxn: OrangeCashTransaction = {
       id: `txn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       senderPhone: String(senderPhone).trim(),
@@ -446,49 +450,36 @@ app.post("/api/subscriptions/auto-verify", (req, res) => {
       userName: String(userName).trim(),
       userEmail: String(userEmail).trim(),
       submittedAt: now.toISOString(),
-      status: "confirmed",
-      verifiedAt: now.toISOString(),
-      notes: notes || `تحقق وتفعيل أوتوماتيكي فوري إلى ${adminSettings.orangeWalletNumber}`,
+      status: "pending",
+      notes: notes || `بانتظار مراجعة التحويل إلى ${adminSettings.orangeWalletNumber}`,
     };
 
     currentSubscription = {
       ...currentSubscription,
-      tier: planId,
-      status: "active",
-      planName: planTitle,
-      activatedAt: now.toISOString(),
-      expiresAt,
-      billingCycle,
-      generationsLimitToday: 99999,
-      generationsUsedToday: 0,
-      canExportZip: true,
-      canDeployCustomDomain: true,
-      canUseVisualInspector: true,
-      priorityAiModel: true,
       transactions: [newTxn, ...currentSubscription.transactions],
     };
     saveSubscriptionData(currentSubscription);
 
-    // Also upgrade the user's physical device
+    // Track the requesting device for fraud review — WITHOUT granting it a tier.
     const ip = getClientIp(req);
     const userAgent = req.headers["user-agent"] || "";
     if (deviceId || fingerprintHash) {
       const dev = findOrCreateDevice(deviceId || "", fingerprintHash || "", ip, userAgent, userEmail);
-      dev.associatedTier = planId;
-      dev.isBlocked = false;
+      dev.associatedTier = "free";
       saveDevicesData(devicesDb);
     }
 
     return res.json({
       success: true,
-      instant: true,
-      message: `تم التحقق الأوتوماتيكي الفوري من المعاملة المرجعية وتفعيل ${planTitle} بنجاح!`,
+      instant: false,
+      status: "pending",
+      message: `تم استلام طلب ${planTitle} وهو قيد المراجعة. سيتم تفعيل اشتراكك بعد التأكد من التحويل.`,
       subscription: currentSubscription,
       transaction: newTxn,
     });
   } catch (err: any) {
     console.error("Auto verify error:", err);
-    return res.status(500).json({ error: "فشل التحقق الأوتوماتيكي. يرجى مراجعة البيانات أو التواصل عبر واتساب." });
+    return res.status(500).json({ error: "فشل تسجيل طلب الاشتراك. يرجى المحاولة مرة أخرى." });
   }
 });
 
@@ -540,45 +531,35 @@ app.post("/api/subscriptions/submit-orange-cash", (req, res) => {
       userName: String(userName).trim(),
       userEmail: String(userEmail).trim(),
       submittedAt: now.toISOString(),
-      status: "confirmed", // Auto verified & activated
-      verifiedAt: now.toISOString(),
+      // Queued for review — activation happens only via the owner-only
+      // /api/admin/transaction/update-status endpoint.
+      status: "pending",
       receiptImage: receiptImage || undefined,
-      notes: notes || `تحويل أورانج كاش إلى ${adminSettings.orangeWalletNumber}`,
+      notes: notes || `بانتظار مراجعة التحويل إلى ${adminSettings.orangeWalletNumber}`,
     };
 
-    // Update the active subscription
+    // Record the request WITHOUT touching the active tier.
     currentSubscription = {
       ...currentSubscription,
-      tier: planId,
-      status: "active",
-      planName: planTitle,
-      activatedAt: now.toISOString(),
-      expiresAt: expiresAt,
-      billingCycle,
-      generationsLimitToday: 99999, // Unlimited
-      generationsUsedToday: 0,
-      canExportZip: true,
-      canDeployCustomDomain: true,
-      canUseVisualInspector: true,
-      priorityAiModel: true,
       transactions: [newTxn, ...currentSubscription.transactions],
     };
 
     saveSubscriptionData(currentSubscription);
 
-    // Also upgrade the physical device
+    // Track the device for fraud review — WITHOUT granting it a tier.
     const ip = getClientIp(req);
     const userAgent = req.headers["user-agent"] || "";
     if (deviceId || fingerprintHash) {
       const dev = findOrCreateDevice(deviceId || "", fingerprintHash || "", ip, userAgent, userEmail);
-      dev.associatedTier = planId;
-      dev.isBlocked = false;
+      dev.associatedTier = "free";
       saveDevicesData(devicesDb);
     }
 
     return res.json({
       success: true,
-      message: `تم التحقق من المعاملة المرجعية بنجاح وتفعيل ${planTitle} فورياً!`,
+      instant: false,
+      status: "pending",
+      message: `تم استلام طلب ${planTitle} وهو قيد المراجعة. سيتم تفعيل اشتراكك بعد التأكد من التحويل.`,
       subscription: currentSubscription,
       transaction: newTxn,
     });
@@ -589,7 +570,7 @@ app.post("/api/subscriptions/submit-orange-cash", (req, res) => {
 });
 
 // Reset Subscription back to Starter Free (for testing and downgrading)
-app.post("/api/subscriptions/reset-free", (req, res) => {
+app.post("/api/subscriptions/reset-free", requireAdmin, (req, res) => {
   currentSubscription = {
     tier: "free",
     status: "active",

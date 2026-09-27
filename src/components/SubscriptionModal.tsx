@@ -77,6 +77,8 @@ export const SubscriptionModal = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successCelebration, setSuccessCelebration] = useState(false);
+  // Payment is submitted for MANUAL review — never activated on the spot.
+  const [pendingReview, setPendingReview] = useState(false);
 
   if (!isOpen) return null;
 
@@ -160,15 +162,16 @@ export const SubscriptionModal = ({
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error((data as { error?: string }).error || 'فشل التحقق من العملية، يرجى التأكد من الرقم المرجعي أو التواصل عبر واتساب.');
+        throw new Error((data as { error?: string }).error || 'فشل إرسال طلب الاشتراك، يرجى التأكد من البيانات أو التواصل عبر واتساب.');
       }
 
-      onSubscriptionUpdated((data as { subscription: UserSubscription }).subscription);
-      setSuccessCelebration(true);
-      setTimeout(() => {
-        setSuccessCelebration(false);
-        setActiveTab('history');
-      }, 2500);
+      // SECURITY: the server only queues a payment for REVIEW — it never grants a
+      // paid tier here. Apply whatever the server returns (always the current
+      // tier) and tell the user the review is pending instead of faking success.
+      const nextSub = (data as { subscription?: UserSubscription }).subscription;
+      if (nextSub) onSubscriptionUpdated(nextSub);
+      setPendingReview(true);
+      setErrorMessage(null);
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : (language === 'ar' ? 'حدث خطأ أثناء الاتصال بالخادم.' : 'Server communication error.'));
     } finally {
@@ -212,8 +215,8 @@ export const SubscriptionModal = ({
               </div>
               <p className="text-xs text-slate-400">
                 {language === 'ar' 
-                  ? 'بناء غير محدود، تصدير الكود بالكامل، وتفعيل فوري عبر محفظة أورانج كاش' 
-                  : 'Unlimited AI generation, complete source code export, instant activation via Orange Cash'}
+                  ? 'بناء غير محدود، تصدير الكود بالكامل، وتفعيل عبر محفظة أورانج كاش بعد مراجعة التحويل' 
+                  : 'Unlimited AI generation, complete source code export, activation via Orange Cash after transfer review'}
               </p>
             </div>
           </div>
@@ -779,8 +782,8 @@ export const SubscriptionModal = ({
                       <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                       <span>
                         {language === 'ar'
-                          ? 'تحويل مباشر إلى 01207782741 وتفعيل تلقائي فوري'
-                          : 'Direct transfer to 01207782741 with instant activation'}
+                          ? 'تحويل مباشر إلى 01207782741 مع مراجعة يدوية سريعة'
+                          : 'Direct transfer to 01207782741 with quick manual review'}
                       </span>
                     </div>
 
@@ -792,12 +795,12 @@ export const SubscriptionModal = ({
                       {isSubmitting ? (
                         <>
                           <Sparkles className="w-4 h-4 animate-spin text-slate-950" />
-                          <span>{language === 'ar' ? 'جاري التحقق والتفعيل...' : 'Verifying & Activating...'}</span>
+                          <span>{language === 'ar' ? 'جاري إرسال طلب الاشتراك...' : 'Submitting your request...'}</span>
                         </>
                       ) : (
                         <>
                           <CheckCircle2 className="w-4 h-4 text-slate-950" />
-                          <span>{language === 'ar' ? 'تأكيد المعاملة وتفعيل الاشتراك الآن' : 'Confirm Reference & Activate Subscription'}</span>
+                          <span>{language === 'ar' ? 'تأكيد المعاملة وإرسال الطلب للمراجعة' : 'Confirm Reference & Submit for Review'}</span>
                         </>
                       )}
                     </button>
@@ -938,24 +941,31 @@ export const SubscriptionModal = ({
           )}
         </div>
 
-        {/* Success Celebration Overlay */}
-        {successCelebration && (
+        {/* Payment Submitted — awaiting manual review (NOT an activation) */}
+        {(successCelebration || pendingReview) && (
           <div className="absolute inset-0 bg-slate-950/95 z-50 flex flex-col items-center justify-center p-6 text-center animate-fadeIn">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-400 to-green-500 text-slate-950 flex items-center justify-center mb-4 shadow-xl shadow-emerald-500/30 animate-bounce">
-              <Check className="w-8 h-8 stroke-[3]" />
+            <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-slate-950 flex items-center justify-center mb-4 shadow-xl shadow-amber-500/30">
+              <Clock className="w-8 h-8 stroke-[3]" />
             </div>
             <h3 className="text-xl sm:text-2xl font-black text-white mb-2">
-              {language === 'ar' ? 'تم تأكيد المعاملة وتفعيل اشتراكك بنجاح! 🎉' : 'Payment Confirmed & Subscription Activated! 🎉'}
+              {language === 'ar' ? 'تم استلام طلبك وهو قيد المراجعة ✅' : 'Request Received — Under Review ✅'}
             </h3>
             <p className="text-xs sm:text-sm text-slate-300 max-w-md leading-relaxed mb-4">
-              {language === 'ar' 
-                ? `تم توثيق الرقم المرجعي للعملية وتفعيل باقة ${selectedPlan.nameAr} فورياً على حسابك. استمتع ببناء التطبيقات بلا حدود وتصدير الكود بالكامل!`
-                : `Your Orange Cash reference code has been verified and your subscription is now live. Enjoy unlimited generation and full export capabilities!`}
+              {language === 'ar'
+                ? `سجّلنا طلب باقة ${selectedPlan.nameAr} ورقم العملية. تتأكد إدارة المنصة من التحويل فعلياً قبل التفعيل، وسيتم تفعيل اشتراكك مباشرة بعد التأكد.`
+                : `We recorded your ${selectedPlan.nameEn} request and the transaction reference. The team verifies the transfer before activating, and your subscription goes live right after confirmation.`}
             </p>
             <div className="flex items-center gap-2 text-xs font-mono text-orange-400 bg-orange-500/10 px-3 py-1.5 rounded-xl border border-orange-500/30">
               <span>{language === 'ar' ? 'الرقم المرجعي:' : 'Reference:'}</span>
-              <strong>{transactionReference || 'EBNILI-ORANGE-VERIFIED'}</strong>
+              <strong>{transactionReference || '—'}</strong>
             </div>
+            <button
+              type="button"
+              onClick={() => { setPendingReview(false); setSuccessCelebration(false); setActiveTab('history'); }}
+              className="mt-5 px-5 py-2.5 rounded-xl bg-white text-slate-900 font-black text-xs sm:text-sm hover:bg-slate-100 transition cursor-pointer"
+            >
+              {language === 'ar' ? 'حسناً، شكراً' : 'Got it, thanks'}
+            </button>
           </div>
         )}
       </div>

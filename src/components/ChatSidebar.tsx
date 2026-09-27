@@ -541,8 +541,8 @@ export const ChatSidebar = ({
                 </p>
                 <p>
                   {language === 'ar'
-                    ? '2. أدخل الرقم المرجعي من رسالة التأكيد لتفعيل حسابك فورياً.'
-                    : '2. Submit your transaction reference code for instant activation.'}
+                    ? '2. أرسل الرقم المرجعي من رسالة التأكيد، وتتم مراجعة التحويل وتفعيل حسابك.'
+                    : '2. Submit your transaction reference; the transfer is verified and your account is activated.'}
                 </p>
               </div>
 
