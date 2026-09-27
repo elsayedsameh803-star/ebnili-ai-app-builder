@@ -1,0 +1,4 @@
+?? q.txt
+794f0e8 fix(auth): normalise Supabase base URL and guard against API-path redirects
+519bb08 fix(auth): strip /rest/v1 from the Supabase project URL
+409a546 fix(auth): broker Google/GitHub sign-in through Supabase
