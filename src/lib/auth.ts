@@ -26,6 +26,201 @@ export function isOwnerAccount(user: AuthUser | null | undefined): boolean {
  * cookie back through `/api/auth/me`.
  */
 
+/**
+ * Project export — turns the single-file generated app into a real, multi-file
+ * project that extracts as a normal ZIP (src files you can open in an editor,
+ * a package.json with working scripts, and a README).
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * Ebnily generates one standalone `index.html` (Tailwind CDN + inline <style>
+ * + inline <script>) so it can run inside the preview iframe. Zipping that
+ * verbatim produced an archive containing nothing but a web page, which is not
+ * what a "Download ZIP" button should deliver. Here the same HTML is decomposed
+ * into `index.html` + `src/styles.css` + `src/app.js` — functionally identical
+ * (classic script + relative paths, so it even opens straight off the
+ * filesystem) but a genuine source project.
+ *
+ * The DOM is parsed with the real `DOMParser` rather than regexes, so quoting,
+ * nested tags, and multiple style/script blocks are handled correctly.
+ */
+
+export interface ExportedProject {
+  /** Path inside the archive → file contents. */
+  files: Record<string, string>;
+  /** Folder name used at the archive root. */
+  rootDir: string;
+}
+
+/** Filesystem-safe, lowercase folder name. */
+export function slugify(name: string): string {
+  const slug = (name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-_]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return slug || 'ebnili-project';
+}
+
+/** The generated app always lands in `index.html`; fall back to any HTML file. */
+function pickPrimaryHtml(files: Record<string, string>): { html: string } | null {
+  const entries = Object.entries(files ?? {});
+  if (entries.length === 0) return null;
+
+  const byIndex = entries.find(([name]) => name.toLowerCase().endsWith('index.html'));
+  if (byIndex) return { html: String(byIndex[1] ?? '') };
+
+  const anyHtml = entries.find(
+    ([name, content]) => /\.html?$/i.test(name) && /<html/i.test(String(content ?? '')),
+  );
+  if (anyHtml) return { html: String(anyHtml[1] ?? '') };
+
+  const biggest = entries
+    .map(([, content]) => ({ html: String(content ?? '') }))
+    .sort((a, b) => b.html.length - a.html.length)[0];
+  return biggest || null;
+}
+
+/** Inline scripts that must stay inline to keep working (Babel, JSON-LD, modules). */
+function mustStayInline(script: HTMLScriptElement): boolean {
+  if (script.src) return true;
+  const type = (script.getAttribute('type') || '').toLowerCase();
+  return type !== '' && type !== 'text/javascript' && type !== 'application/javascript';
+}
+
+export function buildProjectExport(
+  projectName: string,
+  files: Record<string, string>,
+): ExportedProject {
+  const rootDir = slugify(projectName);
+  const primary = pickPrimaryHtml(files);
+  const out: Record<string, string> = {};
+  const p = (rel: string) => `${rootDir}/${rel}`;
+
+  const packageJson = {
+    name: rootDir,
+    private: true,
+    version: '1.0.0',
+    type: 'module',
+    description: `${projectName} — generated with Ebnili AI App Builder`,
+    scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+    devDependencies: { vite: '^5.4.0' },
+  };
+
+  const readme = [
+    `# ${projectName}`,
+    '',
+    'Generated with [Ebnili AI App Builder](https://ebnily.vercel.app).',
+    '',
+    '## Project structure',
+    '',
+    '```',
+    'index.html      page shell + CDN tags (Tailwind, fonts, icons)',
+    'src/styles.css  styles extracted from the generated document',
+    'src/app.js      application logic extracted from the generated document',
+    'vite.config.js  dev/build config',
+    '```',
+    '',
+    '## Run it',
+    '',
+    'Open `index.html` directly in a browser, or run a dev server:',
+    '',
+    '```bash',
+    'npm install',
+    'npm run dev',
+    '```',
+    '',
+  ].join('\n');
+
+  // No parseable document: fall back to dumping whatever files we were given.
+  if (!primary || !/<html|<body|<div/i.test(primary.html)) {
+    Object.entries(files ?? {}).forEach(([name, content]) => {
+      out[p(name)] = String(content ?? '');
+    });
+    out[p('package.json')] = JSON.stringify(packageJson, null, 2);
+    out[p('README.md')] = readme;
+    return { files: out, rootDir };
+  }
+
+  const doc = new DOMParser().parseFromString(primary.html, 'text/html');
+
+  // 1. Pull every inline <style> out into one stylesheet.
+  const cssParts: string[] = [];
+  Array.from(doc.querySelectorAll('style')).forEach((node) => {
+    const text = node.textContent?.trim();
+    if (text) cssParts.push(text);
+    node.remove();
+  });
+
+  // 2. Pull runnable inline <script> bodies out into one script file.
+  const jsParts: string[] = [];
+  Array.from(doc.querySelectorAll('script')).forEach((node) => {
+    if (mustStayInline(node as HTMLScriptElement)) return;
+    const text = node.textContent?.trim();
+    if (text) jsParts.push(text);
+    node.remove();
+  });
+
+  // 2b. Capture the document title, then drop the original <title> and
+  //     <meta charset> — the rebuilt shell supplies its own, so keeping the
+  //     originals would emit them twice.
+  const title = (doc.title || '').trim() || projectName;
+  Array.from(doc.querySelectorAll('title')).forEach((node) => node.remove());
+  Array.from(doc.querySelectorAll('meta[charset]')).forEach((node) => node.remove());
+
+  const bodyHtml = doc.body?.innerHTML?.trim() ?? '';
+  const headHtml = doc.head?.innerHTML?.trim() ?? '';
+  const htmlLang = doc.documentElement.getAttribute('lang') || 'en';
+  const dir = doc.documentElement.getAttribute('dir') || '';
+  const hasCss = cssParts.length > 0;
+  const hasJs = jsParts.length > 0;
+
+  // 3. Rebuild a clean shell. Classic (non-module) script + relative paths keep
+  //    the project working from a static host AND straight off the filesystem.
+  const indexHtml = [
+    '<!DOCTYPE html>',
+    `<html lang="${htmlLang}"${dir ? ` dir="${dir}"` : ''}>`,
+    '<head>',
+    '<meta charset="UTF-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+    `<title>${title.replace(/</g, '&lt;')}</title>`,
+    headHtml,
+    hasCss ? '<link rel="stylesheet" href="./src/styles.css" />' : '',
+    '</head>',
+    '<body>',
+    bodyHtml,
+    // Loaded at the end of the body so the DOM exists before it runs, which is
+    // where an inline script normally sits.
+    hasJs ? '<script src="./src/app.js"></script>' : '',
+    '</body>',
+    '</html>',
+    '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  out[p('index.html')] = indexHtml;
+  if (hasCss) out[p('src/styles.css')] = `${cssParts.join('\n\n')}\n`;
+  if (hasJs) out[p('src/app.js')] = `${jsParts.join('\n\n')}\n`;
+
+  out[p('vite.config.js')] = [
+    "import { defineConfig } from 'vite';",
+    '',
+    'export default defineConfig({',
+    '  server: { port: 3000, open: true },',
+    '});',
+    '',
+  ].join('\n');
+
+  out[p('package.json')] = `${JSON.stringify(packageJson, null, 2)}\n`;
+  out[p('README.md')] = readme;
+  out[p('.gitignore')] = 'node_modules\ndist\n.DS_Store\n';
+
+  return { files: out, rootDir };
+}
+
 export const AUTH_ERROR_MESSAGES: Record<string, { ar: string; en: string }> = {
   not_configured: {
     ar: 'طريقة الدخول غير مُهيأة على الخادم بعد. أضف مفاتيح OAuth من إعدادات Vercel.',

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Download, X, Copy, Check, FileArchive, Terminal, Code } from 'lucide-react';
 import JSZip from 'jszip';
 import { Language } from '../types';
+import { buildProjectExport, slugify } from '../lib/auth';
 
 interface ExportModalProps {
   projectName: string;
@@ -26,38 +27,15 @@ export const ExportModal = ({
   const handleDownloadZip = async () => {
     try {
       setIsZipping(true);
+      // Build a real multi-file project (index.html + src/styles.css +
+      // src/app.js + package.json + README) instead of zipping the single
+      // generated HTML page, which is what made the download look "broken".
+      const project = buildProjectExport(projectName, files);
       const zip = new JSZip();
 
-      // Add all project files
-      Object.entries(files).forEach(([fileName, content]) => {
-        zip.file(fileName, String(content));
+      Object.entries(project.files).forEach(([path, content]) => {
+        zip.file(path, content);
       });
-
-      // Add standard package.json
-      const packageJson = {
-        name: projectName.toLowerCase().replace(/\s+/g, '-'),
-        version: '1.0.0',
-        description: 'Generated with ابنيلي (Ibni-li) AI App Builder',
-        scripts: {
-          dev: 'vite',
-          build: 'vite build',
-          preview: 'vite preview',
-        },
-        dependencies: {
-          react: '^18.3.1',
-          'react-dom': '^18.3.1',
-          'lucide-react': '^0.400.0',
-        },
-        devDependencies: {
-          tailwindcss: '^3.4.0',
-          vite: '^5.0.0',
-        },
-      };
-      zip.file('package.json', JSON.stringify(packageJson, null, 2));
-
-      // Add README.md
-      const readme = `# ${projectName}\n\nThis application was generated using [ابنيلي AI App Builder](https://ibnili.app).\n\n## Getting Started\n\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n\nOpen http://localhost:3000 to preview.\n`;
-      zip.file('README.md', readme);
 
       // Generate blob — compression keeps large projects fast to build and small
       // to download. `streamFiles: true` is the default, but being explicit
@@ -70,14 +48,19 @@ export const ExportModal = ({
       const url = URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${projectName.toLowerCase().replace(/\s+/g, '-')}.zip`;
+      link.download = `${project.rootDir}.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      // Give the browser a tick to start the download before releasing the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       console.error('Export zip failed:', err);
-      alert('Failed to generate ZIP archive.');
+      alert(
+        language === 'ar'
+          ? 'تعذر إنشاء ملف ZIP. يرجى المحاولة مرة أخرى.'
+          : 'Failed to generate the ZIP archive. Please try again.',
+      );
     } finally {
       setIsZipping(false);
     }
@@ -182,9 +165,10 @@ export const ExportModal = ({
             <span>{language === 'ar' ? 'التشغيل المحلي عبر الطرفية:' : 'Terminal Quickstart:'}</span>
           </div>
           <pre className="font-mono text-[11px] text-slate-300 pt-1">
-            unzip {projectName.toLowerCase().replace(/\s+/g, '-')}.zip{'\n'}
-            npm install{'\n'}
-            npm run dev
+            unzip {slugify(projectName)}.zip
+            {'\n'}cd {slugify(projectName)}
+            {'\n'}npm install
+            {'\n'}npm run dev
           </pre>
         </div>
 
