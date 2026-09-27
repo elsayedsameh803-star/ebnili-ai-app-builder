@@ -644,7 +644,10 @@ CREATE TABLE records (
       />
 
       {/* Main Studio Body: Left Sidebar + Right Workspace */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+      {/* `min-h-0` on both wrappers is what lets the flex children actually
+          shrink: without it a column flex container refuses to shrink below
+          its content and the preview gets clipped off-screen on a phone. */}
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden relative">
         {/* Left Side: Copilot, Prompts, Files, History, Subscription */}
         <ChatSidebar
           messages={chatMessages}
@@ -665,7 +668,7 @@ CREATE TABLE records (
         />
 
         {/* Right Workspace: Preview, Code Editor, or Split View */}
-        <main className="flex-1 flex overflow-hidden relative">
+        <main className="flex-1 min-h-0 flex overflow-hidden relative">
           {viewMode === 'preview' && (
             <PreviewFrame
               code={project.code}

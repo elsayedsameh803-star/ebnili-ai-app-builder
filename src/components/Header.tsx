@@ -113,26 +113,30 @@ export const Header = ({
   };
 
   return (
-    <header className="h-14 bg-slate-900 text-slate-100 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 select-none z-20">
+    // MOBILE: the bar used to overflow sideways (the actions alone needed ~460px
+    // on a 375px phone), so half the controls were cut off / unreachable and the
+    // layout felt broken. It is now horizontally scrollable as a safety net, and
+    // the labels that do not fit are dropped below `sm` (see each button).
+    <header className="h-14 bg-slate-900 text-slate-100 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between gap-2 overflow-x-auto shrink-0 select-none z-20">
       {/* Left: Brand & Project Name */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink">
         <button
           onClick={onNewProject}
           title={language === 'ar' ? 'مشروع جديد' : 'New Project'}
-          className="flex items-center gap-2 group hover:opacity-90 transition cursor-pointer"
+          className="flex items-center gap-2 group hover:opacity-90 transition cursor-pointer shrink-0"
         >
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center shadow-md shadow-rose-500/20">
             <span className="text-white text-base font-bold">♥</span>
           </div>
-          <div className="flex flex-col text-left">
+          <div className="hidden sm:flex flex-col text-left">
             <span className="font-extrabold text-sm tracking-tight text-white flex items-center gap-1.5 font-['Cairo',sans-serif]">
-              إبنيلي <span className="text-[11px] text-slate-400 font-semibold hidden sm:inline">Ebnili</span>
+              إبنيلي <span className="text-[11px] text-slate-400 font-semibold hidden md:inline">Ebnili</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded bg-orange-500/20 text-orange-300 font-semibold border border-orange-500/30">AI</span>
             </span>
           </div>
         </button>
 
-        <div className="h-4 w-px bg-slate-800" />
+        <div className="h-4 w-px bg-slate-800 shrink-0" />
 
         {/* Project Name & Selector */}
         <div className="relative flex items-center gap-2">
@@ -150,7 +154,7 @@ export const Header = ({
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setIsEditingName(true)}
-                className="text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/80 px-2 py-1 rounded transition max-w-[170px] truncate"
+                className="text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/80 px-2 py-1 rounded transition max-w-[72px] sm:max-w-[170px] truncate"
                 title={language === 'ar' ? 'انقر لتغيير اسم المشروع' : 'Click to rename'}
               >
                 {projectName}
@@ -170,7 +174,7 @@ export const Header = ({
 
           {/* Projects Dropdown */}
           {showProjectsMenu && projects.length > 0 && (
-            <div className="absolute top-full left-0 mt-1.5 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1.5 space-y-1">
+            <div className="absolute top-full left-0 mt-1.5 w-60 max-w-[calc(100vw-1rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1.5 space-y-1">
               <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase">
                 {language === 'ar' ? 'مشاريعك المحفوظة' : 'Saved Projects'}
               </div>
@@ -207,12 +211,12 @@ export const Header = ({
           )}
 
           {isGenerating ? (
-            <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 animate-pulse">
+            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 animate-pulse shrink-0">
               <Sparkles className="w-3 h-3 animate-spin" />
               <span>{language === 'ar' ? 'جاري البناء...' : 'Building...'}</span>
             </span>
           ) : (
-            <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               <span>{language === 'ar' ? 'جاهز' : 'Ready'}</span>
             </span>
@@ -306,12 +310,13 @@ export const Header = ({
       </div>
 
       {/* Right: Actions */}
-      <div className="flex items-center gap-2">
-        {/* Gemini 3.8 Flash AI Studio Button */}
+      <div className="flex items-center gap-2 shrink-0">
+        {/* Gemini 3.8 Flash AI Studio Button — icon-only on phones (the full
+            studio is still one tap away from the chat sidebar). */}
         {onOpenGeminiStudio && (
           <button
             onClick={onOpenGeminiStudio}
-            className="flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-purple-600 via-rose-500 to-amber-500 hover:from-purple-500 hover:to-amber-400 px-3 py-1.5 rounded-lg shadow-sm shadow-purple-500/20 transition cursor-pointer border border-white/10"
+            className="flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-purple-600 via-rose-500 to-amber-500 hover:from-purple-500 hover:to-amber-400 px-2.5 sm:px-3 py-1.5 rounded-lg shadow-sm shadow-purple-500/20 transition cursor-pointer border border-white/10 shrink-0"
             title={language === 'ar' ? 'فتح استوديو الذكاء الاصطناعي المتطور' : 'Open Ebnili AI Studio'}
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin-slow" />
@@ -341,7 +346,8 @@ export const Header = ({
               title={language === 'ar' ? 'الترقية عبر محفظة Orange Cash (01207782741)' : 'Upgrade with Orange Cash (01207782741)'}
             >
               <Crown className="w-3.5 h-3.5 text-slate-950" />
-              <span>{language === 'ar' ? 'ترقية الباقة' : 'Upgrade'}</span>
+              <span className="sm:hidden">{language === 'ar' ? 'ترقية' : 'Upgrade'}</span>
+              <span className="hidden sm:inline">{language === 'ar' ? 'ترقية الباقة' : 'Upgrade'}</span>
               <span className="hidden lg:inline text-[10px] bg-slate-950/20 text-slate-950 px-1 rounded font-bold">Orange Cash</span>
             </button>
           )
@@ -373,7 +379,11 @@ export const Header = ({
             </button>
 
             {showUserMenu && (
-              <div className="absolute top-full left-0 mt-1.5 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1.5">
+              // Anchored to the RIGHT edge: the account button sits at the far
+              // right of the bar, so a left-anchored 240px panel ran off the
+              // right edge of a phone. The owner tools live in here, so it has
+              // to be reachable on small screens.
+              <div className="absolute top-full right-0 mt-1.5 w-60 max-w-[calc(100vw-1rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1.5">
                 <div className="px-2.5 py-2 border-b border-slate-800">
                   <div className="flex items-center gap-2.5">
                     {authUser.picture ? (
@@ -401,6 +411,49 @@ export const Header = ({
                     {authUser.provider === 'google' ? 'Google' : 'GitHub'}
                   </div>
                 </div>
+
+                {/* ── Owner-only tools ──────────────────────────────────────
+                    These live HERE, inside the account dropdown, and only for
+                    the site owner. They used to sit in the shared top bar,
+                    which exposed owner surfaces in front of ordinary users and
+                    ate the width a phone needs. `isOwner` is the server-issued
+                    flag — see `isOwnerAccount`. */}
+                {isOwner && (onOpenAdmin || onOpenIntegrations) && (
+                  <div className="mt-1 pt-1 border-t border-slate-800">
+                    <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                      {language === 'ar' ? 'أدوات المالك فقط' : 'Owner tools only'}
+                    </div>
+
+                    {onOpenAdmin && (
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onOpenAdmin();
+                        }}
+                        className="w-full text-right px-2.5 py-2 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/10 flex items-center gap-2 transition"
+                        title={language === 'ar' ? 'لوحة تحكم صاحب الموقع (إحصائيات وحماية الأجهزة)' : 'Owner admin dashboard'}
+                      >
+                        <Shield className="w-3.5 h-3.5 text-rose-400" />
+                        <span>{language === 'ar' ? 'لوحة المالك' : 'Owner admin panel'}</span>
+                      </button>
+                    )}
+
+                    {onOpenIntegrations && (
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onOpenIntegrations();
+                        }}
+                        className="w-full text-right px-2.5 py-2 rounded-lg text-xs font-bold text-slate-200 hover:bg-slate-800 flex items-center gap-2 transition"
+                        title={language === 'ar' ? 'قواعد البيانات والتكاملات' : 'Database & integrations'}
+                      >
+                        <Database className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>{language === 'ar' ? 'قاعدة البيانات والتكاملات' : 'Database & integrations'}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <button
                   onClick={() => {
                     setShowUserMenu(false);
@@ -429,29 +482,9 @@ export const Header = ({
           )
         )}
 
-        {/* Owner Admin Button — owner accounts only */}
-        {isOwner && onOpenAdmin && (
-          <button
-            onClick={onOpenAdmin}
-            className="flex items-center gap-1.5 text-xs text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/20 px-2.5 py-1.5 rounded-lg border border-rose-500/30 transition cursor-pointer"
-            title={language === 'ar' ? 'لوحة تحكم صاحب الموقع (إحصائيات حقيقية وحماية الأجهزة)' : 'Owner Admin Dashboard'}
-          >
-            <Shield className="w-3.5 h-3.5 text-rose-400" />
-            <span className="hidden md:inline font-bold">{language === 'ar' ? 'لوحة المالك' : 'Admin'}</span>
-          </button>
-        )}
-
-        {/* Integrations (Supabase / DB / Auth) — owner accounts only */}
-        {isOwner && (
-          <button
-            onClick={onOpenIntegrations}
-            className="hidden sm:flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-700/60 transition"
-            title={language === 'ar' ? 'قواعد البيانات والتكاملات' : 'Integrations & Supabase'}
-          >
-            <Database className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="hidden lg:inline">{language === 'ar' ? 'قاعدة البيانات' : 'Backend'}</span>
-          </button>
-        )}
+      {/* Owner tools are NOT in the top bar — see the account dropdown below.
+          A shared header must never carry owner surfaces in front of ordinary
+          users, and on a phone the bar has no room to spare anyway. */}
 
         {/* Export ZIP */}
         <button
@@ -469,22 +502,24 @@ export const Header = ({
           className="flex items-center gap-1.5 text-xs font-bold text-white bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 px-3 py-1.5 rounded-lg shadow-sm shadow-rose-600/30 transition cursor-pointer"
         >
           <Share2 className="w-3.5 h-3.5" />
-          <span>{language === 'ar' ? 'نشر ومشاركة' : 'Publish'}</span>
+          <span className="sm:hidden">{language === 'ar' ? 'نشر' : 'Publish'}</span>
+          <span className="hidden sm:inline">{language === 'ar' ? 'نشر ومشاركة' : 'Publish'}</span>
         </button>
 
         {/* Language switch */}
         <button
           onClick={onToggleLanguage}
-          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition shrink-0"
           title={language === 'ar' ? 'Switch to English' : 'التحويل للعربية'}
         >
           <Globe className="w-4 h-4" />
         </button>
 
-        {/* New Project Quick Button */}
+        {/* New Project Quick Button — the brand button already starts a new
+            project, so this duplicate is dropped on the narrowest screens. */}
         <button
           onClick={onNewProject}
-          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+          className="hidden sm:inline-flex p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition shrink-0"
           title={language === 'ar' ? 'بدء مشروع جديد' : 'New Project'}
         >
           <Plus className="w-4 h-4" />

@@ -166,12 +166,17 @@ export const PreviewFrame = ({
   }, [code, isInspectMode, refreshKey]);
 
   // Determine viewport styles based on deviceMode
+  //
+  // MOBILE: the frames carry fixed pixel sizes (375×720 / 768px) that are
+  // larger than a phone's remaining space, so the preview was being clipped
+  // and looked blank. `max-w-full max-h-full` lets the frame shrink into
+  // whatever space is actually available instead of overflowing it.
   const getDeviceStyles = () => {
     switch (deviceMode) {
       case 'mobile':
-        return 'w-[375px] h-[720px] rounded-[36px] border-8 border-slate-800 shadow-2xl overflow-hidden';
+        return 'w-[375px] max-w-full h-[720px] max-h-full rounded-[24px] sm:rounded-[36px] border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
       case 'tablet':
-        return 'w-[768px] h-[86%] rounded-2xl border-8 border-slate-800 shadow-2xl overflow-hidden';
+        return 'w-[768px] max-w-full h-[86%] max-h-full rounded-xl sm:rounded-2xl border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
       case 'desktop':
       default:
         return 'w-full h-full rounded-none border-0';
@@ -199,7 +204,9 @@ export const PreviewFrame = ({
         </div>
 
         {/* Address Bar */}
-        <div className="flex-1 max-w-md mx-4 bg-slate-950 px-3 py-1 rounded-md border border-slate-800 text-center font-mono text-[11px] text-slate-300 flex items-center justify-between">
+        {/* Address Bar — hidden on phones: the mock chrome around it is wider
+            than a 375px screen, and every pixel belongs to the preview. */}
+        <div className="hidden sm:flex flex-1 max-w-md mx-4 bg-slate-950 px-3 py-1 rounded-md border border-slate-800 text-center font-mono text-[11px] text-slate-300 items-center justify-between">
           <span className="text-emerald-400 text-xs">🔒</span>
           <span className="truncate">https://ibnili-preview.dev/live-app</span>
           <button

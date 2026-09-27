@@ -156,7 +156,11 @@ export const ChatSidebar = ({
   };
 
   return (
-    <aside className="w-full md:w-96 lg:w-[410px] bg-slate-900 border-r border-slate-800 flex flex-col h-full shrink-0 select-none text-slate-200">
+    // MOBILE: `h-full` here used to swallow the whole screen — the chat column
+    // took 100% width AND 100% height, so the preview was pushed completely out
+    // of view on a phone. It now takes a fixed slice of the height on small
+    // screens and returns to full height from `md` up (side-by-side layout).
+    <aside className="w-full md:w-96 lg:w-[410px] bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col h-[45%] md:h-full min-h-0 shrink-0 select-none text-slate-200">
       {/* Sidebar Header Tabs */}
       <div className="flex items-center border-b border-slate-800 bg-slate-950 px-2 pt-2">
         <button
