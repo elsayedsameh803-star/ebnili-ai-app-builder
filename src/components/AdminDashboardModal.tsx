@@ -385,12 +385,24 @@ export const AdminDashboardModal = ({
     }
   };
 
-  const handleUpdateTransactionStatus = async (txId: string, status: 'confirmed' | 'rejected') => {
+  // SECURITY: approving a payment is the ONLY way a paid tier is granted, so the
+  // customer's email MUST travel with the request — the server mints the signed
+  // plan grant for that address and nothing else.
+  const handleUpdateTransactionStatus = async (
+    txId: string,
+    status: 'confirmed' | 'rejected',
+    customerEmail?: string,
+    tier?: string,
+  ) => {
     try {
+      if (status === 'confirmed' && !customerEmail) {
+        showToast('لا يوجد بريد مسجل لهذه المعاملة — لا يمكن التفعيل بدونه');
+        return;
+      }
       const res = await fetch('/api/admin/transaction/update-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactionId: txId, status }),
+        body: JSON.stringify({ transactionId: txId, status, email: customerEmail, tier }),
       });
       if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
@@ -398,6 +410,8 @@ export const AdminDashboardModal = ({
         if (data.transaction) setTransactions(prev => prev.map(t => t.id === txId ? data.transaction : t));
         fetchAdminData();
         showToast(status === 'confirmed' ? 'تم تأكيد وتفعيل المعاملة بنجاح' : 'تم رفض المعاملة');
+      } else {
+        showToast((data as { error?: string; message?: string }).error || 'تعذّر تنفيذ العملية');
       }
     } catch (err) {
       console.error(err);
@@ -904,7 +918,7 @@ export const AdminDashboardModal = ({
                               {tx.status !== 'confirmed' ? (
                                 <div className="flex items-center justify-center gap-1.5">
                                   <button
-                                    onClick={() => handleUpdateTransactionStatus(tx.id, 'confirmed')}
+                                    onClick={() => handleUpdateTransactionStatus(tx.id, 'confirmed', tx.userEmail, tx.planId)}
                                     className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold transition"
                                   >
                                     تأكيد وتفعيل

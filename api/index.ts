@@ -67,6 +67,14 @@ const DEFAULT_SUBSCRIPTION = {
 // the owner through POST /api/admin/transaction/update-status (admin session
 // required), which mints the signed `ebnili_plan` grant cookie this endpoint
 // reads. The client treats the server response as authoritative.
+
+/** Site owner — always full access, no payment needed. */
+const OWNER_EMAIL = "elsayedsameh803@gmail.com";
+
+function isOwnerAccount(session: AuthUser | null): boolean {
+  return Boolean(session) && String(session?.email ?? "").toLowerCase() === OWNER_EMAIL;
+}
+
 function subscriptionPayload(grant: { email: string; tier: "pro" | "business" } | null) {
   const paid = grant
     ? {
@@ -89,9 +97,35 @@ function subscriptionPayload(grant: { email: string; tier: "pro" | "business" } 
   };
 }
 
+/** Highest tier shape, used for the owner account. */
+function ownerSubscription() {
+  return {
+    ...DEFAULT_SUBSCRIPTION,
+    tier: "business" as const,
+    status: "active" as const,
+    planName: "Business",
+    generationsLimitToday: 99999,
+    canExportZip: true,
+    canDeployCustomDomain: true,
+    priorityAiModel: true,
+    activatedAt: new Date().toISOString(),
+  };
+}
+
 app.get("/api/subscriptions/current", (req: Request, res: Response) => {
-  // A grant only counts for the account it was issued to.
+  // The owner account needs no grant cookie.
   const session = readAuthSession(req);
+  if (isOwnerAccount(session)) {
+    res.json({
+      success: true,
+      subscription: ownerSubscription(),
+      orangeWalletNumber: "01207782741",
+      supportWhatsappNumber: "01207782741",
+    });
+    return;
+  }
+
+  // A grant only counts for the account it was issued to.
   const grant = readPlanGrant(req);
   const entitled =
     grant && session && session.email.toLowerCase() === grant.email ? grant : null;
