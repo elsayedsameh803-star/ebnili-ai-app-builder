@@ -16,7 +16,7 @@ import { AuthModal } from './components/AuthModal';
 import { AuthGate } from './components/AuthGate';
 import { WhatsAppSupportButton } from './components/WhatsAppSupportButton';
 import { getDeviceFingerprint } from './utils/fingerprint';
-import { fetchCurrentUser, logout as authLogout } from './lib/auth';
+import { fetchCurrentUser, logout as authLogout, isOwnerAccount } from './lib/auth';
 import { 
   AppProject, 
   ChatMessage, 
@@ -86,6 +86,11 @@ export default function App() {
     await authLogout();
     setAuthUser(null);
   }, []);
+
+  // Owner-only surfaces (admin panel, backend/database console). The verdict is
+  // the server's — see `isOwnerAccount` — and it gates both the header buttons
+  // and the modals themselves, so an ordinary user never mounts them at all.
+  const isOwner = isOwnerAccount(authUser);
 
   // Subscription State with Orange Cash support
   const [subscription, setSubscription] = useState<UserSubscription>({
@@ -741,8 +746,8 @@ CREATE TABLE records (
         />
       )}
 
-      {/* Backend & Supabase Integrations Modal */}
-      {showIntegrations && (
+      {/* Backend & Supabase Integrations Modal — owner only */}
+      {isOwner && showIntegrations && (
         <IntegrationsModal
           onClose={() => setShowIntegrations(false)}
           language={language}
@@ -759,12 +764,14 @@ CREATE TABLE records (
         />
       )}
 
-      {/* Owner Admin Dashboard Modal */}
-      <AdminDashboardModal
-        isOpen={showAdminDashboard}
-        onClose={() => setShowAdminDashboard(false)}
-        language={language}
-      />
+      {/* Owner Admin Dashboard Modal — owner only */}
+      {isOwner && (
+        <AdminDashboardModal
+          isOpen={showAdminDashboard}
+          onClose={() => setShowAdminDashboard(false)}
+          language={language}
+        />
+      )}
 
       {/* Google / GitHub sign-in modal */}
       <AuthModal

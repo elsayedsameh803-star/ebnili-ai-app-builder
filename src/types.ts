@@ -145,6 +145,12 @@ export interface AuthUser {
   email: string;
   picture: string;
   provider: AuthProviderId;
+  /**
+   * Decided by the SERVER (`/api/auth/me`) from the signed session cookie.
+   * Only ever `true` for the site owner — the browser cannot grant it to
+   * itself, and the owner's address is not part of the public bundle.
+   */
+  isOwner?: boolean;
 }
 
 export interface AuthProviderInfo {

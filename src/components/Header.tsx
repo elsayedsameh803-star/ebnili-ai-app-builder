@@ -83,8 +83,10 @@ export const Header = ({
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
-  // Owner-only controls (admin dashboard, backend console) stay hidden from
-  // ordinary users. Server-side `requireAdmin` remains the real boundary.
+  // Owner-only controls (admin dashboard, backend/database console) stay hidden
+  // from ordinary users. `authUser.isOwner` is stamped by the server on
+  // `/api/auth/me`, so the browser cannot talk its way into these buttons —
+  // and server-side `requireAdmin` remains the real boundary.
   const isOwner = isOwnerAccount(authUser);
 
   // Close the account dropdown on any outside click.

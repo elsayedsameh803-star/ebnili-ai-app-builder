@@ -49,7 +49,10 @@ const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   autoVerificationEnabled: true,
   supportWhatsappNumber: '01207782741',
   siteName: 'إبنيلي | Ebnili AI Studio',
-  adminEmail: 'elsayedsameh803@gmail.com',
+  // Placeholder only. This object ships to EVERY visitor inside the public JS
+  // bundle, so the owner's address must never be hard-coded here — the real
+  // value arrives from `/api/admin/overview`, which is owner-session only.
+  adminEmail: '',
 };
 
 const normalizeAdminSettings = (value: unknown, previous?: AdminSettings | null): AdminSettings => {

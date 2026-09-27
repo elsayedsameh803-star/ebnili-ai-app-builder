@@ -3,19 +3,18 @@ import type { AuthProviderId, AuthProviderInfo, AuthUser } from '../types';
 /**
  * OWNER-ONLY UI GATING
  * ────────────────────
- * The header exposes a few controls that belong to the site owner and must not
+ * The header exposes a few controls that belong to the site owner and must never
  * be shown to ordinary users (owner dashboard, backend/database console, …).
- * Hiding them in the client is a UX measure, NOT a security boundary: the real
- * protection lives on the server, where every admin route requires a valid
- * owner session (see `requireAdmin` in `api/index.ts`). The account check below
- * is only so the buttons do not appear to everyone.
+ *
+ * The decision is made by the SERVER: `/api/auth/me` verifies the signed session
+ * cookie and stamps `user.isOwner` on the response. Nothing about the owner's
+ * identity is hard-coded here, so the public bundle no longer leaks the address,
+ * and the flag cannot be forged by editing client state. The real protection
+ * still lives on the server, where every admin route requires a valid owner
+ * session (see `requireAdmin` in `api/index.ts`).
  */
-const OWNER_EMAILS = ['elsayedsameh803@gmail.com'];
-
-/** True when the signed-in account is the site owner. */
 export function isOwnerAccount(user: AuthUser | null | undefined): boolean {
-  const email = (user?.email ?? '').trim().toLowerCase();
-  return Boolean(email) && OWNER_EMAILS.includes(email);
+  return user?.isOwner === true;
 }
 
 /**
@@ -309,8 +308,15 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
   try {
     const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
     if (!res.ok) return null;
-    const data = (await res.json()) as { authenticated?: boolean; user?: AuthUser | null };
-    return data.authenticated && data.user ? data.user : null;
+    const data = (await res.json()) as {
+      authenticated?: boolean;
+      user?: AuthUser | null;
+      isOwner?: boolean;
+    };
+    if (!data.authenticated || !data.user) return null;
+    // The owner verdict comes from the server: prefer the flag on the session
+    // object, fall back to the top-level one. Never re-derive it here.
+    return { ...data.user, isOwner: data.user.isOwner === true || data.isOwner === true };
   } catch {
     return null;
   }

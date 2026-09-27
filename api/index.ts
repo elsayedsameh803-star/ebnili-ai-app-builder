@@ -68,11 +68,20 @@ const DEFAULT_SUBSCRIPTION = {
 // required), which mints the signed `ebnili_plan` grant cookie this endpoint
 // reads. The client treats the server response as authoritative.
 
-/** Site owner — always full access, no payment needed. */
-const OWNER_EMAIL = "elsayedsameh803@gmail.com";
+/**
+ * Site owner — always full access, no payment needed.
+ * Resolved once, on the server, so the address is never shipped to the browser
+ * and never has to be edited in (and redeployed) to change who owns the site.
+ */
+const OWNER_EMAIL = (
+  process.env.SITE_OWNER_EMAIL || process.env.OWNER_EMAIL || "elsayedsameh803@gmail.com"
+)
+  .trim()
+  .toLowerCase();
 
 function isOwnerAccount(session: AuthUser | null): boolean {
-  return Boolean(session) && String(session?.email ?? "").toLowerCase() === OWNER_EMAIL;
+  if (!session || !OWNER_EMAIL) return false;
+  return String(session?.email ?? "").trim().toLowerCase() === OWNER_EMAIL;
 }
 
 function subscriptionPayload(grant: { email: string; tier: "pro" | "business" } | null) {
@@ -804,9 +813,20 @@ app.get("/api/auth/providers", (_req: AuthReq, res: AuthRes) => {
 });
 
 // Who am I? Returns `{ authenticated: false }` for guests — never an error.
+//
+// `isOwner` is decided HERE, on the server, from the signed session cookie —
+// never in the browser. Owner-only controls (admin dashboard, backend/database
+// console) read this flag, so they stay out of every ordinary user's header and
+// the flag cannot be forged by editing client state. The owner's email address
+// is deliberately absent from the public JS bundle.
 app.get("/api/auth/me", (req: AuthReq, res: AuthRes) => {
   const user = readAuthSession(req);
-  res.json({ success: true, authenticated: Boolean(user), user });
+  res.json({
+    success: true,
+    authenticated: Boolean(user),
+    user: user ? { ...user, isOwner: isOwnerAccount(user) } : null,
+    isOwner: isOwnerAccount(user),
+  });
 });
 
 app.post("/api/auth/logout", (_req: AuthReq, res: AuthRes) => {
