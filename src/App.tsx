@@ -126,40 +126,59 @@ export default function App() {
   }, [language]);
 
   const [currentPlanSteps, setCurrentPlanSteps] = useState<string[]>([]);
+  // Prompt of the last generation that failed, so the chat can offer a real
+  // "try again" instead of making the user retype a long specification.
+  const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
 
   // Active Project State
   const [project, setProject] = useState<AppProject>(() => {
+    // This used to be a hard-coded white page that simply said "Preview". After
+    // a failed generation the user was left staring at it and reasonably
+    // concluded the builder "made a fake site". The studio now starts on an
+    // honest empty state that asks for the first prompt.
     const initialCode = `<!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Preview</title>
+  <title>ابدأ مشروعك</title>
   <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background-color: #ffffff;
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+      background: #020617;
+      color: #e2e8f0;
+      font-family: "Cairo", system-ui, -apple-system, sans-serif;
+      padding: 24px;
+      text-align: center;
     }
-    .preview-text {
-      font-size: 2.25rem;
-      font-weight: 700;
-      color: #334155;
-      letter-spacing: -0.02em;
-      user-select: none;
+    .wrap { max-width: 520px; }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      letter-spacing: .08em;
+      color: #fda4af;
+      border: 1px solid #fb7185;
+      background: rgba(244,63,94,.1);
+      border-radius: 999px;
+      padding: 4px 12px;
+      margin-bottom: 18px;
     }
+    h1 { font-size: 26px; font-weight: 800; margin-bottom: 12px; }
+    p { font-size: 14px; line-height: 1.9; color: #94a3b8; }
+    .hint { margin-top: 18px; font-size: 12px; color: #64748b; }
   </style>
 </head>
 <body>
-  <div class="preview-text">Preview</div>
+  <div class="wrap">
+    <span class="badge">لم يتم توليد أي موقع بعد</span>
+    <h1>اكتب فكرتك في مربع المحادثة</h1>
+    <p>صف الموقع أو التطبيق اللي تريده بالتفصيل — الصفحات، الألوان، المحتوى، والتفاعلات — وسيتم بناء موقع حقيقي يعمل داخل هذه المعاينة.</p>
+    <p class="hint">لا يوجد محتوى تجريبي مسبق — كل ما تراه هنا سيأتي من الذكاء الاصطناعي.</p>
+  </div>
 </body>
 </html>`;
 
@@ -265,6 +284,8 @@ CREATE TABLE records (
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setChatMessages((prev) => [...prev, assistantMsg]);
+        // Keep the prompt around so the chat can offer a one-tap retry.
+        setLastFailedPrompt(prompt);
         // Only open the subscription modal for quota errors, not server/key errors.
         if (/QUOTA|quota|استنفذت|الرصيد/.test(errorMsg)) setShowSubscription(true);
         return;
@@ -319,12 +340,14 @@ CREATE TABLE records (
       const assistantMsg: ChatMessage = {
         id: String(Date.now() + 1),
         sender: 'assistant',
-        text: (data as { explanation?: string }).explanation || (language === 'ar' ? 'تم إنشاء التطبيق بنجاح!' : 'App generated successfully!'),
+        text: (data as { explanation?: string }).explanation || (language === 'ar' ? 'تم إنشاء الموقع بنجاح!' : 'Website generated successfully!'),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         versionTag: newVersionNum,
         plan: (data as { plan?: string[] }).plan || currentPlanSteps,
       };
       setChatMessages((prev) => [...prev, assistantMsg]);
+      // The site really exists now — drop the retry affordance.
+      setLastFailedPrompt(null);
     } catch (err) {
       console.error(err);
       const networkMsg: ChatMessage = {
@@ -336,6 +359,7 @@ CREATE TABLE records (
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setChatMessages((prev) => [...prev, networkMsg]);
+      setLastFailedPrompt(prompt);
     } finally {
       setIsGenerating(false);
       setCurrentPlanSteps([]);
@@ -424,6 +448,23 @@ CREATE TABLE records (
         };
         setChatMessages((prev) => [...prev, assistantMsg]);
         setShowSubscription(true);
+        return;
+      }
+
+      // The server tells us honestly whether the edit really happened. When the
+      // AI engine is unavailable it returns `applied: false` with the ORIGINAL
+      // code — we surface that message and keep the project untouched instead
+      // of announcing a change that never occurred.
+      if ((data as { applied?: boolean }).applied === false) {
+        const notApplied: ChatMessage = {
+          id: String(Date.now() + 1),
+          sender: 'assistant',
+          text: (data as { explanation?: string }).explanation
+            || (language === 'ar' ? '⚠️ لم يتم تطبيق التعديل.' : '⚠️ Change not applied.'),
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setChatMessages((prev) => [...prev, notApplied]);
+        setLastFailedPrompt(prompt);
         return;
       }
 
@@ -665,6 +706,10 @@ CREATE TABLE records (
           subscription={subscription}
           onOpenSubscription={() => setShowSubscription(true)}
           onOpenGeminiStudio={() => setShowGeminiStudio(true)}
+          retryPrompt={lastFailedPrompt}
+          onRetryPrompt={() => {
+            if (lastFailedPrompt) handleStartProject(lastFailedPrompt);
+          }}
         />
 
         {/* Right Workspace: Preview, Code Editor, or Split View */}

@@ -1106,28 +1106,64 @@ function getGeminiClient(): GoogleGenAI | null {
 // Model priority is based on the official Gemini model catalogue and live
 // production behaviour. Keep concrete stable IDs instead of relying on a
 // moving alias: the alias can be unavailable for a particular API key.
-//   gemini-3.5-flash     → stable, fast, and strong for coding workflows
-//   gemini-3.5-flash-lite → stable low-latency fallback for text generation
-//   gemini-3.8-flash     → newest flagship Flash, kept after the stable 3.5
-//   gemini-flash-latest  → official hot-swapped alias
-//   gemini-3.7-flash     → previous-generation stable coding model
-//   gemini-3.6-flash     → last-resort stable model (can be slower)
-// gemini-2.5-flash remains excluded because the production key received a
-// 404 "no longer available to new users" response on 2026-09-24.
+//   gemini-3.5-flash      → primary: stable, fast, strong for coding
+//   gemini-3.5-flash-lite → low-latency fallback for the same generation
+//   gemini-flash-latest   → official hot-swapped alias
+//   gemini-3.8-flash      → newest flagship Flash
+//   gemini-2.5-flash      → the most widely provisioned stable model; a 404 on
+//                          this one means the key cannot reach the 3.x family
+//   gemini-2.5-flash-lite → last low-cost resort
+//   gemini-3.7 / 3.6      → previous-generation stable models
+// Anything the key cannot reach answers 404 and is dropped immediately
+// (classifyModelError → "permanent"), so listing extra candidates is free.
 const CANDIDATE_MODELS = [
   "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
-  "gemini-3.8-flash",
   "gemini-flash-latest",
+  "gemini-3.8-flash",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
   "gemini-3.7-flash",
   "gemini-3.6-flash",
 ];
 
-// Keep the whole function below Vercel's 60-second limit with room for the
-// response to be serialized. A complete HTML document is more likely to finish
-// on the primary model, while a low-latency fallback gets a shorter slice.
-const GEMINI_TOTAL_BUDGET_MS = 45_000;
-const GEMINI_ATTEMPT_TIMEOUT_MS = 18_000;
+// TIME BUDGETS — this is what made "big prompts" fail 100% of the time.
+//
+// A complete single-file application is a 40k–120k token answer. The old
+// settings were 18s per attempt inside a 45s total budget, and vercel.json
+// capped the whole function at 60s. Two models ate 36s and "timed out" while
+// they were still generating, the rest answered 503 "high demand", and the
+// request always ended as HTTP 502 — for a two-word prompt as well as for a
+// full specification. The budgets below match what the function is actually
+// allowed to run (see `maxDuration` in vercel.json), leaving room for a real
+// answer plus a second attempt, and the text-only studio endpoints keep a
+// shorter slice because they never return a document.
+const GENERATE_BUDGET_MS = 240_000;
+const GENERATE_ATTEMPT_TIMEOUT_MS = 75_000;
+const REFINE_BUDGET_MS = 180_000;
+const REFINE_ATTEMPT_TIMEOUT_MS = 70_000;
+const STUDIO_BUDGET_MS = 120_000;
+const STUDIO_ATTEMPT_TIMEOUT_MS = 45_000;
+
+// Never let a document get cut off mid-file: an unterminated HTML string used
+// to reach the browser as a blank/broken preview. A high ceiling keeps big
+// specifications in one answer instead of silently truncating them.
+const DOCUMENT_MAX_OUTPUT_TOKENS = 65_536;
+
+// "Accept any text in the input box" without letting a pasted 2MB essay
+// exceed the request budget: the head and the tail are kept (a specification
+// states its goal first and its constraints last) and the middle is elided.
+const MAX_PROMPT_CHARS = 40_000;
+const MAX_CURRENT_CODE_CHARS = 120_000;
+
+function boundText(text: string, maxChars: number, elisionNote: string): string {
+  const t = (text || "").trim();
+  if (t.length <= maxChars) return t;
+  const headChars = Math.floor(maxChars * 0.75);
+  const tailChars = maxChars - headChars;
+  const dropped = t.length - maxChars;
+  return `${t.slice(0, headChars)}\n\n[${elisionNote}: ${dropped} characters elided]\n\n${t.slice(-tailChars)}`;
+}
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1159,8 +1195,26 @@ function classifyModelError(raw: string): "permanent" | "timeout" | "transient" 
   return "transient";
 }
 
-async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruction?: string) {
-  const deadline = Date.now() + GEMINI_TOTAL_BUDGET_MS;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+interface GeminiCallOptions {
+  /** Total wall-clock the whole call (all models, all passes) may take. */
+  budgetMs?: number;
+  /** Per-model attempt ceiling. */
+  attemptTimeoutMs?: number;
+  /** Output ceiling — raise it for document-producing calls. */
+  maxOutputTokens?: number;
+}
+
+async function generateWithGemini(
+  ai: GoogleGenAI,
+  prompt: string,
+  systemInstruction?: string,
+  options: GeminiCallOptions = {},
+) {
+  const budgetMs = options.budgetMs ?? GENERATE_BUDGET_MS;
+  const attemptTimeoutMs = options.attemptTimeoutMs ?? GENERATE_ATTEMPT_TIMEOUT_MS;
+  const deadline = Date.now() + budgetMs;
   const failures: string[] = [];
   const deadModels = new Set<string>();
   const retryableModels = new Set<string>();
@@ -1187,16 +1241,25 @@ async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruc
 
       attempted = true;
       attempts.set(model, (attempts.get(model) ?? 0) + 1);
-      const attemptTimeout = Math.min(remaining, GEMINI_ATTEMPT_TIMEOUT_MS);
+      // Never start an attempt we cannot finish: leave room for the response to
+      // travel, and never let a retry begin with a fraction of a second left.
+      const usable = remaining - 1_500;
+      if (usable < 2_000) {
+        failures.push(`budget exhausted before ${model}`);
+        break;
+      }
+      const attemptTimeout = Math.min(usable, attemptTimeoutMs);
       const usesThinkingLevel = model === "gemini-3.5-flash" || model === "gemini-3.5-flash-lite";
       // `low` is supported by both stable 3.5 Flash variants. Avoid changing
       // the shared config when there is no system instruction.
       const config: {
         systemInstruction?: string;
         thinkingConfig?: { thinkingLevel: ThinkingLevel };
+        maxOutputTokens?: number;
       } = {
         ...(systemInstruction ? { systemInstruction } : {}),
         ...(usesThinkingLevel ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+        ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
       };
 
       try {
@@ -1231,11 +1294,14 @@ async function generateWithGemini(ai: GoogleGenAI, prompt: string, systemInstruc
         retryableModels.has(model) &&
         (attempts.get(model) ?? 0) < MAX_ATTEMPTS_PER_MODEL,
     );
-    if (!attempted || !canRetry || deadline - Date.now() <= 0) break;
+    if (!attempted || !canRetry || deadline - Date.now() <= 2_000) break;
 
-    // Leave two seconds for JSON serialization and the Vercel response itself.
-    const pause = Math.min(700 * pass, Math.max(0, deadline - Date.now() - 2_000));
-    if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
+    // A 429/503 "high demand" clears on its own within seconds. Rushing the
+    // second pass used to burn the whole budget and fail anyway; a short,
+    // deadline-aware pause is what actually makes the retry worth taking.
+    // Two seconds are always left for JSON serialization and the Vercel reply.
+    const pause = Math.min(2_500 * pass, Math.max(0, deadline - Date.now() - 2_000));
+    if (pause > 0) await sleep(pause);
   }
 
   const detail = failures.join(" | ").slice(0, 1800);
@@ -1330,43 +1396,51 @@ function normalizeRefinedHtml(raw: string): string {
   return "";
 }
 
-// Deterministic local refinement used whenever the AI call cannot complete
-// (missing key, model failure, timeout, empty reply). Mirrors server.ts so
-// /api/ai/refine-app always answers 200 with usable code — never 500.
-function applyLocalRefinement(html: string, prompt: string, selectedElement?: SelectedElementContext): string {
-  let updated = html;
-  const p = prompt.toLowerCase();
+// NOTE: the old `applyLocalRefinement()` (a regex colour-swap) used to live
+// here as the refine-app fallback. It rewrote Tailwind classes and then the
+// endpoint reported "تم التعديل" — a cosmetic change dressed up as a real
+// edit, which is exactly the "fake result" complaint. The fallback now returns
+// the untouched original code with `applied: false` and says so.
 
-  if (p.includes("dark") || p.includes("داكن") || p.includes("اسود") || p.includes("دارك")) {
-    if (!updated.includes("class=\"dark\"")) {
-      updated = updated.replace(/<body([^>]*)class="([^"]*)"/i, '<body$1class="$2 bg-slate-900 text-white"');
-      updated = updated.replace(/bg-white/g, "bg-slate-800 text-slate-100");
-      updated = updated.replace(/bg-slate-50/g, "bg-slate-900 text-slate-100");
-      updated = updated.replace(/border-slate-200/g, "border-slate-700");
-    }
+// Turn whatever came back into a document the browser can actually run.
+// `stripToCode` cuts at the first `</html>`; when a long generation was cut off
+// before its closing tag we close the file instead of shipping a half page
+// (which used to render as an empty preview — a "fake" result).
+function repairDocument(raw: string): string {
+  let out = stripToCode(raw);
+  if (!out) return "";
+  if (!/<html[\s>]/i.test(out)) {
+    out =
+      `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n` +
+      `<meta name="viewport" content="width=device-width, initial-scale=1.0">\n</head>\n<body>\n${out}`;
+  } else if (!/<!DOCTYPE/i.test(out)) {
+    out = `<!DOCTYPE html>\n${out}`;
   }
+  if (!/<\/body>/i.test(out)) out += "\n</body>";
+  if (!/<\/html>/i.test(out)) out += "\n</html>";
+  return out;
+}
 
-  if (p.includes("ازرق") || p.includes("blue")) {
-    updated = updated.replace(/bg-emerald-\d+|bg-indigo-\d+|bg-violet-\d+|bg-rose-\d+/g, "bg-blue-600");
-    updated = updated.replace(/text-emerald-\d+|text-indigo-\d+|text-violet-\d+|text-rose-\d+/g, "text-blue-600");
-  } else if (p.includes("اخضر") || p.includes("green")) {
-    updated = updated.replace(/bg-blue-\d+|bg-indigo-\d+|bg-violet-\d+|bg-rose-\d+/g, "bg-emerald-600");
-    updated = updated.replace(/text-blue-\d+|text-indigo-\d+|text-violet-\d+|text-rose-\d+/g, "text-emerald-600");
-  } else if (p.includes("بنفسجي") || p.includes("purple") || p.includes("violet")) {
-    updated = updated.replace(/bg-blue-\d+|bg-emerald-\d+|bg-indigo-\d+/g, "bg-purple-600");
-  }
-
-  if (selectedElement?.text && selectedElement.text.trim()) {
-    const targetText = selectedElement.text.trim();
-    if (p.includes("غير النص") || p.includes("change text") || p.includes("سميه") || p.includes("to ")) {
-      const matchNewText = prompt.match(/(?:to|الي|إلى|سميه)\s*["'«]?([^"'»\n]+)["'»]?/i);
-      if (matchNewText && matchNewText[1]) {
-        updated = updated.replace(targetText, matchNewText[1].trim());
-      }
-    }
-  }
-
-  return updated;
+// Owner-facing message. The model diagnostics stay in `debug` (never shown);
+// the visitor gets one actionable Arabic/English sentence instead of a wall of
+// SDK internals.
+function friendlyAiError(raw: string, language: string): string {
+  const en = language !== "ar";
+  if (/timed out|deadline|budget|ETIMEDOUT|aborted/i.test(raw))
+    return en
+      ? "The AI engine took too long to answer. Please try again in a moment."
+      : "محرك الذكاء الاصطناعي استغرق وقتاً طويلاً للإجابة. حاول مرة أخرى بعد قليل.";
+  if (/high demand|503|UNAVAILABLE|overloaded|\b429\b|rate/i.test(raw))
+    return en
+      ? "The AI engine is under heavy load right now. Please try again in a minute."
+      : "محرك الذكاء الاصطناعي عليه ضغط كبير حالياً. حاول مرة أخرى بعد دقيقة.";
+  if (/API_KEY|API key/i.test(raw) && /invalid|incorrect|missing|not valid/i.test(raw))
+    return en
+      ? "The GEMINI_API_KEY configured on the server is not valid."
+      : "مفتاح GEMINI_API_KEY غير صالح على الخادم.";
+  return en
+    ? "Generation failed. Please try again."
+    : "فشل توليد التطبيق. حاول مرة أخرى.";
 }
 
 app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
@@ -1374,28 +1448,37 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
     const ai = getGeminiClient();
     if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const { prompt, language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
-    if (!prompt) return res.status(400).json({ success: false, message: "prompt مطلوب" });
+    if (!prompt || !String(prompt).trim())
+      return res.status(400).json({ success: false, message: "prompt مطلوب" });
+    // Any length of text is accepted; only an extreme paste is elided so the
+    // request can never exceed the model/budget limits.
+    const bounded = boundText(String(prompt), MAX_PROMPT_CHARS, "تم اختصار منتصف الطلب");
     const result = await generateWithGemini(
       ai,
-      `Build a complete single-file HTML app for this request (lang: ${language}):\n${prompt}`,
+      `Build a complete single-file HTML app for this request (lang: ${language}):\n${bounded}`,
       GENERATE_SYSTEM,
+      {
+        budgetMs: GENERATE_BUDGET_MS,
+        attemptTimeoutMs: GENERATE_ATTEMPT_TIMEOUT_MS,
+        maxOutputTokens: DOCUMENT_MAX_OUTPUT_TOKENS,
+      },
     );
-    const code = stripToCode(extractText(result));
+    const code = repairDocument(extractText(result));
     if (!code) {
       console.error("generate-app: Gemini returned empty text");
       return res.status(502).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
     }
-    res.json({ success: true, code, appName: prompt.slice(0, 60) });
+    res.json({ success: true, code, appName: String(prompt).slice(0, 60) });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("generate-app failed:", msg);
     if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
       return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
-    const short = msg.length > 400 ? `${msg.slice(0, 400)}…` : msg;
+    const language = String((req.body as { language?: string })?.language ?? "ar");
     res.status(502).json({
       success: false,
-      message: `فشل توليد التطبيق، حاول مرة أخرى — السبب: ${short}`,
+      message: friendlyAiError(msg, language),
       // Full per-model diagnostics for the client/owner (not shown in UI).
       debug: msg,
     });
@@ -1417,38 +1500,57 @@ app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
     language === "ar"
       ? ["فحص الكود الحالي وتحديد موضع التعديل", "تطبيق التعديلات والأنماط المطلوبة", "تحديث المعاينة المباشرة"]
       : ["Inspecting current code and target location", "Applying requested changes and styles", "Refreshing live preview"];
-  const explanation =
-    language === "ar" ? `تم تطبيق التعديل: "${prompt}"` : `Applied modification: "${prompt}"`;
 
-  // Owner standard #3: this endpoint must never answer 500 — whenever the AI
-  // is unavailable, times out, or returns nothing usable, respond with the
-  // deterministic local refinement instead.
-  const fallback = (source: "engine" | "fallback") =>
-    res.json({
+  // Owner standard #3: this endpoint must never answer 500. BUT it must also
+  // never pretend: when the engine is unavailable we hand the ORIGINAL code
+  // back with `applied: false` and an honest explanation, instead of the old
+  // behaviour that ran a cosmetic string-replace and announced "تم التعديل"
+  // while nothing had actually changed.
+  const fallback = (reason: string) => {
+    const note =
+      language === "ar"
+        ? `⚠️ لم يتم تطبيق التعديل: محرك الذكاء الاصطناعي غير متاح حالياً (${reason}). كودك الحالي لم يتغير — حاول مرة أخرى.`
+        : `⚠️ Change not applied: the AI engine is unavailable (${reason}). Your current code is unchanged — please try again.`;
+    return res.json({
       success: true,
-      source,
-      code: applyLocalRefinement(currentCode as string, prompt as string, selectedElement),
-      explanation,
-      plan,
+      source: "fallback",
+      applied: false,
+      code: currentCode as string,
+      explanation: note,
+      plan: [],
     });
+  };
 
   try {
     const ai = getGeminiClient();
-    if (!ai) return fallback("engine");
+    if (!ai) return fallback("no-api-key");
+    // The visual inspector posts the element under the cursor — passing it to
+    // the model is what makes "make this button green" edit the right node.
+    const target = selectedElement
+      ? `\nTarget element: <${selectedElement.tagName}> text "${selectedElement.text ?? ""}" classes "${selectedElement.className ?? ""}" selector "${selectedElement.selector ?? ""}"\n`
+      : "";
     const result = await generateWithGemini(
       ai,
-      `Refine this HTML app (lang: ${language}). Instruction: ${prompt}\n\nCurrent code:\n${currentCode}`,
+      `Refine this HTML app (lang: ${language}). Instruction: ${boundText(String(prompt), 8_000, "تم اختصار منتصف الطلب")}${target}\n\nCurrent code:\n${boundText(String(currentCode), MAX_CURRENT_CODE_CHARS, "تم اختصار منتصف الكود")}`,
       REFINE_SYSTEM,
+      {
+        budgetMs: REFINE_BUDGET_MS,
+        attemptTimeoutMs: REFINE_ATTEMPT_TIMEOUT_MS,
+        maxOutputTokens: DOCUMENT_MAX_OUTPUT_TOKENS,
+      },
     );
     const refined = normalizeRefinedHtml(extractText(result));
     if (!refined) {
-      console.error("refine-app: model returned no usable HTML, using local refinement");
-      return fallback("fallback");
+      console.error("refine-app: model returned no usable HTML");
+      return fallback("no-usable-output");
     }
-    return res.json({ success: true, source: "gemini", code: refined, explanation, plan });
+    const explanation =
+      language === "ar" ? `تم تطبيق التعديل: "${prompt}"` : `Applied modification: "${prompt}"`;
+    return res.json({ success: true, source: "gemini", applied: true, code: refined, explanation, plan });
   } catch (e) {
-    console.error("refine-app failed:", e instanceof Error ? e.message : String(e));
-    return fallback("fallback");
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("refine-app failed:", msg);
+    return fallback(friendlyAiError(msg, language));
   }
 });
 
@@ -1458,7 +1560,11 @@ for (const p of ["/api/ai/gemini-enhance-prompt", "/api/ai/gemini-architect", "/
       const ai = getGeminiClient();
       if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
       const { prompt = "", language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
-      const result = await generateWithGemini(ai, `(lang: ${language}) ${prompt}`, STUDIO_SYSTEM);
+      const result = await generateWithGemini(ai, `(lang: ${language}) ${boundText(String(prompt), MAX_PROMPT_CHARS, "تم اختصار منتصف الطلب")}`, STUDIO_SYSTEM, {
+        budgetMs: STUDIO_BUDGET_MS,
+        attemptTimeoutMs: STUDIO_ATTEMPT_TIMEOUT_MS,
+        maxOutputTokens: DOCUMENT_MAX_OUTPUT_TOKENS,
+      });
       const text = extractText(result);
       if (!text) {
         console.error(`${p}: Gemini returned empty text`);

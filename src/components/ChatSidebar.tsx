@@ -39,6 +39,9 @@ interface ChatSidebarProps {
   subscription?: UserSubscription;
   onOpenSubscription?: () => void;
   onOpenGeminiStudio?: () => void;
+  /** Prompt of the last failed generation — enables the one-tap retry bar. */
+  retryPrompt?: string | null;
+  onRetryPrompt?: () => void;
 }
 
 export const ChatSidebar = ({
@@ -57,6 +60,8 @@ export const ChatSidebar = ({
   subscription,
   onOpenSubscription,
   onOpenGeminiStudio,
+  retryPrompt,
+  onRetryPrompt,
 }: ChatSidebarProps) => {
   const [activeTab, setActiveTab] = useState<'chat' | 'files' | 'history' | 'subscription'>('chat');
   const [inputText, setInputText] = useState('');
@@ -613,6 +618,23 @@ export const ChatSidebar = ({
       {/* Bottom Prompt Input */}
       <div className="p-3 border-t border-slate-800 bg-slate-950/80">
         <form onSubmit={handleSend} className="space-y-2">
+          {/* Retry bar — the last generation failed, so offer to run that exact
+              long specification again instead of making the user retype it. */}
+          {retryPrompt && onRetryPrompt && !isGenerating && (
+            <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30">
+              <span className="text-[11px] text-amber-200 truncate">
+                {language === 'ar' ? 'آخر محاولة لم تُنفَّذ' : 'Last attempt did not complete'}
+              </span>
+              <button
+                type="button"
+                onClick={onRetryPrompt}
+                className="shrink-0 text-[11px] font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 px-2.5 py-1 rounded-lg transition flex items-center gap-1"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>{language === 'ar' ? 'إعادة المحاولة' : 'Retry'}</span>
+              </button>
+            </div>
+          )}
           {/* Engine Ribbon */}
           <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
             <div className="flex items-center gap-1 font-mono text-[10px] text-emerald-400">
