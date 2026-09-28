@@ -1,22 +1,27 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Sparkles } from 'lucide-react';
 import { Header } from './components/Header';
 import { ChatSidebar } from './components/ChatSidebar';
 import { PreviewFrame } from './components/PreviewFrame';
 import { CodeEditor } from './components/CodeEditor';
-import { VisualInspectorModal } from './components/VisualInspectorModal';
-import { ExportModal } from './components/ExportModal';
-import { DeployModal } from './components/DeployModal';
-import { IntegrationsModal } from './components/IntegrationsModal';
-import { SubscriptionModal } from './components/SubscriptionModal';
-import { GeminiStudioModal } from './components/GeminiStudioModal';
 import { NewProjectHero } from './components/NewProjectHero';
-import { AdminDashboardModal } from './components/AdminDashboardModal';
-import { AuthModal } from './components/AuthModal';
 import { AuthGate } from './components/AuthGate';
-import { WhatsAppSupportButton } from './components/WhatsAppSupportButton';
+import { InfoPagesModal, type PageKey } from './components/InfoPagesModal';
 import { getDeviceFingerprint } from './utils/fingerprint';
 import { fetchCurrentUser, logout as authLogout, isOwnerAccount } from './lib/auth';
+
+// ── Code splitting ───────────────────────────────────────────────────────────
+// These surfaces are modal and rarely opened, yet each one used to be part of
+// the first paint. Loading them on demand keeps the initial bundle small, which
+// is the single biggest win for visitors on a phone.
+const VisualInspectorModal = lazy(() => import('./components/VisualInspectorModal').then((m) => ({ default: m.VisualInspectorModal })));
+const ExportModal = lazy(() => import('./components/ExportModal').then((m) => ({ default: m.ExportModal })));
+const DeployModal = lazy(() => import('./components/DeployModal').then((m) => ({ default: m.DeployModal })));
+const IntegrationsModal = lazy(() => import('./components/IntegrationsModal').then((m) => ({ default: m.IntegrationsModal })));
+const SubscriptionModal = lazy(() => import('./components/SubscriptionModal').then((m) => ({ default: m.SubscriptionModal })));
+const GeminiStudioModal = lazy(() => import('./components/GeminiStudioModal').then((m) => ({ default: m.GeminiStudioModal })));
+const AdminDashboardModal = lazy(() => import('./components/AdminDashboardModal').then((m) => ({ default: m.AdminDashboardModal })));
+const AuthModal = lazy(() => import('./components/AuthModal').then((m) => ({ default: m.AuthModal })));
 import { 
   AppProject, 
   ChatMessage, 
@@ -71,6 +76,8 @@ export default function App() {
   const [showGeminiStudio, setShowGeminiStudio] = useState<boolean>(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  // Which of the site pages is open (About / Contact / Privacy / Terms).
+  const [infoPage, setInfoPage] = useState<PageKey | null>(null);
 
   // ── User authentication (Google / GitHub) ─────────────────────────────────
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
@@ -886,6 +893,16 @@ CREATE TABLE records (
         authUser={authUser}
         onOpenAuth={() => setShowAuthModal(true)}
         onLogout={handleLogout}
+        onOpenInfoPage={setInfoPage}
+        onOpenInNewTab={() => {
+          // The preview is a full HTML document; open it as a real page in a new
+          // tab (and copy it to the clipboard, since window.open cannot be
+          // trusted to carry a large srcdoc on every browser).
+          const blob = new Blob([project.code], { type: 'text/html;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank', 'noopener');
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        }}
       />
 
       {/* Main Studio Body: Left Sidebar + Right Workspace */}
@@ -973,77 +990,84 @@ CREATE TABLE records (
       </div>
 
       {/* Visual Inspector Popup Modal */}
-      {selectedElement && (
-        <VisualInspectorModal
-          elementInfo={selectedElement}
-          onClose={() => setSelectedElement(null)}
-          onSubmitRefinement={(prompt, el) => handleRefinePrompt(prompt, el)}
+      {/* ── Lazily loaded modals ───────────────────────────────────────────
+          Wrapped in one Suspense so a chunk that is still downloading shows a
+          quiet spinner instead of blanking the studio. */}
+      <Suspense fallback={null}>
+        {selectedElement && (
+          <VisualInspectorModal
+            elementInfo={selectedElement}
+            onClose={() => setSelectedElement(null)}
+            onSubmitRefinement={(prompt, el) => handleRefinePrompt(prompt, el)}
+            language={language}
+          />
+        )}
+
+        {showExport && (
+          <ExportModal
+            projectName={project.name}
+            files={project.files}
+            onClose={() => setShowExport(false)}
+            language={language}
+          />
+        )}
+
+        {showDeploy && (
+          <DeployModal
+            projectName={project.name}
+            onClose={() => setShowDeploy(false)}
+            language={language}
+          />
+        )}
+
+        {/* Backend & Supabase Integrations Modal — owner only */}
+        {isOwner && showIntegrations && (
+          <IntegrationsModal
+            onClose={() => setShowIntegrations(false)}
+            language={language}
+          />
+        )}
+
+        {showSubscription && (
+          <SubscriptionModal
+            currentSubscription={subscription}
+            onClose={() => setShowSubscription(false)}
+            onSubscriptionUpdated={(newSub) => setSubscription(newSub)}
+            language={language}
+          />
+        )}
+
+        {/* Owner Admin Dashboard Modal — owner only */}
+        {isOwner && (
+          <AdminDashboardModal
+            isOpen={showAdminDashboard}
+            onClose={() => setShowAdminDashboard(false)}
+            language={language}
+          />
+        )}
+
+        {/* Google / GitHub sign-in modal */}
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => {
+            setShowAuthModal(false);
+            setAuthError(null);
+          }}
           language={language}
+          errorCode={authError}
+        />
+      </Suspense>
+
+      {/* Site pages: About / Contact / Privacy / Terms.
+          Replaces the old floating WhatsApp bubble — the support number now
+          lives in a real Contact page (and the legal pages the bubble never had). */}
+      {infoPage && (
+        <InfoPagesModal
+          language={language}
+          initialPage={infoPage}
+          onClose={() => setInfoPage(null)}
         />
       )}
-
-      {/* Export ZIP & Embed Modal */}
-      {showExport && (
-        <ExportModal
-          projectName={project.name}
-          files={project.files}
-          onClose={() => setShowExport(false)}
-          language={language}
-        />
-      )}
-
-      {/* Deploy & Public Share Modal */}
-      {showDeploy && (
-        <DeployModal
-          projectName={project.name}
-          onClose={() => setShowDeploy(false)}
-          language={language}
-        />
-      )}
-
-      {/* Backend & Supabase Integrations Modal — owner only */}
-      {isOwner && showIntegrations && (
-        <IntegrationsModal
-          onClose={() => setShowIntegrations(false)}
-          language={language}
-        />
-      )}
-
-      {/* Subscription & Orange Cash Modal */}
-      {showSubscription && (
-        <SubscriptionModal
-          currentSubscription={subscription}
-          onClose={() => setShowSubscription(false)}
-          onSubscriptionUpdated={(newSub) => setSubscription(newSub)}
-          language={language}
-        />
-      )}
-
-      {/* Owner Admin Dashboard Modal — owner only */}
-      {isOwner && (
-        <AdminDashboardModal
-          isOpen={showAdminDashboard}
-          onClose={() => setShowAdminDashboard(false)}
-          language={language}
-        />
-      )}
-
-      {/* Google / GitHub sign-in modal */}
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={() => {
-          setShowAuthModal(false);
-          setAuthError(null);
-        }}
-        language={language}
-        errorCode={authError}
-      />
-
-      {/* Floating WhatsApp Support Button */}
-      <WhatsAppSupportButton
-        language={language}
-        walletNumber="01207782741"
-      />
 
       {/* Gemini 3.8 Flash AI Studio Modal */}
       {showGeminiStudio && (

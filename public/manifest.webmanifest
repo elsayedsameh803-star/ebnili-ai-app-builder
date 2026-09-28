@@ -1,0 +1,26 @@
+{
+  "name": "Ebnili — AI App Builder",
+  "short_name": "Ebnili",
+  "description": "منصة إبنيلي الذكية لبناء مواقع وتطبيقات الويب بالذكاء الاصطناعي",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "categories": ["productivity", "developer", "business"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    { "name": "مشروع جديد", "url": "/" },
+    { "name": "الاشتراكات", "url": "/?tab=subscription" }
+  ]
+}

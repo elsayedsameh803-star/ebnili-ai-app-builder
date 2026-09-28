@@ -9,12 +9,17 @@ import {
   Download,
   Share2,
   Database,
+  ExternalLink,
+  Info,
+  Phone,
+  Scale,
   Plus,
   Globe,
   Sparkles,
   MousePointerClick,
   Crown,
   Shield,
+  ShieldCheck,
   LogIn,
   LogOut,
   User as UserIcon
@@ -45,6 +50,10 @@ interface HeaderProps {
   authUser?: AuthUser | null;
   onOpenAuth?: () => void;
   onLogout?: () => void;
+  /** Opens one of the site pages (about / contact / privacy / terms). */
+  onOpenInfoPage?: (page: 'about' | 'contact' | 'privacy' | 'terms') => void;
+  /** Opens the current site in a new browser tab (real preview, not the iframe). */
+  onOpenInNewTab?: () => void;
   projects?: AppProject[];
   activeProjectId?: string;
   onSelectProject?: (id: string) => void;
@@ -73,6 +82,8 @@ export const Header = ({
   authUser = null,
   onOpenAuth,
   onLogout,
+  onOpenInfoPage,
+  onOpenInNewTab,
   projects = [],
   activeProjectId,
   onSelectProject,
@@ -389,6 +400,19 @@ export const Header = ({
           A shared header must never carry owner surfaces in front of ordinary
           users, and on a phone the bar has no room to spare anyway. */}
 
+        {/* Open the generated site in a real browser tab — the fastest way to
+            check the result on a phone or share a clean link. */}
+        {onOpenInNewTab && (
+          <button
+            onClick={onOpenInNewTab}
+            className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-700/60 transition cursor-pointer shrink-0"
+            title={language === 'ar' ? 'فتح الموقع في تبويب جديد' : 'Open site in a new tab'}
+          >
+            <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden lg:inline">{language === 'ar' ? 'فتح الموقع' : 'Open'}</span>
+          </button>
+        )}
+
         {/* Export ZIP */}
         <button
           onClick={onOpenExport}
@@ -507,6 +531,39 @@ export const Header = ({
               </div>
             )}
           </div>
+
+          {onOpenInfoPage && (
+            <div className="mt-1 pt-1 border-t border-slate-800">
+              <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                {language === 'ar' ? 'المنصة' : 'The platform'}
+              </div>
+              <div className="grid grid-cols-2 gap-1 p-0.5">
+                {(
+                  [
+                    { key: 'about', ar: 'من نحن', en: 'About', icon: Info },
+                    { key: 'contact', ar: 'اتصل بنا', en: 'Contact', icon: Phone },
+                    { key: 'privacy', ar: 'الخصوصية', en: 'Privacy', icon: ShieldCheck },
+                    { key: 'terms', ar: 'الشروط', en: 'Terms', icon: Scale },
+                  ] as const
+                ).map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        onOpenInfoPage(item.key);
+                      }}
+                      className="flex items-center gap-1.5 px-2 py-2 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-slate-800 hover:text-white transition text-right"
+                    >
+                      <Icon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="truncate">{language === 'ar' ? item.ar : item.en}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ── Owner-only tools ────────────────────────────────────────────
               Owner surfaces live HERE, inside the account dropdown, and only

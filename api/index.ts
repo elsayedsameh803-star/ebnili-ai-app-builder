@@ -204,6 +204,42 @@ app.post("/api/subscriptions/reset-free", (_req: Request, res: Response) => {
   res.json({ success: true, subscription: DEFAULT_SUBSCRIPTION });
 });
 
+// ── Signed-in user guard for the AI engine ──────────────────────────────────
+// SECURITY: every /api/ai/* route used to be anonymous, so anybody (a bot, a
+// leaked URL, a curl loop) could spend the owner's Gemini key at will. The
+// studio itself is already behind the login gate, so requiring the same signed
+// session cookie costs a real user nothing and closes the door on abuse.
+// Reuses the existing `requireSignedIn` guard (line 145) in middleware form.
+function requireAiSession(req: Request, res: Response, next: NextFunction) {
+  if (!readAuthSession(req as AuthReq)) {
+    return res.status(401).json({
+      success: false,
+      code: "AUTH_REQUIRED",
+      message: "سجّل الدخول مرة أخرى للمتابعة — الجلسة انتهت أو لم يتم العثور عليها.",
+    });
+  }
+  next();
+}
+
+// A light per-session daily cap. The serverless runtime is stateless, so this
+// is best-effort (it stops a single runaway client, not a determined attacker)
+// — but the real boundary is the paid plan, and the owner can still raise the
+// ceiling through the admin dashboard.
+const AI_DAILY_LIMIT = 60;
+const aiUsage = new Map<string, { day: string; count: number }>();
+
+function aiQuotaExceeded(sessionId: string): boolean {
+  const day = new Date().toISOString().slice(0, 10);
+  const rec = aiUsage.get(sessionId);
+  if (!rec || rec.day !== day) {
+    aiUsage.set(sessionId, { day, count: 1 });
+    return false;
+  }
+  if (rec.count >= AI_DAILY_LIMIT) return true;
+  rec.count += 1;
+  return false;
+}
+
 // ── Device protection (stateless stubs) ─────────────────────────────────────
 app.get("/api/protection/status", (req: Request, res: Response) => {
   res.json({
@@ -1443,8 +1479,16 @@ function friendlyAiError(raw: string, language: string): string {
     : "فشل توليد التطبيق. حاول مرة أخرى.";
 }
 
-app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
+app.post("/api/ai/generate-app", requireAiSession, async (req: Request, res: Response) => {
   try {
+    const session = readAuthSession(req as AuthReq);
+    if (session && aiQuotaExceeded(session.id)) {
+      return res.status(429).json({
+        success: false,
+        code: "AI_QUOTA_EXCEEDED",
+        message: "بلغت الحد الأقصى للطلبات اليومي. حاول غداً أو رقِّ باقتك عبر أورانج كاش.",
+      });
+    }
     const ai = getGeminiClient();
     if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const { prompt, language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
@@ -1492,7 +1536,7 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
 // the model is still writing. Same models, same system rules, same fallbacks —
 // only the transport changes. On any model-level failure the client silently
 // falls back to the non-streaming /api/ai/generate-app above.
-app.post("/api/ai/generate-app/stream", async (req: Request, res: Response) => {
+app.post("/api/ai/generate-app/stream", requireAiSession, async (req: Request, res: Response) => {
   const language = String((req.body as { language?: string })?.language ?? "ar");
   const promptRaw = String((req.body as { prompt?: string })?.prompt ?? "");
   const ai = getGeminiClient();
@@ -1573,7 +1617,7 @@ app.post("/api/ai/generate-app/stream", async (req: Request, res: Response) => {
   return res.end();
 });
 
-app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
+app.post("/api/ai/refine-app", requireAiSession, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as {
     prompt?: string;
     currentCode?: string;
@@ -1643,8 +1687,12 @@ app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
 });
 
 for (const p of ["/api/ai/gemini-enhance-prompt", "/api/ai/gemini-architect", "/api/ai/gemini-code-doctor"]) {
-  app.post(p, async (req: Request, res: Response) => {
+  app.post(p, requireAiSession, async (req: Request, res: Response) => {
     try {
+      const session = readAuthSession(req as AuthReq);
+      if (session && aiQuotaExceeded(session.id)) {
+        return res.status(429).json({ success: false, message: "بلغت الحد الأقصى للطلبات اليومي" });
+      }
       const ai = getGeminiClient();
       if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
       const { prompt = "", language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
