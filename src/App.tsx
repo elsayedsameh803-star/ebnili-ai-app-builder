@@ -9,6 +9,18 @@ import { AuthGate } from './components/AuthGate';
 import { InfoPagesModal, type PageKey } from './components/InfoPagesModal';
 import { getDeviceFingerprint } from './utils/fingerprint';
 import { fetchCurrentUser, logout as authLogout, isOwnerAccount } from './lib/auth';
+import {
+  deleteProject,
+  getActiveId,
+  hasRealContent,
+  listProjects,
+  loadProject,
+  newProjectId,
+  renameProject,
+  saveProject,
+  setActiveId,
+  type ProjectSummary,
+} from './lib/projects';
 
 // ── Code splitting ───────────────────────────────────────────────────────────
 // These surfaces are modal and rarely opened, yet each one used to be part of
@@ -57,6 +69,71 @@ function closeDocument(raw: string): string {
   if (!/<\/body>/i.test(out)) out += '\n</body>';
   if (!/<\/html>/i.test(out)) out += '\n</html>';
   return out;
+}
+
+/**
+ * The "no project yet" document. It is deliberately an honest, empty state — the
+ * studio never pretends a placeholder is a generated site.
+ */
+function createBlankProject(): AppProject {
+  const code = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ابدأ مشروعك</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #020617;
+      color: #e2e8f0;
+      font-family: "Cairo", system-ui, -apple-system, sans-serif;
+      padding: 24px;
+      text-align: center;
+    }
+    .wrap { max-width: 520px; }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      letter-spacing: .08em;
+      color: #fda4af;
+      border: 1px solid #fb7185;
+      background: rgba(244,63,94,.1);
+      border-radius: 999px;
+      padding: 4px 12px;
+      margin-bottom: 18px;
+    }
+    h1 { font-size: 26px; font-weight: 800; margin-bottom: 12px; }
+    p { font-size: 14px; line-height: 1.9; color: #94a3b8; }
+    .hint { margin-top: 18px; font-size: 12px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <span class="badge">لم يتم توليد أي موقع بعد</span>
+    <h1>اكتب فكرتك في مربع المحادثة</h1>
+    <p>صف الموقع أو التطبيق اللي تريده بالتفصيل — الصفحات، الألوان، المحتوى، والتفاعلات — وسيتم بناء موقع حقيقي يعمل داخل هذه المعاينة.</p>
+    <p class="hint">لا يوجد محتوى تجريبي مسبق — كل ما تراه هنا سيأتي من الذكاء الاصطناعي.</p>
+  </div>
+</body>
+</html>`;
+
+  return {
+    id: 'draft',
+    name: 'مشروع جديد',
+    description: 'معاينة جاهزة للتطوير المباشر.',
+    code,
+    files: { 'index.html': code },
+    activeFile: 'index.html',
+    versions: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    theme: { primaryColor: '#6366f1', borderRadius: '12px', darkMode: false },
+  };
 }
 
 export default function App() {
@@ -179,103 +256,8 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const streamStartedAt = useRef<number>(Date.now());
 
-  // Active Project State
-  const [project, setProject] = useState<AppProject>(() => {
-    // This used to be a hard-coded white page that simply said "Preview". After
-    // a failed generation the user was left staring at it and reasonably
-    // concluded the builder "made a fake site". The studio now starts on an
-    // honest empty state that asks for the first prompt.
-    const initialCode = `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ابدأ مشروعك</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #020617;
-      color: #e2e8f0;
-      font-family: "Cairo", system-ui, -apple-system, sans-serif;
-      padding: 24px;
-      text-align: center;
-    }
-    .wrap { max-width: 520px; }
-    .badge {
-      display: inline-block;
-      font-size: 11px;
-      letter-spacing: .08em;
-      color: #fda4af;
-      border: 1px solid #fb7185;
-      background: rgba(244,63,94,.1);
-      border-radius: 999px;
-      padding: 4px 12px;
-      margin-bottom: 18px;
-    }
-    h1 { font-size: 26px; font-weight: 800; margin-bottom: 12px; }
-    p { font-size: 14px; line-height: 1.9; color: #94a3b8; }
-    .hint { margin-top: 18px; font-size: 12px; color: #64748b; }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <span class="badge">لم يتم توليد أي موقع بعد</span>
-    <h1>اكتب فكرتك في مربع المحادثة</h1>
-    <p>صف الموقع أو التطبيق اللي تريده بالتفصيل — الصفحات، الألوان، المحتوى، والتفاعلات — وسيتم بناء موقع حقيقي يعمل داخل هذه المعاينة.</p>
-    <p class="hint">لا يوجد محتوى تجريبي مسبق — كل ما تراه هنا سيأتي من الذكاء الاصطناعي.</p>
-  </div>
-</body>
-</html>`;
-
-    return {
-      id: 'demo-1',
-      name: 'Preview',
-      description: 'معاينة جاهزة للتطوير المباشر.',
-      code: initialCode,
-      files: {
-        'index.html': initialCode,
-        'App.tsx': `// React Component
-import React from 'react';
-
-export default function App() {
-  return (
-    <div className="flex items-center justify-center min-h-screen bg-white text-3xl font-bold text-slate-700">
-      Preview
-    </div>
-  );
-}`,
-        'schema.sql': `-- SQL Schema
-CREATE TABLE records (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  title TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);`,
-      },
-      activeFile: 'index.html',
-      versions: [
-        {
-          id: 'v-1',
-          version: 'v1.0',
-          timestamp: 'الآن',
-          title: 'Preview',
-          prompt: 'صفحة بيضاء مع كلمة Preview بالإنجليزية',
-          code: initialCode,
-          files: { 'index.html': initialCode },
-        },
-      ],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      theme: {
-        primaryColor: '#6366f1',
-        borderRadius: '12px',
-        darkMode: false,
-      },
-    };
-  });
+  // Active Project State — starts on the honest empty state (see createBlankProject).
+  const [project, setProject] = useState<AppProject>(createBlankProject);
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
@@ -286,42 +268,117 @@ CREATE TABLE records (
     },
   ]);
 
-  // ── Auto-save: a professional builder never loses your work ───────────────
-  // Everything lived in React state, so one refresh threw away a site that took
-  // a minute of engine time to generate. Persist (debounced) and restore.
-  useEffect(() => {
-    const id = setTimeout(() => {
-      try {
-        localStorage.setItem(
-          AUTOSAVE_KEY,
-          JSON.stringify({ project, chatMessages, savedAt: Date.now() }),
-        );
-      } catch {
-        /* private mode / quota exceeded — the app still works, just no restore */
-      }
-    }, 800);
-    return () => clearTimeout(id);
-  }, [project, chatMessages]);
+  // ── Multi-project store ───────────────────────────────────────────────────
+  // `projectId` is null while the user is still on the starter screen; the first
+  // real generation mints an id, and everything after that is saved against it.
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
 
-  useEffect(() => {
+  const refreshProjectList = useCallback(() => {
     try {
-      const raw = localStorage.getItem(AUTOSAVE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as { project?: AppProject; chatMessages?: ChatMessage[] };
-      // Only restore real generated work, never the untouched placeholder.
-      if (saved.project?.code && /<html/i.test(saved.project.code) && !/ابدأ مشروعك/.test(saved.project.code)) {
-        setProject(saved.project);
-        setHasStarted(true);
-      }
-      if (Array.isArray(saved.chatMessages) && saved.chatMessages.length > 1) {
-        setChatMessages(saved.chatMessages);
-      }
+      setProjectList(listProjects());
     } catch {
-      /* ignore an unreadable autosave */
+      setProjectList([]);
+    }
+  }, []);
+
+  // Auto-save: every project is stored under its own id, debounced, so a
+  // refresh (or a crashed tab) never costs a generated site.
+  useEffect(() => {
+    if (!projectId || isGenerating) return;
+    if (!hasRealContent(project.code)) return;
+    const timer = setTimeout(() => {
+      saveProject(projectId, project, chatMessages);
+      refreshProjectList();
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [projectId, project, chatMessages, isGenerating, refreshProjectList]);
+
+  // Restore the last project on load.
+  useEffect(() => {
+    refreshProjectList();
+    const activeId = getActiveId();
+    if (!activeId) return;
+    const stored = loadProject(activeId);
+    if (!stored?.project) return;
+    setProjectId(activeId);
+    setProject(stored.project);
+    setHasStarted(true);
+    if (Array.isArray(stored.chatMessages) && stored.chatMessages.length > 0) {
+      setChatMessages(stored.chatMessages);
     }
     // Restore pass — runs once on mount, not as a sync loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Switch to another project from the list.
+  const handleSelectProject = useCallback((id: string) => {
+    if (id === projectId) return;
+    const stored = loadProject(id);
+    if (!stored?.project) {
+      deleteProject(id);
+      refreshProjectList();
+      return;
+    }
+    setProjectId(id);
+    setActiveId(id);
+    setProject(stored.project);
+    setChatMessages(
+      Array.isArray(stored.chatMessages) && stored.chatMessages.length > 0
+        ? stored.chatMessages
+        : [
+            {
+              id: 'm-1',
+              sender: 'assistant',
+              text: `تم فتح المشروع "${stored.project.name}". اطلب أي تعديل وأنا جاهز.`,
+              timestamp: 'الآن',
+            },
+          ],
+    );
+    setHasStarted(true);
+    setSelectedElement(null);
+    refreshProjectList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, refreshProjectList]);
+
+  // Start a clean project. The id is minted on the first real generation, so
+  // the list never fills up with empty placeholders.
+  const handleStartNewProject = useCallback(() => {
+    setProjectId(null);
+    setActiveId(null);
+    setProject(createBlankProject());
+    setChatMessages([
+      {
+        id: 'm-1',
+        sender: 'assistant',
+        text: 'مشروع جديد جاهز. صف اللي عايزه وأنا هبنيه من الصفر.',
+        timestamp: 'الآن',
+      },
+    ]);
+    setSelectedElement(null);
+    setHasStarted(false);
+    setLastFailedPrompt(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleDeleteProject = useCallback((id: string) => {
+    const wasActive = id === projectId;
+    deleteProject(id);
+    refreshProjectList();
+    if (wasActive) {
+      const next = listProjects()[0];
+      if (next) handleSelectProject(next.id);
+      else handleStartNewProject();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, refreshProjectList]);
+
+  const handleRenameStoredProject = useCallback((id: string, name: string) => {
+    renameProject(id, name);
+    if (id === projectId) setProject((prev) => ({ ...prev, name }));
+    refreshProjectList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, refreshProjectList]);
 
 
   // Streaming finaliser shared by the SSE path and the fallback path: takes the
@@ -330,6 +387,13 @@ CREATE TABLE records (
   const commitGeneratedSite = (prompt: string, rawCode: string, appName?: string) => {
     const updatedCode = closeDocument(rawCode) || project.code;
     const name = appName || prompt.slice(0, 25);
+    // The first real generation mints the project id, so the list never fills
+    // up with empty placeholders and the work is saved from the first second.
+    if (!projectId) {
+      const id = newProjectId();
+      setProjectId(id);
+      setActiveId(id);
+    }
     const newVersionNum = `v1.0`;
 
     const newVersion: VersionHistoryItem = {
@@ -348,10 +412,15 @@ CREATE TABLE records (
 
     setProject((prev) => ({
       ...prev,
+      // The stored id is the source of truth, so a re-opened project is saved
+      // back to the right slot instead of creating a duplicate.
+      id: projectId ?? prev.id,
       name,
+      description: prompt.slice(0, 80),
       code: updatedCode,
       files: { ...prev.files, 'index.html': updatedCode },
       versions: [newVersion, ...prev.versions],
+      updatedAt: new Date().toISOString(),
     }));
 
     const assistantMsg: ChatMessage = {
@@ -882,7 +951,7 @@ CREATE TABLE records (
         onToggleInspectMode={() => setIsInspectMode((m) => !m)}
         language={language}
         onToggleLanguage={() => setLanguage((l) => (l === 'ar' ? 'en' : 'ar'))}
-        onNewProject={() => setHasStarted(false)}
+        onNewProject={handleStartNewProject}
         onOpenExport={() => setShowExport(true)}
         onOpenDeploy={() => setShowDeploy(true)}
         onOpenIntegrations={() => setShowIntegrations(true)}
@@ -896,13 +965,18 @@ CREATE TABLE records (
         onOpenInfoPage={setInfoPage}
         onOpenInNewTab={() => {
           // The preview is a full HTML document; open it as a real page in a new
-          // tab (and copy it to the clipboard, since window.open cannot be
-          // trusted to carry a large srcdoc on every browser).
+          // tab. A blob URL carries the whole document without the browser
+          // truncating a large srcdoc.
           const blob = new Blob([project.code], { type: 'text/html;charset=utf-8' });
           const url = URL.createObjectURL(blob);
           window.open(url, '_blank', 'noopener');
           setTimeout(() => URL.revokeObjectURL(url), 60_000);
         }}
+        projects={projectList}
+        activeProjectId={projectId ?? undefined}
+        onSelectProject={handleSelectProject}
+        onDeleteProject={handleDeleteProject}
+        onRenameStoredProject={handleRenameStoredProject}
       />
 
       {/* Main Studio Body: Left Sidebar + Right Workspace */}

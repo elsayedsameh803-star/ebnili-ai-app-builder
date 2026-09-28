@@ -13,6 +13,9 @@ import {
   Info,
   Phone,
   Scale,
+  FolderTree,
+  Pencil,
+  Trash2,
   Plus,
   Globe,
   Sparkles,
@@ -26,6 +29,21 @@ import {
 } from 'lucide-react';
 import { DeviceMode, ViewMode, Language, UserSubscription, AppProject, AuthUser } from '../types';
 import { isOwnerAccount } from '../lib/auth';
+import type { ProjectSummary } from '../lib/projects';
+
+/** "منذ 5 دقائق" / "2 hours ago" — the project list is a recency list. */
+function formatRelative(iso: string, language: Language): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return '';
+  const minutes = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (minutes < 1) return language === 'ar' ? 'الآن' : 'now';
+  if (minutes < 60) return language === 'ar' ? `منذ ${minutes} د` : `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return language === 'ar' ? `منذ ${hours} س` : `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return language === 'ar' ? `منذ ${days} يوم` : `${days}d ago`;
+  return new Date(iso).toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-GB');
+}
 
 interface HeaderProps {
   projectName: string;
@@ -54,9 +72,13 @@ interface HeaderProps {
   onOpenInfoPage?: (page: 'about' | 'contact' | 'privacy' | 'terms') => void;
   /** Opens the current site in a new browser tab (real preview, not the iframe). */
   onOpenInNewTab?: () => void;
-  projects?: AppProject[];
+  projects?: ProjectSummary[];
   activeProjectId?: string;
   onSelectProject?: (id: string) => void;
+  /** Deletes a stored project (only for non-active ones in the list UI). */
+  onDeleteProject?: (id: string) => void;
+  /** Renames a stored project from the list. */
+  onRenameStoredProject?: (id: string, name: string) => void;
 }
 
 export const Header = ({
@@ -87,6 +109,8 @@ export const Header = ({
   projects = [],
   activeProjectId,
   onSelectProject,
+  onDeleteProject,
+  onRenameStoredProject,
 }: HeaderProps) => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(projectName);
@@ -457,31 +481,97 @@ export const Header = ({
       {/* ── Dropdowns: OUTSIDE the horizontally scrolling bar ────────────────
           A scroll container clips absolutely-positioned children, so these
           live as direct children of <header> (which is `relative`). */}
-      {showProjectsMenu && projects.length > 0 && (
+      {showProjectsMenu && (
         <div
           ref={projectsMenuRef}
-          className="absolute top-full left-2 sm:left-4 mt-1.5 w-64 max-w-[calc(100vw-1rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5 space-y-1"
+          className="absolute top-full left-2 sm:left-4 mt-1.5 w-72 max-w-[calc(100vw-1rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5"
         >
-          <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase">
-            {language === 'ar' ? 'مشاريعك المحفوظة' : 'Saved Projects'}
+          <div className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase flex items-center justify-between">
+            <span>{language === 'ar' ? 'مشاريعي' : 'My projects'}</span>
+            <span className="text-slate-600 normal-case font-medium">
+              {language === 'ar' ? 'محفوظة على هذا الجهاز' : 'saved on this device'}
+            </span>
           </div>
-          {projects.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => {
-                if (onSelectProject) onSelectProject(p.id);
-                setShowProjectsMenu(false);
-              }}
-              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition ${
-                p.id === activeProjectId
-                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <span className="truncate">{p.name}</span>
-              {p.id === activeProjectId && <span className="text-rose-400 text-xs">✓</span>}
-            </button>
-          ))}
+
+          {projects.length === 0 ? (
+            <div className="px-3 py-6 text-center">
+              <div className="w-10 h-10 mx-auto rounded-xl bg-slate-800 flex items-center justify-center mb-2">
+                <FolderTree className="w-5 h-5 text-slate-500" />
+              </div>
+              <p className="text-[11px] text-slate-400 leading-5">
+                {language === 'ar'
+                  ? 'لسه مفيش مشاريع محفوظة. أول ما تولّد موقع هيتحفظ هنا تلقائياً.'
+                  : 'No saved projects yet. Your first generated site is saved here automatically.'}
+              </p>
+            </div>
+          ) : (
+            <div className="max-h-72 overflow-y-auto space-y-0.5 pe-0.5">
+              {projects.map((p) => {
+                const isActive = p.id === activeProjectId;
+                return (
+                  <div
+                    key={p.id}
+                    className={`group flex items-center gap-1 rounded-lg px-1.5 py-1 transition ${
+                      isActive ? 'bg-rose-500/15 border border-rose-500/30' : 'hover:bg-slate-800'
+                    }`}
+                  >
+                    <button
+                      onClick={() => {
+                        if (onSelectProject) onSelectProject(p.id);
+                        setShowProjectsMenu(false);
+                      }}
+                      className="flex-1 text-right px-1 py-1 min-w-0"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs font-bold truncate ${isActive ? 'text-rose-300' : 'text-slate-200'}`}>
+                          {p.name}
+                        </span>
+                        {isActive && <span className="text-rose-400 text-[10px] shrink-0">مفتوح</span>}
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate">
+                        {language === 'ar'
+                          ? `${p.versions?.length ?? 0} إصدارات · ${formatRelative(p.updatedAt, language)}`
+                          : `${p.versions?.length ?? 0} versions · ${formatRelative(p.updatedAt, language)}`}
+                      </div>
+                    </button>
+
+                    {onRenameStoredProject && (
+                      <button
+                        onClick={() => {
+                          const next = window.prompt(
+                            language === 'ar' ? 'اسم المشروع الجديد' : 'New project name',
+                            p.name,
+                          );
+                          if (next && next.trim()) onRenameStoredProject(p.id, next.trim());
+                        }}
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 transition shrink-0"
+                        title={language === 'ar' ? 'إعادة تسمية' : 'Rename'}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    {onDeleteProject && (
+                      <button
+                        onClick={() => {
+                          const ok = window.confirm(
+                            language === 'ar'
+                              ? `حذف المشروع "${p.name}" نهائياً؟ لا يمكن التراجع.`
+                              : `Permanently delete "${p.name}"? This cannot be undone.`,
+                          );
+                          if (ok) onDeleteProject(p.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition shrink-0"
+                        title={language === 'ar' ? 'حذف' : 'Delete'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="border-t border-slate-800 pt-1 mt-1">
             <button
               onClick={() => {
