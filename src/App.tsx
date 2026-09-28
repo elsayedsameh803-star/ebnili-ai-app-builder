@@ -8,7 +8,7 @@ import { NewProjectHero } from './components/NewProjectHero';
 import { AuthGate } from './components/AuthGate';
 import { InfoPagesModal, type PageKey } from './components/InfoPagesModal';
 import { getDeviceFingerprint } from './utils/fingerprint';
-import { fetchCurrentUser, logout as authLogout, isOwnerAccount } from './lib/auth';
+import { fetchCurrentUser, logout as authLogout, isOwnerAccount, fetchWithTimeout } from './lib/auth';
 import {
   deleteProject,
   getActiveId,
@@ -70,6 +70,14 @@ function closeDocument(raw: string): string {
   if (!/<\/html>/i.test(out)) out += '\n</html>';
   return out;
 }
+
+/**
+ * Absolute ceiling for the session probe, independent of the fetch timeout.
+ * If `/api/auth/me` has not answered by now we stop waiting and let the app
+ * render anyway — a guest sees the login wall, a signed-in user sees the
+ * studio. Nothing about identity may hold the interface hostage.
+ */
+const AUTH_WATCHDOG_MS = 6_000;
 
 /**
  * The "no project yet" document. It is deliberately an honest, empty state — the
@@ -162,12 +170,38 @@ export default function App() {
   // `null` until /api/auth/me answers, so the gate doesn't flash for a
   // returning user who already has a valid session cookie.
   const [authChecked, setAuthChecked] = useState<boolean>(false);
+  // Set when the session check could not complete. The studio still opens — a
+  // failed identity lookup is not a reason to block the user; the error is
+  // surfaced only when they actually try to use the engine.
+  const [authProbeFailed, setAuthProbeFailed] = useState<boolean>(false);
 
+  // ── Session bootstrap (never blocks the UI) ─────────────────────────────────
+  // Two independent guarantees, because a stuck splash is the worst failure
+  // this app can have:
+  //   1. `fetchCurrentUser()` is deadline-bounded (AUTH_INIT_TIMEOUT_MS).
+  //   2. `finally` always clears the gate, and a hard watchdog clears it even
+  //      if the fetch somehow never settles.
   useEffect(() => {
-    fetchCurrentUser().then((user) => {
-      setAuthUser(user);
+    let settled = false;
+    fetchCurrentUser()
+      .then((user) => {
+        settled = true;
+        if (user) setAuthUser(user);
+      })
+      .catch(() => {
+        settled = true;
+        setAuthProbeFailed(true);
+      })
+      .finally(() => {
+        if (settled) setAuthChecked(true);
+      });
+
+    // Hard watchdog: whatever happens upstream, the studio becomes reachable.
+    const watchdog = setTimeout(() => {
       setAuthChecked(true);
-    });
+      if (!settled) setAuthProbeFailed(true);
+    }, AUTH_WATCHDOG_MS);
+    return () => clearTimeout(watchdog);
   }, []);
 
   // The server redirects back to `/?auth=success` or `/?auth_error=<code>`.
@@ -181,10 +215,12 @@ export default function App() {
     if (error) setAuthError(error);
     if (success) {
       setAuthError(null);
-      fetchCurrentUser().then((user) => {
-        setAuthUser(user);
-        setAuthChecked(true);
-      });
+      fetchCurrentUser()
+        .then((user) => {
+          if (user) setAuthUser(user);
+        })
+        .catch(() => setAuthProbeFailed(true))
+        .finally(() => setAuthChecked(true));
     }
     setShowAuthModal(Boolean(error));
 
@@ -194,6 +230,37 @@ export default function App() {
   const handleLogout = useCallback(async () => {
     await authLogout();
     setAuthUser(null);
+  }, []);
+
+  /**
+   * The session expired while the tab was open (cookie TTL, sign-out elsewhere).
+   * Re-probe once to be sure, and only then drop to the sign-in wall — the
+   * studio is never blocked by a service hiccup, and the user is never shown a
+   * misleading "server error".
+   */
+  const handleSessionExpired = useCallback(async (lang: Language) => {
+    const user = await fetchCurrentUser().catch(() => null);
+    if (user) {
+      // The cookie is actually fine (a transient blip) — keep working.
+      setAuthUser(user);
+      setAuthProbeFailed(false);
+      return;
+    }
+    setAuthUser(null);
+    setAuthProbeFailed(false);
+    setAuthError(lang === 'ar' ? 'انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى.' : 'Session expired — please sign in again.');
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: String(Date.now()),
+        sender: 'assistant',
+        text:
+          lang === 'ar'
+            ? '⚠️ انتهت جلستك. سجّل الدخول مرة أخرى للمتابعة.'
+            : '⚠️ Your session expired. Please sign in again to continue.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
   }, []);
 
   // Owner-only surfaces (admin panel, backend/database console). The verdict is
@@ -215,9 +282,11 @@ export default function App() {
     transactions: [],
   });
 
-  // Fetch current subscription from backend
+  // Fetch current subscription from backend.
+  // NON-CRITICAL: this only decorates the UI (badge, limits), so it is bounded
+  // and fails silently — a slow billing service must never delay the studio.
   useEffect(() => {
-    fetch('/api/subscriptions/current')
+    fetchWithTimeout('/api/subscriptions/current', {}, 10_000)
       .then((res) => res.json().catch(() => null))
       .then((data) => {
         if (data && data.subscription) {
@@ -588,6 +657,14 @@ export default function App() {
       const data = await res.json().catch(() => ({ success: false as const, message: '' as string }));
 
       if (!res.ok) {
+        // An expired/missing session is the ONE failure that must reach the
+        // user: the engine now requires a signed-in session, so a stale cookie
+        // would otherwise look like a generic server error. Re-probe the
+        // session and send them back to the sign-in wall.
+        if ((data as { code?: string }).code === 'AUTH_REQUIRED' || res.status === 401) {
+          handleSessionExpired(language);
+          return;
+        }
         const errorMsg = (data as { message?: string }).message || (language === 'ar'
           ? '⚠️ حدث خطأ في الخادم أثناء التوليد. حاول مرة أخرى بعد قليل.'
           : '⚠️ Server error during generation. Please try again.');
@@ -701,6 +778,10 @@ export default function App() {
       const data = await res.json().catch(() => ({ success: false as const, message: '' as string }));
 
       if (!res.ok) {
+        if ((data as { code?: string }).code === 'AUTH_REQUIRED' || res.status === 401) {
+          handleSessionExpired(language);
+          return;
+        }
         const errorMsg = (data as { message?: string }).message || (language === 'ar'
           ? '⚠️ حدث خطأ في الخادم أثناء التعديل. حاول مرة أخرى بعد قليل.'
           : '⚠️ Server error during refinement. Please try again.');
@@ -912,8 +993,9 @@ export default function App() {
   }
 
   // ── Gate: nobody reaches the studio without a session ─────────────────────
-  // While /api/auth/me is still in flight we show a neutral splash rather than
-  // the gate, otherwise a signed-in user would see the login wall flash.
+  // While /api/auth/me is in flight we show a neutral splash rather than the
+  // gate, otherwise a signed-in user would see the login wall flash. It is
+  // deadline-bounded (see AUTH_WATCHDOG_MS) and can never stay on screen.
   if (!authChecked) {
     return (
       <div className="h-screen bg-slate-950 flex items-center justify-center">
@@ -938,6 +1020,25 @@ export default function App() {
       }`}
       dir={language === 'ar' ? 'rtl' : 'ltr'}
     >
+      {/* Session probe notice — NON-BLOCKING. The studio is fully usable; we
+          only tell the user that identity could not be confirmed, so the first
+          AI request does not surprise them. */}
+      {authProbeFailed && !isGenerating && (
+        <div className="shrink-0 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-[11px] text-amber-200 flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+          <span className="truncate">
+            {language === 'ar'
+              ? 'تعذّر تأكيد الجلسة. الاستوديو يعمل بشكل طبيعي، وقد تحتاج لتسجيل الدخول عند استخدام الذكاء الاصطناعي.'
+              : 'Could not confirm your session. The studio works normally; you may need to sign in before using the AI.'}
+          </span>
+          <button
+            onClick={() => setAuthProbeFailed(false)}
+            className="ms-auto text-amber-300 hover:text-white font-bold shrink-0"
+          >
+            {language === 'ar' ? 'إخفاء' : 'Dismiss'}
+          </button>
+        </div>
+      )}
       {/* Top Application Header */}
       <Header
         projectName={project.name}

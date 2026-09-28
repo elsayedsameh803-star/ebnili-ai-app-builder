@@ -22,8 +22,39 @@
     <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body>
-    <div id="root"><div dir="rtl" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#020617;color:#e2e8f0;font-family:'Cairo','Plus Jakarta Sans',system-ui,sans-serif;"><div style="width:44px;height:44px;border:3px solid #1e293b;border-top-color:#6366f1;border-radius:50%;animation:ebnily-spin .8s linear infinite;"></div><div style="font-size:20px;font-weight:800;">⚡ إبنيلي <span style="color:#818cf8;font-size:13px;font-weight:600;">AI App Builder</span></div><div style="font-size:12px;color:#64748b;">جارٍ تجهيز الاستوديو…</div></div></div>
+    <div id="root"><div data-boot dir="rtl" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#020617;color:#e2e8f0;font-family:'Cairo','Plus Jakarta Sans',system-ui,sans-serif;"><div style="width:44px;height:44px;border:3px solid #1e293b;border-top-color:#6366f1;border-radius:50%;animation:ebnily-spin .8s linear infinite;"></div><div style="font-size:20px;font-weight:800;">⚡ إبنيلي <span style="color:#818cf8;font-size:13px;font-weight:600;">AI App Builder</span></div><div style="font-size:12px;color:#64748b;">جارٍ تجهيز الاستوديو…</div></div></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      /* Boot watchdog.
+         The markup inside #root is a static shell that React replaces on mount.
+         If the bundle fails to download, throws before render, or the network
+         drops, NOTHING replaces it and the visitor stares at
+         "جارٍ تجهيز الاستوديو…" forever with no way out. This replaces the shell
+         with a real recovery message (same colours, same fonts) once we can tell
+         the app did not take over. It touches nothing once React has mounted. */
+      (function () {
+        var timer = setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root) return;
+          // React has mounted if the placeholder shell is gone.
+          if (!root.firstChild || !root.firstChild.hasAttribute || !root.firstChild.hasAttribute('data-boot')) {
+            return;
+          }
+          root.innerHTML =
+            '<div dir="rtl" style="position:fixed;inset:0;display:flex;flex-direction:column;' +
+            'align-items:center;justify-content:center;gap:14px;background:#020617;color:#e2e8f0;' +
+            'font-family:\'Cairo\',system-ui,sans-serif;padding:24px;text-align:center">' +
+            '<div style="font-size:20px;font-weight:800">⚡ إبنيلي <span style="color:#818cf8;font-size:13px;font-weight:600">AI App Builder</span></div>' +
+            '<p style="font-size:13px;color:#94a3b8;max-width:420px;line-height:1.9;margin:0">' +
+            'تعذّر تشغيل الاستوديو في هذه الجلسة. غالباً بسبب انقطاع مؤقت في الشبكة أو ذاكرة التخزين المؤقت للمتصفح.</p>' +
+            '<button onclick="location.reload()" style="margin-top:6px;padding:10px 22px;border:0;border-radius:12px;' +
+            'background:linear-gradient(90deg,#f43f5e,#ec4899,#f59e0b);color:#fff;font-weight:800;font-size:13px;cursor:pointer">' +
+            'إعادة المحاولة</button></div>';
+        }, 12000);
+        // React took over — cancel the watchdog.
+        window.addEventListener('load', function () { clearTimeout(timer); });
+      })();
+    </script>
   </body>
 </html>
 

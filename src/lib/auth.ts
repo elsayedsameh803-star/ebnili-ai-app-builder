@@ -303,10 +303,39 @@ export async function fetchAuthProviders(): Promise<AuthProviderInfo[]> {
   }
 }
 
-/** The current user, or `null` for guests. Never throws. */
+/**
+ * Deadline for any initialization call that is allowed to hold the UI hostage.
+ *
+ * WHY: `fetch` has no timeout of its own. If `/api/auth/me` stalls (cold
+ * serverless start, flaky mobile network, a proxy that never finishes the
+ * response) the promise simply never settles, `setAuthChecked(true)` never runs,
+ * and the visitor is stuck on the "جارٍ تجهيز الاستوديو…" splash FOREVER. Every
+ * non-critical init call is therefore bounded.
+ */
+export const AUTH_INIT_TIMEOUT_MS = 8_000;
+
+/**
+ * `fetch` with a hard deadline, built on AbortController so it works on every
+ * browser we support (no reliance on the newer `AbortSignal.timeout`).
+ */
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = AUTH_INIT_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The current user, or `null` for guests. Never throws, never hangs. */
 export async function fetchCurrentUser(): Promise<AuthUser | null> {
   try {
-    const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+    const res = await fetchWithTimeout('/api/auth/me', { credentials: 'same-origin' });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       authenticated?: boolean;
