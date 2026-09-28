@@ -1485,6 +1485,94 @@ app.post("/api/ai/generate-app", async (req: Request, res: Response) => {
   }
 });
 
+// ── Streaming generation (SSE) ────────────────────────────────────────────────
+// WHY: even with a correct budget a full site takes 40–110s. Waiting in silence
+// for that long looks broken, so this endpoint streams the document to the
+// browser token-by-token over Server-Sent Events and the preview paints while
+// the model is still writing. Same models, same system rules, same fallbacks —
+// only the transport changes. On any model-level failure the client silently
+// falls back to the non-streaming /api/ai/generate-app above.
+app.post("/api/ai/generate-app/stream", async (req: Request, res: Response) => {
+  const language = String((req.body as { language?: string })?.language ?? "ar");
+  const promptRaw = String((req.body as { prompt?: string })?.prompt ?? "");
+  const ai = getGeminiClient();
+
+  if (!ai || !promptRaw.trim()) {
+    return res.status(400).json({ success: false, message: !ai ? "GEMINI_API_KEY غير مُعد" : "prompt مطلوب" });
+  }
+
+  // SSE needs an unbuffered text/event-stream; Vercel otherwise holds the body
+  // until the function ends, which is exactly what we are trying to avoid.
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const deadline = Date.now() + GENERATE_BUDGET_MS;
+  const deadModels = new Set<string>();
+  const failures: string[] = [];
+  let sentAny = false;
+
+  // Immediately tell the client we're alive so its spinner starts now, not
+  // after the first token.
+  send("open", { ok: true });
+
+  for (const model of CANDIDATE_MODELS) {
+    if (deadModels.has(model)) continue;
+    const remaining = deadline - Date.now();
+    if (remaining <= 2_000) break;
+    const attemptTimeout = Math.min(remaining, GENERATE_ATTEMPT_TIMEOUT_MS);
+    const usesThinkingLevel = model === "gemini-3.5-flash" || model === "gemini-3.5-flash-lite";
+    const config = {
+      systemInstruction: GENERATE_SYSTEM,
+      ...(usesThinkingLevel ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+      maxOutputTokens: DOCUMENT_MAX_OUTPUT_TOKENS,
+    };
+
+    try {
+      const stream = await withDeadline(
+        ai.models.generateContentStream({
+          model,
+          contents: `Build a complete single-file HTML app for this request (lang: ${language}):\n${boundText(promptRaw, MAX_PROMPT_CHARS, "تم اختصار منتصف الطلب")}`,
+          config,
+        }),
+        attemptTimeout,
+        `Gemini model "${model}"`,
+      );
+
+      for await (const chunk of stream) {
+        const delta = extractText(chunk);
+        if (!delta) continue;
+        sentAny = true;
+        send("delta", { text: delta });
+        if (Date.now() > deadline) break;
+      }
+      if (sentAny) {
+        send("done", { ok: true, model });
+        return res.end();
+      }
+      throw new Error(`Gemini model "${model}" produced no text`);
+    } catch (e) {
+      const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ");
+      failures.push(`${model}: ${raw.slice(0, 140)}`);
+      console.error(`stream ${model} failed:`, raw);
+      // A 404/invalid-key model is dead for this key; a 429/503 is transient
+      // and simply moves to the next candidate.
+      if (classifyModelError(raw) === "permanent") deadModels.add(model);
+      // If we already streamed content we must not start a second document
+      // mid-stream — stop and let the client fall back for a clean result.
+      if (sentAny) break;
+    }
+  }
+
+  send("failed", { message: friendlyAiError(failures.join(" | "), language), debug: failures.join(" | ").slice(0, 800) });
+  return res.end();
+});
+
 app.post("/api/ai/refine-app", async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as {
     prompt?: string;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sparkles } from 'lucide-react';
 import { Header } from './components/Header';
 import { ChatSidebar } from './components/ChatSidebar';
@@ -28,6 +28,31 @@ import {
   UserSubscription,
   AuthUser
 } from './types';
+
+/**
+ * Make a partially-received document renderable.
+ *
+ * While the model streams, the HTML we hold is almost always incomplete (no
+ * `</body>`, no `</html>`, maybe not even `<head>` yet). Feeding that straight
+ * into the preview iframe shows a blank page, so we close the tags ourselves
+ * while the stream is still running. The final commit runs the same function,
+ * which makes a truncated answer degrade into a working page instead of a
+ * blank one.
+ */
+function closeDocument(raw: string): string {
+  let out = (raw || '').trim();
+  if (!out) return '';
+  if (!/<html[\s>]/i.test(out)) {
+    out =
+      `<!DOCTYPE html>\n<html lang="ar" dir="rtl">\n<head>\n<meta charset="UTF-8">\n` +
+      `<meta name="viewport" content="width=device-width, initial-scale=1.0">\n</head>\n<body>\n${out}`;
+  } else if (!/<!DOCTYPE/i.test(out)) {
+    out = `<!DOCTYPE html>\n${out}`;
+  }
+  if (!/<\/body>/i.test(out)) out += '\n</body>';
+  if (!/<\/html>/i.test(out)) out += '\n</html>';
+  return out;
+}
 
 export default function App() {
   const [language, setLanguage] = useState<Language>('ar');
@@ -125,10 +150,24 @@ export default function App() {
     document.documentElement.lang = language;
   }, [language]);
 
+  // Live "building…" timer: a silent 100-second wait feels broken, so the
+  // counter is what tells the user the engine is still working.
+  useEffect(() => {
+    if (!isGenerating) return;
+    const id = setInterval(() => {
+      setStreamSeconds((Date.now() - streamStartedAt.current) / 1000);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isGenerating]);
+
   const [currentPlanSteps, setCurrentPlanSteps] = useState<string[]>([]);
   // Prompt of the last generation that failed, so the chat can offer a real
   // "try again" instead of making the user retype a long specification.
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
+  // Streaming progress: seconds elapsed and whether tokens are arriving.
+  const [streamSeconds, setStreamSeconds] = useState<number>(0);
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const streamStartedAt = useRef<number>(Date.now());
 
   // Active Project State
   const [project, setProject] = useState<AppProject>(() => {
@@ -237,6 +276,147 @@ CREATE TABLE records (
     },
   ]);
 
+  // Streaming finaliser shared by the SSE path and the fallback path: takes the
+  // complete document, closes it if the model stopped mid-file, and commits it
+  // as version v1.0.
+  const commitGeneratedSite = (prompt: string, rawCode: string, appName?: string) => {
+    const updatedCode = closeDocument(rawCode) || project.code;
+    const name = appName || prompt.slice(0, 25);
+    const newVersionNum = `v1.0`;
+
+    const newVersion: VersionHistoryItem = {
+      id: String(Date.now()),
+      version: newVersionNum,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      title: name,
+      prompt,
+      code: updatedCode,
+      files: {
+        'index.html': updatedCode,
+        'App.tsx': `// App.tsx\nimport React from 'react';\n\nexport default function App() {\n  return <main>/* Generated with Ebnili */</main>;\n}`,
+        'schema.sql': `-- Supabase Schema\nCREATE TABLE records (id SERIAL PRIMARY KEY, data JSONB);`,
+      },
+    };
+
+    setProject((prev) => ({
+      ...prev,
+      name,
+      code: updatedCode,
+      files: { ...prev.files, 'index.html': updatedCode },
+      versions: [newVersion, ...prev.versions],
+    }));
+
+    const assistantMsg: ChatMessage = {
+      id: String(Date.now() + 1),
+      sender: 'assistant',
+      text: language === 'ar'
+        ? `تم إنشاء الموقع بنجاح! استغرق البناء ${Math.round(streamSeconds)} ثانية.`
+        : `Website generated successfully in ${Math.round(streamSeconds)}s!`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      versionTag: newVersionNum,
+      plan: currentPlanSteps,
+    };
+    setChatMessages((prev) => [...prev, assistantMsg]);
+    setLastFailedPrompt(null);
+  };
+
+  // Consume /api/ai/generate-app/stream and paint the preview as tokens arrive.
+  // Returns false when the stream never produced a single token, which tells
+  // the caller to use the non-streaming endpoint instead.
+  const tryStreamedGeneration = async (
+    prompt: string,
+    templateId: string | undefined,
+    devFp: { deviceId: string; fingerprintHash: string },
+  ): Promise<boolean> => {
+    const res = await fetch('/api/ai/generate-app/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-device-id': devFp.deviceId,
+        'x-fingerprint-hash': devFp.fingerprintHash,
+      },
+      body: JSON.stringify({ prompt, templateId, language }),
+    });
+    if (!res.ok || !res.body) return false;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let received = '';
+    let done = false;
+    let failureMessage = '';
+    setIsStreaming(true);
+
+    // Paint at most every ~450ms: fast enough to feel alive, slow enough that
+    // the iframe is not re-parsed on every single token.
+    let lastPaint = 0;
+    const paint = (force: boolean) => {
+      const now = Date.now();
+      if (!force && now - lastPaint < 450) return;
+      lastPaint = now;
+      setProject((prev) => ({ ...prev, code: closeDocument(received) }));
+    };
+
+    try {
+      while (!done) {
+        const { done: finished, value } = await reader.read();
+        if (finished) break;
+        buffer += decoder.decode(value, { stream: true });
+        // SSE frames are separated by a blank line.
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() ?? '';
+        for (const frame of frames) {
+          const eventLine = frame.split('\n').find((l) => l.startsWith('event: '));
+          const dataLine = frame.split('\n').find((l) => l.startsWith('data: '));
+          if (!eventLine || !dataLine) continue;
+          const event = eventLine.slice(7).trim();
+          let payload: { text?: string; message?: string; ok?: boolean } = {};
+          try {
+            payload = JSON.parse(dataLine.slice(6));
+          } catch {
+            continue;
+          }
+          if (event === 'delta' && payload.text) {
+            received += payload.text;
+            paint(false);
+          } else if (event === 'failed') {
+            failureMessage = payload.message ?? '';
+            done = true;
+          } else if (event === 'done') {
+            done = true;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('stream read failed', err);
+      setIsStreaming(false);
+      return false;
+    }
+
+    setIsStreaming(false);
+
+    if (!received.trim()) {
+      // Nothing came through — let the caller fall back to the normal call.
+      if (failureMessage) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: String(Date.now() + 1),
+            sender: 'assistant',
+            text: failureMessage,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      }
+      return false;
+    }
+
+    paint(true);
+    setStreamSeconds((Date.now() - streamStartedAt.current) / 1000);
+    commitGeneratedSite(prompt, received);
+    return true;
+  };
+
   // Handle New App Generation
   const handleStartProject = async (prompt: string, templateId?: string) => {
     setIsGenerating(true);
@@ -260,6 +440,23 @@ CREATE TABLE records (
 
     try {
       const devFp = getDeviceFingerprint();
+      streamStartedAt.current = Date.now();
+      setStreamSeconds(0);
+
+      // STREAMING FIRST — the preview paints while the model is still writing.
+      // If the stream endpoint is missing or dies before the first token, we
+      // transparently fall back to the non-streaming call below, so this can
+      // never be worse than the previous behaviour.
+      let streamed = false;
+      try {
+        streamed = await tryStreamedGeneration(prompt, templateId, devFp);
+      } catch (streamErr) {
+        console.error('streaming path unavailable, falling back', streamErr);
+        streamed = false;
+      }
+
+      if (streamed) return;
+
       const res = await fetch('/api/ai/generate-app', {
         method: 'POST',
         headers: { 
@@ -307,47 +504,13 @@ CREATE TABLE records (
         return;
       }
 
-      const newVersionNum = `v1.0`;
-      const updatedCode = (data as { code?: string }).code || project.code;
-      const appName = (data as { appName?: string }).appName || prompt.slice(0, 25);
-
-      const newVersion: VersionHistoryItem = {
-        id: String(Date.now()),
-        version: newVersionNum,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        title: appName,
+      // Non-streaming fallback reached — same finaliser as the SSE path.
+      setStreamSeconds((Date.now() - streamStartedAt.current) / 1000);
+      commitGeneratedSite(
         prompt,
-        code: updatedCode,
-        files: {
-          'index.html': updatedCode,
-          'App.tsx': `// App.tsx\nimport React from 'react';\n\nexport default function App() {\n  return <main>/* Generated with Ebnili */</main>;\n}`,
-          'schema.sql': `-- Supabase Schema\nCREATE TABLE records (id SERIAL PRIMARY KEY, data JSONB);`,
-        },
-      };
-
-      setProject((prev) => ({
-        ...prev,
-        name: appName,
-        code: updatedCode,
-        files: {
-          ...prev.files,
-          'index.html': updatedCode,
-        },
-        versions: [newVersion, ...prev.versions],
-      }));
-
-      // Add assistant reply
-      const assistantMsg: ChatMessage = {
-        id: String(Date.now() + 1),
-        sender: 'assistant',
-        text: (data as { explanation?: string }).explanation || (language === 'ar' ? 'تم إنشاء الموقع بنجاح!' : 'Website generated successfully!'),
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        versionTag: newVersionNum,
-        plan: (data as { plan?: string[] }).plan || currentPlanSteps,
-      };
-      setChatMessages((prev) => [...prev, assistantMsg]);
-      // The site really exists now — drop the retry affordance.
-      setLastFailedPrompt(null);
+        (data as { code?: string }).code || '',
+        (data as { appName?: string }).appName,
+      );
     } catch (err) {
       console.error(err);
       const networkMsg: ChatMessage = {
@@ -710,6 +873,8 @@ CREATE TABLE records (
           onRetryPrompt={() => {
             if (lastFailedPrompt) handleStartProject(lastFailedPrompt);
           }}
+          isStreaming={isStreaming}
+          streamSeconds={streamSeconds}
         />
 
         {/* Right Workspace: Preview, Code Editor, or Split View */}
@@ -758,6 +923,7 @@ CREATE TABLE records (
                   language={language}
                   subscriptionTier={subscription.tier}
                   onOpenSubscription={() => setShowSubscription(true)}
+                  isStreaming={isStreaming}
                 />
               </div>
             </div>

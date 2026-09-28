@@ -42,6 +42,10 @@ interface ChatSidebarProps {
   /** Prompt of the last failed generation — enables the one-tap retry bar. */
   retryPrompt?: string | null;
   onRetryPrompt?: () => void;
+  /** True while tokens are streaming in from the AI engine. */
+  isStreaming?: boolean;
+  /** Seconds elapsed in the current generation, for a live counter. */
+  streamSeconds?: number;
 }
 
 export const ChatSidebar = ({
@@ -62,6 +66,8 @@ export const ChatSidebar = ({
   onOpenGeminiStudio,
   retryPrompt,
   onRetryPrompt,
+  isStreaming,
+  streamSeconds,
 }: ChatSidebarProps) => {
   const [activeTab, setActiveTab] = useState<'chat' | 'files' | 'history' | 'subscription'>('chat');
   const [inputText, setInputText] = useState('');
@@ -640,6 +646,19 @@ export const ChatSidebar = ({
             <div className="flex items-center gap-1 font-mono text-[10px] text-emerald-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span>{language === 'ar' ? 'محرك إبنيلي الذكي' : 'Ebnili AI Engine'}</span>
+              {/* While tokens stream in, show the elapsed time so a long build
+                  reads as progress instead of a frozen screen. */}
+              {isGenerating && streamSeconds !== undefined && streamSeconds > 1 && (
+                <span className="text-slate-400 ml-1">
+                  · {Math.floor(streamSeconds / 60)}:
+                  {String(Math.floor(streamSeconds % 60)).padStart(2, '0')}
+                </span>
+              )}
+              {isStreaming && (
+                <span className="text-rose-300 ml-1 animate-pulse">
+                  ● {language === 'ar' ? 'يكتب الآن' : 'writing'}
+                </span>
+              )}
             </div>
 
             {inputText.trim() && (

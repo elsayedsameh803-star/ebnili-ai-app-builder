@@ -18,6 +18,8 @@ interface PreviewFrameProps {
   language: Language;
   subscriptionTier?: 'free' | 'pro' | 'business';
   onOpenSubscription?: () => void;
+  /** True while the AI is still streaming the document into this frame. */
+  isStreaming?: boolean;
 }
 
 export const PreviewFrame = ({
@@ -28,6 +30,7 @@ export const PreviewFrame = ({
   language,
   subscriptionTier = 'free',
   onOpenSubscription,
+  isStreaming = false,
 }: PreviewFrameProps) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([]);
@@ -263,6 +266,14 @@ export const PreviewFrame = ({
             className="w-full h-full border-0 bg-white"
             sandbox="allow-scripts allow-forms allow-modals"
           />
+
+          {/* Live "writing" ribbon over the preview while tokens stream in. */}
+          {isStreaming && (
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-slate-950/90 border border-rose-500/40 shadow-2xl px-3 py-1.5 rounded-full text-[11px] font-bold text-rose-200 backdrop-blur-md">
+              <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+              <span>{language === 'ar' ? 'يكتب الموقع الآن…' : 'Building your site…'}</span>
+            </div>
+          )}
 
           {/* Watermark Notice for Free Tier */}
           {subscriptionTier === 'free' && (
