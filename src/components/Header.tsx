@@ -82,6 +82,7 @@ export const Header = ({
   const [showProjectsMenu, setShowProjectsMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const projectsMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Owner-only controls (admin dashboard, backend/database console) stay hidden
   // from ordinary users. `authUser.isOwner` is stamped by the server on
@@ -89,17 +90,35 @@ export const Header = ({
   // and server-side `requireAdmin` remains the real boundary.
   const isOwner = isOwnerAccount(authUser);
 
-  // Close the account dropdown on any outside click.
+  // Close both menus on any outside click. The menu panels are rendered as
+  // direct children of <header> (outside the scrolling bar), so the check has
+  // to cover the trigger buttons AND the panels themselves — otherwise the
+  // very first click on an item would register as "outside" and close the menu
+  // before the click landed.
   useEffect(() => {
-    if (!showUserMenu) return;
+    if (!showUserMenu && !showProjectsMenu) return;
     const onDocClick = (e: MouseEvent) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
         setShowUserMenu(false);
+      }
+      if (projectsMenuRef.current && !projectsMenuRef.current.contains(target)) {
+        setShowProjectsMenu(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowUserMenu(false);
+        setShowProjectsMenu(false);
       }
     };
     document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [showUserMenu]);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showUserMenu, showProjectsMenu]);
 
   useEffect(() => {
     setNameInput(projectName);
@@ -117,7 +136,14 @@ export const Header = ({
     // on a 375px phone), so half the controls were cut off / unreachable and the
     // layout felt broken. It is now horizontally scrollable as a safety net, and
     // the labels that do not fit are dropped below `sm` (see each button).
-    <header className="h-14 bg-slate-900 text-slate-100 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between gap-2 overflow-x-auto shrink-0 select-none z-20">
+    // The bar scrolls sideways on narrow screens, but the two dropdowns are
+    // rendered OUTSIDE that scroller (at the end of this file). Putting them
+    // inside made `overflow-x-auto` on the ancestor compute `overflow-y: auto`
+    // too, which clipped every menu to the 56px bar height — the owner tools
+    // looked unopenable. Never put an absolutely-positioned menu inside a
+    // scroll container.
+    <header className="relative h-14 bg-slate-900 text-slate-100 border-b border-slate-800 shrink-0 select-none z-30">
+      <div className="h-full flex items-center justify-between gap-2 px-2 sm:px-4 overflow-x-auto">
       {/* Left: Brand & Project Name */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink">
         <button
@@ -172,43 +198,7 @@ export const Header = ({
             </div>
           )}
 
-          {/* Projects Dropdown */}
-          {showProjectsMenu && projects.length > 0 && (
-            <div className="absolute top-full left-0 mt-1.5 w-60 max-w-[calc(100vw-1rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1.5 space-y-1">
-              <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase">
-                {language === 'ar' ? 'مشاريعك المحفوظة' : 'Saved Projects'}
-              </div>
-              {projects.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    if (onSelectProject) onSelectProject(p.id);
-                    setShowProjectsMenu(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition ${
-                    p.id === activeProjectId
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold'
-                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                >
-                  <span className="truncate">{p.name}</span>
-                  {p.id === activeProjectId && <span className="text-rose-400 text-xs">✓</span>}
-                </button>
-              ))}
-              <div className="border-t border-slate-800 pt-1 mt-1">
-                <button
-                  onClick={() => {
-                    onNewProject();
-                    setShowProjectsMenu(false);
-                  }}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-1.5 transition"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>{language === 'ar' ? 'مشروع جديد' : 'New Project'}</span>
-                </button>
-              </div>
-            </div>
-          )}
+          {/* Projects Dropdown — see the end of <header>, outside the scroller. */}
 
           {isGenerating ? (
             <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 animate-pulse shrink-0">
@@ -355,7 +345,7 @@ export const Header = ({
 
         {/* User account: sign-in button (guest) or avatar menu (signed in) */}
         {authUser ? (
-          <div className="relative" ref={userMenuRef}>
+          <div className="relative">
             <button
               onClick={() => setShowUserMenu((v) => !v)}
               className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 transition cursor-pointer"
@@ -378,94 +368,7 @@ export const Header = ({
               </span>
             </button>
 
-            {showUserMenu && (
-              // Anchored to the RIGHT edge: the account button sits at the far
-              // right of the bar, so a left-anchored 240px panel ran off the
-              // right edge of a phone. The owner tools live in here, so it has
-              // to be reachable on small screens.
-              <div className="absolute top-full right-0 mt-1.5 w-60 max-w-[calc(100vw-1rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1.5">
-                <div className="px-2.5 py-2 border-b border-slate-800">
-                  <div className="flex items-center gap-2.5">
-                    {authUser.picture ? (
-                      <img
-                        src={authUser.picture}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        className="w-9 h-9 rounded-full object-cover"
-                      />
-                    ) : (
-                      <span className="w-9 h-9 rounded-full bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center">
-                        <UserIcon className="w-4 h-4 text-white" />
-                      </span>
-                    )}
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate">{authUser.name}</div>
-                      {authUser.email && (
-                        <div className="text-[10px] text-slate-400 truncate" dir="ltr">
-                          {authUser.email}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-2 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                    {authUser.provider === 'google' ? 'Google' : 'GitHub'}
-                  </div>
-                </div>
-
-                {/* ── Owner-only tools ──────────────────────────────────────
-                    These live HERE, inside the account dropdown, and only for
-                    the site owner. They used to sit in the shared top bar,
-                    which exposed owner surfaces in front of ordinary users and
-                    ate the width a phone needs. `isOwner` is the server-issued
-                    flag — see `isOwnerAccount`. */}
-                {isOwner && (onOpenAdmin || onOpenIntegrations) && (
-                  <div className="mt-1 pt-1 border-t border-slate-800">
-                    <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
-                      {language === 'ar' ? 'أدوات المالك فقط' : 'Owner tools only'}
-                    </div>
-
-                    {onOpenAdmin && (
-                      <button
-                        onClick={() => {
-                          setShowUserMenu(false);
-                          onOpenAdmin();
-                        }}
-                        className="w-full text-right px-2.5 py-2 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/10 flex items-center gap-2 transition"
-                        title={language === 'ar' ? 'لوحة تحكم صاحب الموقع (إحصائيات وحماية الأجهزة)' : 'Owner admin dashboard'}
-                      >
-                        <Shield className="w-3.5 h-3.5 text-rose-400" />
-                        <span>{language === 'ar' ? 'لوحة المالك' : 'Owner admin panel'}</span>
-                      </button>
-                    )}
-
-                    {onOpenIntegrations && (
-                      <button
-                        onClick={() => {
-                          setShowUserMenu(false);
-                          onOpenIntegrations();
-                        }}
-                        className="w-full text-right px-2.5 py-2 rounded-lg text-xs font-bold text-slate-200 hover:bg-slate-800 flex items-center gap-2 transition"
-                        title={language === 'ar' ? 'قواعد البيانات والتكاملات' : 'Database & integrations'}
-                      >
-                        <Database className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>{language === 'ar' ? 'قاعدة البيانات والتكاملات' : 'Database & integrations'}</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <button
-                  onClick={() => {
-                    setShowUserMenu(false);
-                    onLogout?.();
-                  }}
-                  className="w-full text-left px-2.5 py-2 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 transition mt-1"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>{language === 'ar' ? 'تسجيل الخروج' : 'Sign out'}</span>
-                </button>
-              </div>
-            )}
+            {/* Account dropdown — see the end of <header>, outside the scroller. */}
           </div>
         ) : (
           onOpenAuth && (
@@ -525,6 +428,138 @@ export const Header = ({
           <Plus className="w-4 h-4" />
         </button>
       </div>
+      </div>{/* /scroller */}
+
+      {/* ── Dropdowns: OUTSIDE the horizontally scrolling bar ────────────────
+          A scroll container clips absolutely-positioned children, so these
+          live as direct children of <header> (which is `relative`). */}
+      {showProjectsMenu && projects.length > 0 && (
+        <div
+          ref={projectsMenuRef}
+          className="absolute top-full left-2 sm:left-4 mt-1.5 w-64 max-w-[calc(100vw-1rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5 space-y-1"
+        >
+          <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase">
+            {language === 'ar' ? 'مشاريعك المحفوظة' : 'Saved Projects'}
+          </div>
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                if (onSelectProject) onSelectProject(p.id);
+                setShowProjectsMenu(false);
+              }}
+              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition ${
+                p.id === activeProjectId
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <span className="truncate">{p.name}</span>
+              {p.id === activeProjectId && <span className="text-rose-400 text-xs">✓</span>}
+            </button>
+          ))}
+          <div className="border-t border-slate-800 pt-1 mt-1">
+            <button
+              onClick={() => {
+                onNewProject();
+                setShowProjectsMenu(false);
+              }}
+              className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-1.5 transition"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{language === 'ar' ? 'مشروع جديد' : 'New Project'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showUserMenu && (
+        <div
+          ref={userMenuRef}
+          className="absolute top-full right-2 sm:right-4 mt-1.5 w-64 max-w-[calc(100vw-1rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5"
+        >
+          <div className="px-2.5 py-2 border-b border-slate-800">
+            <div className="flex items-center gap-2.5">
+              {authUser?.picture ? (
+                <img
+                  src={authUser.picture}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="w-9 h-9 rounded-full object-cover"
+                />
+              ) : (
+                <span className="w-9 h-9 rounded-full bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center">
+                  <UserIcon className="w-4 h-4 text-white" />
+                </span>
+              )}
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-white truncate">{authUser?.name}</div>
+                {authUser?.email && (
+                  <div className="text-[10px] text-slate-400 truncate" dir="ltr">
+                    {authUser.email}
+                  </div>
+                )}
+              </div>
+            </div>
+            {authUser?.provider && (
+              <div className="mt-2 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                {authUser.provider === 'google' ? 'Google' : 'GitHub'}
+              </div>
+            )}
+          </div>
+
+          {/* ── Owner-only tools ────────────────────────────────────────────
+              Owner surfaces live HERE, inside the account dropdown, and only
+              for the site owner. `isOwner` is the server-issued flag — see
+              `isOwnerAccount`. */}
+          {isOwner && (onOpenAdmin || onOpenIntegrations) && (
+            <div className="mt-1 pt-1 border-t border-slate-800">
+              <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                {language === 'ar' ? 'أدوات المالك فقط' : 'Owner tools only'}
+              </div>
+
+              {onOpenAdmin && (
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    onOpenAdmin();
+                  }}
+                  className="w-full text-right px-2.5 py-2 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/10 flex items-center gap-2 transition"
+                  title={language === 'ar' ? 'لوحة تحكم صاحب الموقع (إحصائيات وحماية الأجهزة)' : 'Owner admin dashboard'}
+                >
+                  <Shield className="w-3.5 h-3.5 text-rose-400" />
+                  <span>{language === 'ar' ? 'لوحة المالك' : 'Owner admin panel'}</span>
+                </button>
+              )}
+
+              {onOpenIntegrations && (
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    onOpenIntegrations();
+                  }}
+                  className="w-full text-right px-2.5 py-2 rounded-lg text-xs font-bold text-slate-200 hover:bg-slate-800 flex items-center gap-2 transition"
+                  title={language === 'ar' ? 'قواعد البيانات والتكاملات' : 'Database & integrations'}
+                >
+                  <Database className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{language === 'ar' ? 'قاعدة البيانات والتكاملات' : 'Database & integrations'}</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={() => {
+              setShowUserMenu(false);
+              onLogout?.();
+            }}
+            className="w-full text-left px-2.5 py-2 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 transition mt-1"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>{language === 'ar' ? 'تسجيل الخروج' : 'Sign out'}</span>
+          </button>
+        </div>
+      )}
     </header>
   );
 };

@@ -160,6 +160,9 @@ export default function App() {
     return () => clearInterval(id);
   }, [isGenerating]);
 
+  const AUTOSAVE_KEY = 'ebnili_autosave_v1';
+
+
   const [currentPlanSteps, setCurrentPlanSteps] = useState<string[]>([]);
   // Prompt of the last generation that failed, so the chat can offer a real
   // "try again" instead of making the user retype a long specification.
@@ -275,6 +278,44 @@ CREATE TABLE records (
       timestamp: 'الآن',
     },
   ]);
+
+  // ── Auto-save: a professional builder never loses your work ───────────────
+  // Everything lived in React state, so one refresh threw away a site that took
+  // a minute of engine time to generate. Persist (debounced) and restore.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          AUTOSAVE_KEY,
+          JSON.stringify({ project, chatMessages, savedAt: Date.now() }),
+        );
+      } catch {
+        /* private mode / quota exceeded — the app still works, just no restore */
+      }
+    }, 800);
+    return () => clearTimeout(id);
+  }, [project, chatMessages]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { project?: AppProject; chatMessages?: ChatMessage[] };
+      // Only restore real generated work, never the untouched placeholder.
+      if (saved.project?.code && /<html/i.test(saved.project.code) && !/ابدأ مشروعك/.test(saved.project.code)) {
+        setProject(saved.project);
+        setHasStarted(true);
+      }
+      if (Array.isArray(saved.chatMessages) && saved.chatMessages.length > 1) {
+        setChatMessages(saved.chatMessages);
+      }
+    } catch {
+      /* ignore an unreadable autosave */
+    }
+    // Restore pass — runs once on mount, not as a sync loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   // Streaming finaliser shared by the SSE path and the fallback path: takes the
   // complete document, closes it if the model stopped mid-file, and commits it

@@ -159,8 +159,12 @@ export const ChatSidebar = ({
     setInputText('');
   };
 
+  // PROMPT BEHAVIOUR (matches the professional AI builders): Enter inserts a new
+  // line — a specification is several paragraphs long and needs them — and
+  // Cmd/Ctrl + Enter submits. The old "Enter sends" made multi-line briefs
+  // impossible to write.
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSend();
     }
@@ -710,7 +714,9 @@ export const ChatSidebar = ({
 
           <div className="flex items-center justify-between text-[11px] text-slate-400">
             <span className="hidden sm:inline">
-              {language === 'ar' ? 'اضغط Enter للإرسال' : 'Press Enter to generate'}
+              {language === 'ar'
+                ? 'Ctrl/⌘ + Enter للإرسال · Enter لسطر جديد'
+                : 'Ctrl/⌘ + Enter to send · Enter for a new line'}
             </span>
 
             <button
