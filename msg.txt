@@ -1,0 +1,20 @@
+feat: real multi-project store with save, rename, delete and reopen
+
+There was exactly one implicit project in a single localStorage key: starting
+a second site silently overwrote the first, and the header project list could
+never be populated. Now every project is a first-class record.
+
+- src/lib/projects.ts: a small local-first store. A separate index (id, name,
+  timestamps, version count, text preview) keeps listing cheap, and one body
+  key per project holds the full document plus its chat. A save prunes the
+  least recently used project and retries when the ~5MB quota is hit, so the
+  work in front of the user is never what fails. Every call is defensive
+  against private mode and corrupt JSON.
+- App: an id is minted on the first real generation (so the list never fills
+  with placeholders), every project auto-saves under its own id, reopening
+  restores the project AND its chat, and new/select/delete/rename are wired.
+- Header: the project menu is a real list - name, version count, relative
+  time, rename and delete per row, an active marker, and an honest empty
+  state.
+
+Build verified (1701 modules, no errors) and deployed to production.
