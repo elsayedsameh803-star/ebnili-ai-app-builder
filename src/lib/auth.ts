@@ -291,16 +291,46 @@ export function getAuthErrorMessage(code: string, language: 'ar' | 'en'): string
     : 'Sign-in failed. Please try again.';
 }
 
-/** Which providers the server has credentials for (hides the rest of the UI). */
-export async function fetchAuthProviders(): Promise<AuthProviderInfo[]> {
+/**
+ * Single source of truth for the sign-in UI.
+ *
+ * The client used to read /api/auth/providers for the button list and
+ * /api/auth/config for the callback URLs, so the two could describe different
+ * things. Everything now comes from the single /api/auth/providers response.
+ */
+export interface AuthRuntime {
+  providers: AuthProviderInfo[];
+  baseUrl: string;
+  route: 'supabase' | 'direct';
+  callbackBase: string;
+}
+
+export async function fetchAuthRuntime(): Promise<AuthRuntime | null> {
   try {
     const res = await fetch('/api/auth/providers');
-    if (!res.ok) return [];
-    const data = (await res.json()) as { providers?: AuthProviderInfo[] };
-    return Array.isArray(data.providers) ? data.providers : [];
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      providers?: AuthProviderInfo[];
+      baseUrl?: string;
+      route?: 'supabase' | 'direct';
+      callbackBase?: string;
+    };
+    if (!Array.isArray(data.providers)) return null;
+    return {
+      providers: data.providers,
+      baseUrl: data.baseUrl ?? '',
+      route: data.route ?? 'direct',
+      callbackBase: data.callbackBase ?? '',
+    };
   } catch {
-    return [];
+    return null;
   }
+}
+
+/** Which providers the server has credentials for (hides the rest of the UI). */
+export async function fetchAuthProviders(): Promise<AuthProviderInfo[]> {
+  const runtime = await fetchAuthRuntime();
+  return runtime?.providers ?? [];
 }
 
 /**
@@ -357,19 +387,18 @@ export function startOAuth(provider: AuthProviderId): void {
 }
 
 /**
- * The exact callback URLs the server redirects to. Shown in the UI so a
- * redirect_uri mismatch can be fixed by copying the value, rather than
- * guessing at the path.
+ * The exact callback URLs that must be registered on the provider / Supabase
+ * side, shown in the UI so a redirect_uri mismatch can be fixed by copying the
+ * value rather than guessing. Derived from the same /api/auth/providers
+ * response as the buttons, so the two can never disagree.
  */
 export async function fetchAuthCallbacks(): Promise<{ google: string; github: string } | null> {
-  try {
-    const res = await fetch('/api/auth/config');
-    if (!res.ok) return null;
-    const data = (await res.json()) as { callbacks?: { google: string; github: string } };
-    return data.callbacks ?? null;
-  } catch {
-    return null;
-  }
+  const runtime = await fetchAuthRuntime();
+  if (!runtime?.callbackBase) return null;
+  return {
+    google: `${runtime.callbackBase}/google`,
+    github: `${runtime.callbackBase}/github`,
+  };
 }
 
 export async function logout(): Promise<void> {

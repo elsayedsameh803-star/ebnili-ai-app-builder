@@ -728,6 +728,32 @@ const AUTH_STATE_COOKIE = "ebnili_oauth_state";
 const AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
+/**
+ * Canonical attributes for every auth cookie.
+ *
+ * A cookie can only be deleted when the deletion carries the SAME attributes it
+ * was set with — most importantly `Secure`. The state and PKCE cookies were
+ * being set with `secure: true` in production but deleted with a bare
+ * `{ path: "/" }`, so on some browsers the single-use delete silently failed and
+ * a stale nonce survived the round trip. Express clears by emitting an expired
+ * cookie, and the browser only replaces it if the name/domain/path/Secure
+ * attributes line up — hence one helper used by BOTH set and clear.
+ */
+function authCookieOptions(maxAgeMs?: number) {
+  return {
+    httpOnly: true,
+    secure: Boolean(process.env.VERCEL),
+    sameSite: "lax" as const,
+    path: "/",
+    ...(maxAgeMs ? { maxAge: maxAgeMs } : {}),
+  };
+}
+
+/** Delete an auth cookie with exactly the attributes it was created with. */
+function clearAuthCookie(res: Response, name: string): void {
+  res.clearCookie(name, authCookieOptions());
+}
+
 function authSessionSecret(): string {
   return (
     process.env.AUTH_SESSION_SECRET ||
@@ -1028,13 +1054,23 @@ async function exchangeGitHubCode(code: string, redirectUri: string): Promise<Au
 // otherwise Express would treat "me" / "logout" / "providers" as a provider id.
 
 // Which providers can actually be used right now (drives the UI).
-// With Supabase configured we broker both providers through it, so both are
-// offered even though our own Google/GitHub credentials may be absent.
-app.get("/api/auth/providers", (_req: AuthReq, res: AuthRes) => {
+//
+// This is the SINGLE source of truth for the client: it reports the providers,
+// which route will actually handle them ("supabase" or "direct"), and the exact
+// callback URL that must be registered on the provider/Supabase side. The UI
+// used to merge this with /api/auth/config, so the two could disagree; now the
+// client derives everything from one response.
+app.get("/api/auth/providers", (req: AuthReq, res: AuthRes) => {
   const ids: AuthProviderId[] = ["google", "github"];
   const sb = supabaseConfig().configured;
+  const base = requestBaseUrl(req);
   res.json({
     success: true,
+    baseUrl: base,
+    route: sb ? "supabase" : "direct",
+    // The callback that must be whitelisted. With Supabase brokering, the
+    // browser lands on the Supabase callback and Supabase then calls back here.
+    callbackBase: sb ? `${base}/api/auth/callback/supabase` : `${base}/api/auth/callback`,
     providers: ids.map((id) => ({
       id,
       configured: sb || providerConfig(id).configured,
@@ -1060,8 +1096,9 @@ app.get("/api/auth/me", (req: AuthReq, res: AuthRes) => {
 });
 
 app.post("/api/auth/logout", (_req: AuthReq, res: AuthRes) => {
-  res.clearCookie(AUTH_COOKIE_NAME, { path: "/" });
-  res.clearCookie(AUTH_STATE_COOKIE, { path: "/" });
+  clearAuthCookie(res, AUTH_COOKIE_NAME);
+  clearAuthCookie(res, AUTH_STATE_COOKIE);
+  clearAuthCookie(res, AUTH_PKCE_COOKIE);
   res.json({ success: true, authenticated: false });
 });
 
@@ -1122,13 +1159,7 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
 
     // The verifier stays server-side in an HttpOnly cookie; only the derived
     // challenge ever goes to the browser, so a stolen callback code is useless.
-    res.cookie(AUTH_PKCE_COOKIE, `${provider}.${verifier}`, {
-      httpOnly: true,
-      secure: Boolean(process.env.VERCEL),
-      sameSite: "lax",
-      path: "/",
-      maxAge: AUTH_STATE_TTL_MS,
-    });
+    res.cookie(AUTH_PKCE_COOKIE, `${provider}.${verifier}`, authCookieOptions(AUTH_STATE_TTL_MS));
 
     const url = new URL(`${sb.url}/auth/v1/authorize`);
     // Never emit a URL that still carries a PostgREST/GoTrue API segment —
@@ -1164,13 +1195,9 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
   }
 
   const state = crypto.randomBytes(24).toString("hex");
-  res.cookie(AUTH_STATE_COOKIE, `${provider}.${state}`, {
-    httpOnly: true,
-    secure: Boolean(process.env.VERCEL),
-    sameSite: "lax", // the provider returns via a top-level GET navigation
-    path: "/",
-    maxAge: AUTH_STATE_TTL_MS,
-  });
+  // The provider returns via a top-level GET navigation, so SameSite=Lax is
+  // required; the attributes come from one place so the delete below matches.
+  res.cookie(AUTH_STATE_COOKIE, `${provider}.${state}`, authCookieOptions(AUTH_STATE_TTL_MS));
 
   const redirectUri = authCallbackUrl(req, provider);
   const url =
@@ -1214,7 +1241,7 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
 
   // Single-use: clear the verifier cookie on read so a replayed callback fails.
   const stored = readCookie(req, AUTH_PKCE_COOKIE);
-  res.clearCookie(AUTH_PKCE_COOKIE, { path: "/" });
+  clearAuthCookie(res, AUTH_PKCE_COOKIE);
   if (!stored) return fail("pkce_missing");
   const sep = stored.indexOf(".");
   if (sep <= 0) return fail("pkce_invalid");
@@ -1250,13 +1277,7 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
     const identity = mapSupabaseUser(tokenJson.user || {});
     if (!identity) return fail("profile_failed");
 
-    res.cookie(AUTH_COOKIE_NAME, issueAuthSession(identity), {
-      httpOnly: true,
-      secure: Boolean(process.env.VERCEL),
-      sameSite: "lax",
-      path: "/",
-      maxAge: AUTH_SESSION_TTL_MS,
-    });
+    res.cookie(AUTH_COOKIE_NAME, issueAuthSession(identity), authCookieOptions(AUTH_SESSION_TTL_MS));
     return res.redirect(`${home}/?auth=success`);
   } catch (e) {
     console.error("supabase callback failed:", e instanceof Error ? e.message : String(e));
@@ -1282,7 +1303,7 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
   // Single-use CSRF nonce: the cookie is cleared on first read, so a replayed
   // callback URL can never mint a second session.
   const expected = readCookie(req, AUTH_STATE_COOKIE);
-  res.clearCookie(AUTH_STATE_COOKIE, { path: "/" });
+  clearAuthCookie(res, AUTH_STATE_COOKIE);
   if (!expected) return fail("state_cookie_missing");
   const sep = expected.indexOf(".");
   if (sep <= 0) return fail("state_cookie_invalid");
@@ -1300,13 +1321,7 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
         : await exchangeGitHubCode(code, redirectUri);
     if (!user) return fail("profile_failed");
 
-    res.cookie(AUTH_COOKIE_NAME, issueAuthSession(user), {
-      httpOnly: true,
-      secure: Boolean(process.env.VERCEL),
-      sameSite: "lax",
-      path: "/",
-      maxAge: AUTH_SESSION_TTL_MS,
-    });
+    res.cookie(AUTH_COOKIE_NAME, issueAuthSession(user), authCookieOptions(AUTH_SESSION_TTL_MS));
     return res.redirect(`${home}/?auth=success`);
   } catch (e) {
     console.error("auth callback failed:", e instanceof Error ? e.message : String(e));
