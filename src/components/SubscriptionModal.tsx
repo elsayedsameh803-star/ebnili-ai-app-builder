@@ -83,14 +83,16 @@ export const SubscriptionModal = ({
   if (!isOpen) return null;
 
   const selectedPlan = SUBSCRIPTION_PLANS.find(p => p.id === selectedPlanTier) || SUBSCRIPTION_PLANS[1];
-  const targetPrice = billingCycle === 'yearly' ? selectedPlan.priceYearly : selectedPlan.priceMonthly;
+  // The form asks for the amount that leaves the customer's wallet, so it is
+  // always the EGP figure — the USD price is the headline only.
+  const targetEgp = billingCycle === 'yearly' ? selectedPlan.payEgpYearly : selectedPlan.payEgpMonthly;
 
   const handleSelectPlanToCheckout = (tier: SubscriptionTier) => {
     if (tier === 'free') return;
     setSelectedPlanTier(tier);
     const plan = SUBSCRIPTION_PLANS.find(p => p.id === tier);
-    const price = billingCycle === 'yearly' ? plan?.priceYearly : plan?.priceMonthly;
-    setAmountInput(String(price || 249));
+    const amount = billingCycle === 'yearly' ? plan?.payEgpYearly : plan?.payEgpMonthly;
+    setAmountInput(String(amount || 0));
     setErrorMessage(null);
     setActiveTab('checkout');
   };
@@ -149,7 +151,7 @@ export const SubscriptionModal = ({
           billingCycle,
           senderPhone: senderPhone.trim(),
           transactionReference: transactionReference.trim(),
-          amount: Number(amountInput) || targetPrice,
+          amount: Number(amountInput) || targetEgp,
           userName: userName.trim() || undefined,
           userEmail: userEmail.trim() || undefined,
           deviceId: devFp.deviceId,
@@ -345,6 +347,7 @@ export const SubscriptionModal = ({
                 {SUBSCRIPTION_PLANS.map((plan) => {
                   const isCurrent = subscription.tier === plan.id;
                   const price = billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly;
+                  const egp = billingCycle === 'yearly' ? plan.payEgpYearly : plan.payEgpMonthly;
 
                   return (
                     <div
@@ -371,7 +374,8 @@ export const SubscriptionModal = ({
                           </p>
                         </div>
 
-                        {/* Price Display */}
+                        {/* Price Display — USD list price, with the exact EGP
+                            amount to transfer to Orange Cash underneath. */}
                         <div className="flex items-baseline gap-1 py-2 border-y border-slate-800/80">
                           {price === 0 ? (
                             <span className="text-2xl font-black text-white">
@@ -379,16 +383,20 @@ export const SubscriptionModal = ({
                             </span>
                           ) : (
                             <>
-                              <span className="text-3xl font-black text-white font-mono">{price}</span>
-                              <span className="text-xs font-semibold text-orange-400">
-                                {language === 'ar' ? 'ج.م' : 'EGP'}
-                              </span>
+                              <span className="text-3xl font-black text-white font-mono">${price.toFixed(2)}</span>
                               <span className="text-xs text-slate-400">
                                 /{billingCycle === 'yearly' ? (language === 'ar' ? 'سنة' : 'yr') : (language === 'ar' ? 'شهر' : 'mo')}
                               </span>
                             </>
                           )}
                         </div>
+                        {price !== 0 && (
+                          <div className="text-[11px] text-orange-300/90 -mt-2">
+                            {language === 'ar'
+                              ? `المبلغ المطلوب تحويله: ${egp} ج.م عبر أورانج كاش`
+                              : `Transfer ${egp} EGP via Orange Cash`}
+                          </div>
+                        )}
 
                         {/* Features List */}
                         <div className="space-y-2 pt-1">
@@ -501,7 +509,7 @@ export const SubscriptionModal = ({
                   <div className="flex items-center justify-between pt-2 border-t border-slate-800">
                     <span className="text-xs text-slate-400">{language === 'ar' ? 'المبلغ المطلوب تحويله:' : 'Amount to transfer:'}</span>
                     <span className="text-xl font-black text-orange-400 font-mono">
-                      {targetPrice} <span className="text-xs text-slate-300 font-sans">{language === 'ar' ? 'جنيه مصري' : 'EGP'}</span>
+                      {targetEgp} <span className="text-xs text-slate-300 font-sans">{language === 'ar' ? 'جنيه مصري' : 'EGP'}</span>
                     </span>
                   </div>
                 </div>

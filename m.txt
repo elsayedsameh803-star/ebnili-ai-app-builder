@@ -1,0 +1,35 @@
+feat(pricing): USD list prices, real /pricing and /pay pages, owner-only admin
+
+PRICING — one source of truth in src/data/plans.ts. List prices are now
+Pro $9.99 and Business $14.99 (yearly = 10 months). The old 249 / 2,490 /
+599 / 5,990 EGP figures and the Arabic payment steps that quoted them are gone
+from the codebase. Because Orange Cash is an Egyptian wallet and can only
+receive EGP, each plan also carries the exact EGP amount to transfer, derived
+from one USD_TO_EGP constant — change the rate in one place and every figure
+recalculates. Checkout submits the EGP amount, not the USD headline.
+
+/pricing and /pay — the app has no router on purpose; vercel.json already
+rewrites every non-/api path to index.html, so these are real URLs handled in
+App.tsx with zero deployment risk. Both render above the auth gate so a
+visitor can read prices and pay before signing in. The pay page shows the plan
+prices, the Orange Cash number 01207782741, a copy button, a QR rendered
+locally from that number (never sent to a third-party QR service), the payment
+steps, and a receipt upload (image/PDF up to 5 MB).
+
+Receipts go to a `payments-pending` bucket. Supabase Storage is used when
+configured, with an S3-compatible endpoint as an alternative. If neither is
+configured the API answers 503 with the WhatsApp fallback instead of
+pretending the upload succeeded — a payment receipt that silently disappears
+is worse than a clear error. Uploads never grant a tier; activation stays a
+manual owner action.
+
+ADMIN — admin is now the site owner account, elsayedsameh803@gmail.com, and
+nothing else. requireAdmin verifies BOTH the signed account session and the PIN
+(the address is public, so neither factor is enough alone), and returns 404
+rather than 401 so the admin surface simply does not exist from the outside.
+/api/admin/auth answers 404 for a non-owner too, so nobody can even obtain a
+session to try elsewhere with.
+
+No Gemini code and no API key were touched.
+Build verified (1704 modules, no errors), deployed with --prod --force, and
+verified live: /pricing and /pay return 200, /api/admin/overview returns 404.

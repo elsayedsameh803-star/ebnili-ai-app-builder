@@ -75,9 +75,18 @@ export interface SubscriptionPlan {
   nameEn: string;
   taglineAr: string;
   taglineEn: string;
+  /** List price in USD — the headline number shown everywhere. */
   priceMonthly: number;
   priceYearly: number;
   currency: string;
+  /**
+   * Exact amount to transfer to the Orange Cash wallet (EGP). Orange Cash is an
+   * Egyptian wallet and cannot receive USD, so this is what the customer
+   * actually pays; it is derived from the USD price by `USD_TO_EGP` in
+   * `data/plans.ts` and never hard-coded.
+   */
+  payEgpMonthly: number;
+  payEgpYearly: number;
   badgeAr?: string;
   badgeEn?: string;
   isPopular?: boolean;

@@ -3,6 +3,34 @@ import { SubscriptionPlan } from '../types';
 export const ORANGE_CASH_WALLET_NUMBER = '01207782741';
 export const ORANGE_CASH_USSD_CODE = '#115#';
 
+/**
+ * PRICING — single source of truth for the whole site.
+ *
+ * List prices are quoted in USD (Pro $9.99 / Business $14.99). Payments are
+ * collected through Orange Cash, an EGYPTIAN wallet that can only receive
+ * Egyptian pounds, so each plan also carries the exact EGP amount to transfer.
+ * Both numbers are derived here and nowhere else — the old 249 / 2,490 /
+ * 599 / 5,990 EGP prices are gone from the entire codebase.
+ *
+ * TO UPDATE THE RATE: change USD_TO_EGP only. Every EGP figure recalculates.
+ */
+export const USD_TO_EGP = 50;
+
+/** Yearly billing is charged for 10 months (two months free), in USD. */
+const YEARLY_MONTHS = 10;
+
+/** USD list price → the exact EGP amount to send to the wallet. */
+export function egpAmount(usd: number): number {
+  // Round to a clean, memorable transfer amount.
+  const raw = usd * USD_TO_EGP;
+  return Math.round(raw) === raw ? raw : Math.round(raw);
+}
+
+const PRO_USD = 9.99;
+const BUSINESS_USD = 14.99;
+const PRO_USD_YEARLY = Number((PRO_USD * YEARLY_MONTHS).toFixed(2));
+const BUSINESS_USD_YEARLY = Number((BUSINESS_USD * YEARLY_MONTHS).toFixed(2));
+
 export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   {
     id: 'free',
@@ -12,7 +40,9 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     taglineEn: 'For exploring Ebnili and building quick prototypes',
     priceMonthly: 0,
     priceYearly: 0,
-    currency: 'EGP',
+    currency: 'USD',
+    payEgpMonthly: 0,
+    payEgpYearly: 0,
     badgeAr: 'للمبتدئين',
     badgeEn: 'Starter',
     featuresAr: [
@@ -40,9 +70,11 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     nameEn: 'Professional Pro',
     taglineAr: 'للمطورين ورواد الأعمال وصناع المنتجات الرقمية',
     taglineEn: 'For creators, developers and indie hackers shipping fast',
-    priceMonthly: 249,
-    priceYearly: 2490, // 2 months free
-    currency: 'EGP',
+    priceMonthly: PRO_USD,
+    priceYearly: PRO_USD_YEARLY,
+    currency: 'USD',
+    payEgpMonthly: egpAmount(PRO_USD),
+    payEgpYearly: egpAmount(PRO_USD_YEARLY),
     badgeAr: 'الأكثر طلباً 🔥',
     badgeEn: 'Most Popular 🔥',
     isPopular: true,
@@ -75,9 +107,11 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     nameEn: 'Business & Agency',
     taglineAr: 'للشركات والوكالات التي تبني تطبيقات لعملائها',
     taglineEn: 'For agencies and studios building software for clients',
-    priceMonthly: 599,
-    priceYearly: 5990,
-    currency: 'EGP',
+    priceMonthly: BUSINESS_USD,
+    priceYearly: BUSINESS_USD_YEARLY,
+    currency: 'USD',
+    payEgpMonthly: egpAmount(BUSINESS_USD),
+    payEgpYearly: egpAmount(BUSINESS_USD_YEARLY),
     badgeAr: 'للوكالات والفرق',
     badgeEn: 'Agencies',
     featuresAr: [
@@ -120,7 +154,7 @@ export const ORANGE_CASH_STEPS_AR = [
   {
     step: 4,
     title: 'أدخل المبلغ المطلوب',
-    desc: 'أدخل قيمة الباقة المختارة (مثلاً 249 ج.م للباقة الشهرية، أو 2490 ج.م للباقة السنوية).'
+    desc: 'أدخل قيمة الباقة المختارة بالجنيه المصري كما هي معروضة في صفحة الدفع (مثلاً 499 ج.م للباقة الشهرية Pro).'
   },
   {
     step: 5,
@@ -153,7 +187,7 @@ export const ORANGE_CASH_STEPS_EN = [
   {
     step: 4,
     title: 'Enter Exact Amount',
-    desc: 'Enter the exact plan amount (e.g., 249 EGP for Pro Monthly, or 2,490 EGP for Yearly).'
+    desc: 'Enter the plan amount in Egyptian pounds exactly as shown on the payment page (e.g. 499 EGP for Pro Monthly).'
   },
   {
     step: 5,

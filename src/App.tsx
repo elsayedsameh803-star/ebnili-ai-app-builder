@@ -33,6 +33,8 @@ const IntegrationsModal = lazy(() => import('./components/IntegrationsModal').th
 const SubscriptionModal = lazy(() => import('./components/SubscriptionModal').then((m) => ({ default: m.SubscriptionModal })));
 const GeminiStudioModal = lazy(() => import('./components/GeminiStudioModal').then((m) => ({ default: m.GeminiStudioModal })));
 const AdminDashboardModal = lazy(() => import('./components/AdminDashboardModal').then((m) => ({ default: m.AdminDashboardModal })));
+const PricingPage = lazy(() => import('./components/PricingPage').then((m) => ({ default: m.PricingPage })));
+const PayPage = lazy(() => import('./components/PayPage').then((m) => ({ default: m.PayPage })));
 const AuthModal = lazy(() => import('./components/AuthModal').then((m) => ({ default: m.AuthModal })));
 import { 
   AppProject, 
@@ -78,6 +80,19 @@ function closeDocument(raw: string): string {
  * studio. Nothing about identity may hold the interface hostage.
  */
 const AUTH_WATCHDOG_MS = 6_000;
+
+/**
+ * Public routes.
+ *
+ * This app has no router on purpose — `vercel.json` already rewrites every
+ * non-/api path to index.html, so `/pricing` and `/pay` are real URLs handled
+ * here. They render BEFORE the auth gate on purpose: a pricing page and a
+ * checkout page must be reachable by someone who has not signed in yet.
+ */
+function currentRoute(): { path: string; params: URLSearchParams } {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  return { path, params: new URLSearchParams(window.location.search) };
+}
 
 /**
  * The "no project yet" document. It is deliberately an honest, empty state — the
@@ -989,6 +1004,38 @@ export default function App() {
           />
         )}
       </>
+    );
+  }
+
+  // ── Public routes: /pricing and /pay ────────────────────────────────────────
+  // Rendered above the auth gate so a visitor can read the prices and pay
+  // without an account; the studio itself still requires a session.
+  const { path, params } = currentRoute();
+  const navigate = (to: string) => {
+    window.history.pushState({}, '', to);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
+  if (path === '/pricing' || path === '/pay') {
+    return (
+      <Suspense
+        fallback={
+          <div className="h-screen bg-slate-950 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full border-2 border-slate-800 border-t-indigo-400 animate-spin" />
+          </div>
+        }
+      >
+        {path === '/pricing' ? (
+          <PricingPage language={language} onNavigate={navigate} />
+        ) : (
+          <PayPage
+            language={language}
+            initialPlan={params.get('plan') === 'business' ? 'business' : 'pro'}
+            initialCycle={params.get('cycle') === 'yearly' ? 'yearly' : 'monthly'}
+            onNavigate={navigate}
+          />
+        )}
+      </Suspense>
     );
   }
 

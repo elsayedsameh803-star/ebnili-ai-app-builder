@@ -194,7 +194,184 @@ function queuePaymentReview(req: Request, res: Response) {
   });
 }
 
-// Both public payment endpoints behave identically: queue for review only.
+// ── Payment receipts (pending bucket) ────────────────────────────────────────
+// /pay uploads the transfer receipt here. The request is queued for the owner's
+// manual review — it NEVER grants a tier, exactly like `queuePaymentReview`.
+//
+// STORAGE: Vercel functions have no writable disk, so the receipt is stored in an
+// external bucket. Supabase Storage is used when configured (it already backs
+// OAuth here), otherwise a generic S3-compatible endpoint can be supplied. When
+// neither is present the endpoint says so plainly instead of pretending the file
+// was saved — a payment receipt that silently disappears is worse than a clear
+// error, and the customer keeps the WhatsApp fallback either way.
+const RECEIPT_BUCKET = process.env.PAYMENTS_BUCKET || "payments-pending";
+
+function receiptStorageConfigured(): boolean {
+  const supabase = Boolean(supabaseConfig().configured);
+  const s3 = Boolean((process.env.S3_ENDPOINT || "").trim());
+  return supabase || s3;
+}
+
+/** Map a content type to a short, safe file extension for the object name. */
+function safeExtension(contentType: string): string {
+  const map: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "application/pdf": "pdf",
+  };
+  return map[contentType] || "bin";
+}
+
+/**
+ * Write one object to the configured bucket.
+ *
+ * Supabase Storage is preferred (it already backs OAuth in this project); a
+ * generic S3-compatible endpoint is supported for anything else. Returns false
+ * rather than throwing so the caller can turn it into a clean 503 — and returns
+ * false whenever NO storage is configured, so a missing env var can never look
+ * like a successful upload.
+ */
+async function storagePut(
+  path: string,
+  base64: string,
+  contentType: string,
+  metadata: string,
+): Promise<boolean> {
+  const bytes = Buffer.from(base64, "base64");
+  const supabase = supabaseConfig();
+  if (supabase.configured) {
+    const res = await fetch(`${supabase.url}/storage/v1/object/${RECEIPT_BUCKET}/${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${supabase.anonKey}`,
+        apikey: supabase.anonKey,
+        "Content-Type": contentType,
+        "x-upsert": "true",
+        "cache-control": "3600",
+      },
+      body: new Uint8Array(bytes),
+    });
+    if (res.ok) {
+      // Metadata sidecar so the owner can list and triage without downloading.
+      await fetch(`${supabase.url}/storage/v1/object/${RECEIPT_BUCKET}/${path}.json`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${supabase.anonKey}`,
+          apikey: supabase.anonKey,
+          "Content-Type": "application/json",
+          "x-upsert": "true",
+        },
+        body: metadata,
+      }).catch(() => undefined);
+      return true;
+    }
+    console.error("storagePut supabase:", res.status, await res.text().catch(() => ""));
+    return false;
+  }
+
+  const endpoint = (process.env.S3_ENDPOINT || "").trim().replace(/\/+$/, "");
+  if (endpoint) {
+    const res = await fetch(`${endpoint}/${RECEIPT_BUCKET}/${path}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${process.env.S3_TOKEN || ""}`,
+        "Content-Type": contentType,
+        "x-amz-meta-ebnili": Buffer.from(metadata).toString("base64"),
+      },
+      body: new Uint8Array(bytes),
+    });
+    return res.ok;
+  }
+
+  return false;
+}
+
+app.post("/api/payments/receipt", async (req: Request, res: Response) => {
+  if (!requireSignedIn(req, res)) return;
+
+  const body = (req.body as Record<string, unknown>) ?? {};
+  const planId = String(body.planId ?? "pro");
+  if (planId !== "pro" && planId !== "business") {
+    return res.status(400).json({ success: false, message: "خطة الاشتراك غير صحيحة." });
+  }
+  const reference = String(body.transactionReference ?? "").trim();
+  const senderPhone = String(body.senderPhone ?? "").trim();
+  if (senderPhone.length < 8 || reference.length < 3) {
+    return res.status(400).json({
+      success: false,
+      message: "يرجى إدخال رقم المحوِّل والرقم المرجعي قبل رفع الإشعار.",
+    });
+  }
+
+  const fileName = String(body.fileName ?? "").trim();
+  const fileType = String(body.fileType ?? "").trim();
+  const fileData = typeof body.fileData === "string" ? body.fileData : "";
+
+  if (!fileData) {
+    // Nothing attached — the transfer details alone are still worth recording.
+    return res.json({
+      success: true,
+      receiptStored: false,
+      status: "pending",
+      message: "تم استلام بيانات التحويل. سنتحقق منها ونفعّل اشتراكك.",
+    });
+  }
+
+  if (!receiptStorageConfigured()) {
+    // Honest failure: the page falls back to sending the receipt on WhatsApp.
+    return res.status(503).json({
+      success: false,
+      code: "STORAGE_NOT_CONFIGURED",
+      message:
+        "تعذّر حفظ صورة الإشعار على الخادم. من فضلك أرسل الصورة على واتساب على الرقم 01207782741 مع الرقم المرجعي.",
+    });
+  }
+
+  const session = readAuthSession(req as AuthReq);
+  const record = {
+    id: `pay_${Date.now().toString(36)}`,
+    planId,
+    cycle: String(body.cycle ?? "monthly"),
+    amountEgp: Number(body.amountEgp ?? 0),
+    amountUsd: Number(body.amountUsd ?? 0),
+    senderPhone,
+    transactionReference: reference,
+    account: session?.email ?? "",
+    fileName: fileName || "receipt",
+    fileType,
+    createdAt: new Date().toISOString(),
+  };
+
+  // Store the receipt bytes together with a metadata sidecar, under one object
+  // name, so the owner can review the pair later.
+  try {
+    const base64 = fileData.includes(",") ? fileData.slice(fileData.indexOf(",") + 1) : fileData;
+    const ok = await storagePut(
+      `${RECEIPT_BUCKET}/${record.id}.${safeExtension(fileType)}`,
+      base64,
+      fileType || "application/octet-stream",
+      JSON.stringify(record),
+    );
+    if (!ok) throw new Error("storage rejected the write");
+  } catch (err) {
+    console.error("receipt upload failed:", err instanceof Error ? err.message : String(err));
+    return res.status(503).json({
+      success: false,
+      code: "STORAGE_WRITE_FAILED",
+      message: "تعذّر رفع الصورة الآن. أرسلها على واتساب 01207782741 مع الرقم المرجعي.",
+    });
+  }
+
+  res.json({
+    success: true,
+    receiptStored: true,
+    referenceId: record.id,
+    status: "pending",
+    message: "تم رفع إشعار التحويل. سنتحقق منه ونفعّل اشتراكك.",
+  });
+});
+
 app.post("/api/subscriptions/auto-verify", queuePaymentReview);
 app.post("/api/subscriptions/submit-orange-cash", queuePaymentReview);
 
@@ -343,17 +520,34 @@ function pinMatches(pin: unknown): boolean {
   return match;
 }
 
-// Every admin read/write route must present a valid session cookie.
+// Every admin read/write route must present a valid session cookie AND belong to
+// the site owner account.
+//
+// OWNERSHIP: the PIN alone is not enough any more. The owner's address is
+// published in the public bundle and on the contact page, so admin access is
+// bound to the signed account session as well — knowing the e-mail is not
+// enough either, you need the account AND the PIN.
+//
+// 404 (not 401) for anyone else: the admin surface should simply not exist from
+// the outside rather than advertise itself with a "forbidden" answer.
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (!isValidAdminSession(readAdminCookie(req))) {
+  const session = readAuthSession(req as AuthReq);
+  if (!isOwnerAccount(session) || !isValidAdminSession(readAdminCookie(req))) {
     return res
-      .status(401)
-      .json({ success: false, message: "انتهت الجلسة أو غير مصرح — سجّل الدخول مجدداً كمالك الموقع." });
+      .status(404)
+      .json({ success: false, message: "Not found" });
   }
   next();
 }
 
 app.post("/api/admin/auth", (req: Request, res: Response) => {
+  // Admin is the site owner and nothing else. The PIN is a second factor, not
+  // the identity: without the owner account signed in this endpoint answers 404
+  // exactly like every other admin route, so a non-owner cannot even obtain a
+  // session to try elsewhere with.
+  if (!isOwnerAccount(readAuthSession(req as AuthReq))) {
+    return res.status(404).json({ success: false, message: "Not found" });
+  }
   const { pin } = (req.body as { pin?: string; email?: string }) ?? {};
   const failureRec = adminLoginFailures.get(adminClientKey(req));
   if (failureRec && Date.now() <= failureRec.resetAt && failureRec.count >= ADMIN_MAX_FAILS) {

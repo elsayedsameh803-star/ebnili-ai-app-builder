@@ -530,8 +530,8 @@ export const Header = ({
                       </div>
                       <div className="text-[10px] text-slate-500 truncate">
                         {language === 'ar'
-                          ? `${p.versions?.length ?? 0} إصدارات · ${formatRelative(p.updatedAt, language)}`
-                          : `${p.versions?.length ?? 0} versions · ${formatRelative(p.updatedAt, language)}`}
+                          ? `${p.versionCount ?? 0} إصدارات · ${formatRelative(p.updatedAt, language)}`
+                          : `${p.versionCount ?? 0} versions · ${formatRelative(p.updatedAt, language)}`}
                       </div>
                     </button>
 
