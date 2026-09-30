@@ -1,6 +1,161 @@
 import type { AppProject, ChatMessage } from '../types';
 
 /**
+ * Projects — the REAL store, backed by the server database.
+ *
+ * WHY THIS REPLACED localStorage: sites used to live only in the browser, so
+ * they vanished on another device and a hand-edited id could reach another
+ * account. Every call here goes to /api/projects, where the server resolves the
+ * owner from the signed session cookie and filters by owner_id — the browser
+ * never states who it is. When the database is unreachable the calls fail loudly
+ * (`DbUnavailableError`) instead of silently pretending the save worked.
+ *
+ * The previous localStorage implementation is kept below as a read-only cache
+ * for instant first paint, and is only trusted for data the server has
+ * already confirmed.
+ */
+
+const CACHE_INDEX_KEY = 'ebnili_projects_cache_v1';
+const CACHE_BODY_PREFIX = 'ebnili_project_cache_';
+
+/** A project row as the server returns it. */
+export interface RemoteProject extends Omit<AppProject, 'description' | 'activeFile'> {
+  description?: string;
+  activeFile?: string;
+  preview?: string;
+}
+
+export class DbUnavailableError extends Error {
+  constructor(message = 'قاعدة البيانات غير متاحة') {
+    super(message);
+    this.name = 'DbUnavailableError';
+  }
+}
+
+async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(path, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new Error('AUTH_REQUIRED');
+  if (!res.ok) {
+    if (res.status === 503) throw new DbUnavailableError();
+    throw new Error((data as { message?: string }).message || 'request failed');
+  }
+  return data as T;
+}
+
+/** Every saved project of the signed-in account, newest first. */
+export async function fetchRemoteProjects(): Promise<RemoteProject[]> {
+  const data = await api<{ projects: RemoteProject[] }>('/api/projects');
+  const list = Array.isArray(data.projects) ? data.projects : [];
+  try {
+    localStorage.setItem(CACHE_INDEX_KEY, JSON.stringify(list.map((p) => ({ ...p, code: '' }))));
+  } catch {
+    /* cache is an optimisation only */
+  }
+  return list;
+}
+
+/** Open one project. A 404 means it is not this account's — never fabricate it. */
+export async function fetchRemoteProject(id: string): Promise<RemoteProject | null> {
+  try {
+    const data = await api<{ project: RemoteProject }>(`/api/projects/${encodeURIComponent(id)}`);
+    return data.project ?? null;
+  } catch (err) {
+    if (err instanceof Error && err.message === 'NOT_FOUND') return null;
+    throw err;
+  }
+}
+
+export async function createRemoteProject(project: AppProject): Promise<RemoteProject> {
+  const data = await api<{ project: RemoteProject }>('/api/projects', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: project.name,
+      code: project.code,
+      files: project.files,
+      versions: project.versions,
+      theme: project.theme,
+    }),
+  });
+  return data.project;
+}
+
+export async function updateRemoteProject(
+  id: string,
+  patch: Partial<Pick<AppProject, 'name' | 'code' | 'files' | 'versions' | 'theme'>>,
+): Promise<RemoteProject> {
+  const data = await api<{ project: RemoteProject }>(`/api/projects/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return data.project;
+}
+
+export async function deleteRemoteProject(id: string): Promise<void> {
+  await api<{ deleted: string }>(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export interface ExportResult {
+  /** The server's authoritative tier for this account. */
+  tier: 'free' | 'pro' | 'business';
+  /** True when the server stamped the watermark in. */
+  watermarked: boolean;
+  files: Record<string, string>;
+}
+
+/**
+ * Produce the export through the SERVER so the watermark cannot be bypassed
+ * from the browser. Whatever tier the UI believes it has is irrelevant here.
+ */
+export async function exportProjectFiles(files: Record<string, string>): Promise<ExportResult> {
+  const data = await api<ExportResult>('/api/projects/export', {
+    method: 'POST',
+    body: JSON.stringify({ files }),
+  });
+  return data;
+}
+
+/** Cached list for the first paint; never used as a source of truth. */
+export function readCachedProjects(): RemoteProject[] {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(CACHE_INDEX_KEY);
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as RemoteProject[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Cached list for the first paint; never used as a source of truth. */
+export function cacheProjectBody(id: string, project: AppProject): void {
+  try {
+    localStorage.setItem(CACHE_BODY_PREFIX + id, JSON.stringify(project));
+  } catch {
+    /* cache is an optimisation only */
+  }
+}
+
+export function readCachedProjectBody(id: string): AppProject | null {
+  try {
+    const raw = localStorage.getItem(CACHE_BODY_PREFIX + id);
+    if (!raw) return null;
+    return JSON.parse(raw) as AppProject;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * REAL PROJECT STORE (multi-project, local-first)
  * ────────────────────────────────────────────
  * Before this there was exactly one implicit project living in a single

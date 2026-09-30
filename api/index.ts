@@ -194,7 +194,6 @@ function queuePaymentReview(req: Request, res: Response) {
   });
 }
 
-// ── Payment receipts (pending bucket) ────────────────────────────────────────
 // /pay uploads the transfer receipt here. The request is queued for the owner's
 // manual review — it NEVER grants a tier, exactly like `queuePaymentReview`.
 //
@@ -287,6 +286,211 @@ async function storagePut(
   return false;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Projects — real, per-account, server-verified
+// ═══════════════════════════════════════════════════════════════════════════
+// Every route below requires the signed session cookie, derives the owner from
+// that cookie only (never from the body/query), and filters every query by
+// owner_id — so changing an ?id= in the URL yields 404 for somebody else's
+// project instead of their content. Ids are minted server-side, so a reload can
+// never create a duplicate or a phantom project.
+
+function toPublicProject(row: DbProject) {
+  return {
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    files: row.files ?? {},
+    versions: Array.isArray(row.versions) ? row.versions : [],
+    theme: row.theme ?? {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** 503 with a readable reason instead of pretending the data exists. */
+function dbUnavailable(res: Response) {
+  return res.status(503).json({
+    success: false,
+    code: "DB_UNAVAILABLE",
+    message: "قاعدة بيانات المشاريع غير مهيأة على الخادم.",
+  });
+}
+
+/** List every project owned by the signed-in account, newest first. */
+app.get("/api/projects", (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  void dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    query: {
+      select: "id,name,code,files,versions,theme,created_at,updated_at",
+      owner_id: `eq.${owner.id}`,
+      order: "updated_at.desc",
+    },
+  }).then((result) => {
+    if (!result.ok) {
+      console.error("projects list failed:", result.error);
+      return dbUnavailable(res);
+    }
+    const rows = (result.data ?? []).map((row) => ({
+      ...toPublicProject(row),
+      // The list view does not need the full document body.
+      code: "",
+      preview: (row.code || "")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 160),
+    }));
+    res.json({ success: true, projects: rows });
+  });
+});
+
+/** Open one project. Scoped by owner_id, so another account's id → 404. */
+app.get("/api/projects/:id", (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const id = String(req.params.id ?? "");
+  void dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    query: {
+      select: "id,name,code,files,versions,theme,created_at,updated_at",
+      owner_id: `eq.${owner.id}`,
+      id: `eq.${id}`,
+      limit: "1",
+    },
+  }).then((result) => {
+    if (!result.ok) {
+      console.error("project read failed:", result.error);
+      return dbUnavailable(res);
+    }
+    const row = result.data?.[0];
+    // 404 (not 403): a stranger's project must be indistinguishable from one
+    // that does not exist.
+    if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+    res.json({ success: true, project: toPublicProject(row) });
+  });
+});
+
+app.post("/api/projects", (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const body = (req.body as Record<string, unknown>) ?? {};
+  const now = new Date().toISOString();
+  const row: DbProject = {
+    id: `prj_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
+    owner_id: owner.id,
+    name: String(body.name ?? "مشروع بدون اسم").slice(0, 120) || "مشروع بدون اسم",
+    code: typeof body.code === "string" ? body.code : "",
+    files: (body.files && typeof body.files === "object" ? body.files : {}) as Record<string, string>,
+    versions: Array.isArray(body.versions) ? (body.versions as unknown[]).slice(0, 20) : [],
+    theme: (body.theme && typeof body.theme === "object" ? body.theme : {}) as Record<string, unknown>,
+    created_at: now,
+    updated_at: now,
+  };
+
+  void dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    method: "POST",
+    body: JSON.stringify(row),
+  }).then((result) => {
+    if (!result.ok || !result.data?.[0]) {
+      console.error("project create failed:", result.error);
+      return dbUnavailable(res);
+    }
+    res.status(201).json({ success: true, project: toPublicProject(result.data[0]) });
+  });
+});
+
+app.patch("/api/projects/:id", (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const id = String(req.params.id ?? "");
+  const body = (req.body as Record<string, unknown>) ?? {};
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (typeof body.name === "string" && body.name.trim()) {
+    patch.name = body.name.trim().slice(0, 120);
+  }
+  if (typeof body.code === "string") patch.code = body.code;
+  if (body.files && typeof body.files === "object") patch.files = body.files;
+  if (Array.isArray(body.versions)) patch.versions = body.versions.slice(0, 20);
+  if (body.theme && typeof body.theme === "object") patch.theme = body.theme;
+
+  void dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    method: "PATCH",
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+    body: JSON.stringify(patch),
+  }).then((result) => {
+    if (!result.ok) {
+      console.error("project update failed:", result.error);
+      return dbUnavailable(res);
+    }
+    const row = result.data?.[0];
+    if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+    res.json({ success: true, project: toPublicProject(row) });
+  });
+});
+
+app.delete("/api/projects/:id", (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const id = String(req.params.id ?? "");
+  void dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    method: "DELETE",
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+  }).then((result) => {
+    if (!result.ok) {
+      console.error("project delete failed:", result.error);
+      return dbUnavailable(res);
+    }
+    if (!result.data || result.data.length === 0) {
+      return res.status(404).json({ success: false, code: "NOT_FOUND" });
+    }
+    res.json({ success: true, deleted: id });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Export — the ONLY place files are produced, and the tier is resolved here
+// ═══════════════════════════════════════════════════════════════════════════
+// The client no longer assembles the ZIP from its own copy of the code, so the
+// mark cannot be dodged by exporting from the browser. A `tier` in the request
+// body is IGNORED on purpose: a client claiming to be paid changes nothing.
+
+app.post("/api/projects/export", (req: Request, res: Response) => {
+  const session = readAuthSession(req as AuthReq);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+
+  const tier = serverTierFor(req, session);
+  const body = (req.body as { files?: Record<string, string> }) ?? {};
+  const files = body.files && typeof body.files === "object" ? body.files : {};
+
+  const marked: Record<string, string> = {};
+  for (const [path, content] of Object.entries(files)) {
+    // Only the executable page carries a mark; README/JSON/SQL are not documents.
+    marked[path] = /\.html?$/i.test(path) ? applyWatermark(String(content), tier) : String(content);
+  }
+
+  res.json({
+    success: true,
+    // The server's verdict, returned so the client can label the download.
+    tier,
+    watermarked: !isPaidTier(tier),
+    files: marked,
+  });
+});
+
+// ── Payment receipts (pending bucket) ────────────────────────────────────────
 app.post("/api/payments/receipt", async (req: Request, res: Response) => {
   if (!requireSignedIn(req, res)) return;
 
@@ -632,7 +836,7 @@ function hmacB64With(value: string, secret: string): string {
   return crypto.createHmac("sha256", secret).update(value).digest("base64url");
 }
 
-function readPlanGrant(req: Request): { email: string; tier: "pro" | "business" } | null {
+function readPlanGrant(req: Request): { email: string; tier: "pro" | "business"; expiresAt: string } | null {
   const token = readCookie(req, PLAN_COOKIE_NAME);
   if (!token) return null;
   const sep = token.indexOf(".");
@@ -646,9 +850,11 @@ function readPlanGrant(req: Request): { email: string; tier: "pro" | "business" 
       exp?: number;
     };
     if (!parsed?.email) return null;
+    // A lapsed grant is no grant: this is what makes a finished subscription
+    // fall back to Free automatically (and bring the watermark back).
     if (typeof parsed.exp !== "number" || Date.now() > parsed.exp) return null;
     const tier = parsed.tier === "business" ? "business" : "pro";
-    return { email: parsed.email, tier };
+    return { email: parsed.email, tier, expiresAt: new Date(parsed.exp).toISOString() };
   } catch {
     return null;
   }
@@ -725,6 +931,8 @@ interface ProviderCredentials {
 
 const AUTH_COOKIE_NAME = "ebnili_user_session";
 const AUTH_STATE_COOKIE = "ebnili_oauth_state";
+/** PKCE verifier/challenge, so the browser never carries a usable credential. */
+const AUTH_PKCE_COOKIE = "ebnili_oauth_pkce";
 const AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -821,7 +1029,11 @@ function providerConfig(provider: AuthProviderId): ProviderCredentials {
 interface SupabaseConfig {
   url: string;
   anonKey: string;
+  /** Server-only key. Required for the projects database; never sent anywhere. */
+  serviceRoleKey: string;
   configured: boolean;
+  /** True when the projects store can actually be used. */
+  dbConfigured: boolean;
 }
 
 function supabaseConfig(): SupabaseConfig {
@@ -861,11 +1073,176 @@ function supabaseConfig(): SupabaseConfig {
     ""
   ).trim();
 
-  return { url: cleaned, anonKey, configured: Boolean(cleaned && anonKey) };
+  // Server-only. This key bypasses Row Level Security, so it is ONLY ever used
+  // here, server-side, after the caller's own signed session has been verified —
+  // never forwarded to the browser. Without it the projects database cannot be
+  // reached at all and every data route says so instead of faking success.
+  const serviceRoleKey = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    ""
+  ).trim();
+
+  return {
+    url: cleaned,
+    anonKey,
+    serviceRoleKey,
+    configured: Boolean(cleaned && anonKey),
+    dbConfigured: Boolean(cleaned && serviceRoleKey),
+  };
 }
 
-/** PKCE verifier/challenge, so the browser never carries a usable credential. */
-const AUTH_PKCE_COOKIE = "ebnili_oauth_pkce";
+// ═══════════════════════════════════════════════════════════════════════════
+// Server-side data layer (Supabase / PostgREST)
+// ═══════════════════════════════════════════════════════════════════════════
+// WHY A REAL DATABASE: projects used to live in localStorage, so a signed-in
+// user's sites vanished on another device and a hand-edited `?id=` could read
+// anyone else's work. Everything below is keyed on the OWNER ID taken from the
+// signed session cookie — never from the request body — and every query filters
+// on it, so one account can never read or write another's rows.
+//
+// No mock data: if the database is unreachable the endpoints answer 503 with a
+// clear reason instead of inventing a project.
+
+type Tier = "free" | "pro" | "business";
+
+interface DbProject {
+  id: string;
+  owner_id: string;
+  name: string;
+  code: string;
+  files: Record<string, string>;
+  versions: unknown[];
+  theme: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+const PROJECTS_TABLE = "ebnily_projects";
+
+/** PostgREST call with the server-only service key. Never logs the key. */
+async function dbRequest<T>(
+  path: string,
+  init: RequestInit & { query?: Record<string, string> } = {},
+): Promise<{ ok: boolean; status: number; data: T | null; error?: string }> {
+  const sb = supabaseConfig();
+  if (!sb.dbConfigured) {
+    return { ok: false, status: 503, data: null, error: "database_not_configured" };
+  }
+  const query = new URLSearchParams(init.query ?? {}).toString();
+  const url = `${sb.url}/rest/v1/${path}${query ? `?${query}` : ""}`;
+
+  try {
+    const res = await fetch(url, {
+      method: init.method ?? "GET",
+      headers: {
+        apikey: sb.serviceRoleKey,
+        Authorization: `Bearer ${sb.serviceRoleKey}`,
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+        ...(init.headers as Record<string, string> | undefined),
+      },
+      body: init.body,
+    });
+    const text = await res.text();
+    let data: T | null = null;
+    try {
+      data = text ? (JSON.parse(text) as T) : null;
+    } catch {
+      data = null;
+    }
+    if (!res.ok) {
+      return { ok: false, status: res.status, data, error: text.slice(0, 300) || res.statusText };
+    }
+    return { ok: true, status: res.status, data };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 503,
+      data: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * The owner's identity, resolved SERVER-SIDE from the signed cookie.
+ * `owner_id` is stable (the Supabase user id) so rows stay attached to the same
+ * account even if the e-mail changes.
+ */
+function currentOwner(req: Request): { id: string; email: string; isOwner: boolean } | null {
+  const session = readAuthSession(req as AuthReq);
+  if (!session) return null;
+  return { id: session.id, email: session.email, isOwner: isOwnerAccount(session) };
+}
+
+// ── Subscription state (single source of truth, server-side) ────────────────
+// Read from the signed `ebnili_plan` grant the owner mints when a payment is
+// approved, or from the owner's account. The browser NEVER sends the tier — a
+// client-provided "I'm paid" is exactly what this guard exists to reject.
+
+function serverTierFor(req: Request, session: AuthUser | null): Tier {
+  if (isOwnerAccount(session)) return "business";
+  const grant = readPlanGrant(req);
+  if (!grant) return "free";
+  if (!session) return "free";
+  // A grant only ever counts for the account it was issued to.
+  if (grant.email.toLowerCase() !== session.email.toLowerCase()) return "free";
+  if (new Date(grant.expiresAt).getTime() <= Date.now()) return "free";
+  return grant.tier;
+}
+
+function isPaidTier(tier: Tier): boolean {
+  return tier === "pro" || tier === "business";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Watermark — enforced on the server, inside the exported artifact itself
+// ═══════════════════════════════════════════════════════════════════════════
+// WHY: the watermark used to be a badge in the preview UI only. Removing a
+// `div` in devtools (or exporting straight from the browser bundle) removed it,
+// and the ZIP never had one at all. Now the decision is made here, from the
+// server-resolved tier, and the mark is written INTO the exported files — so
+// it ships in the ZIP, in the copied code, and in the deployed site, and it
+// cannot be stripped client-side because the client never performs the export.
+//
+// `injectWatermark` is idempotent: re-exporting an already-marked project
+// does not stack a second mark, and it never double-injects.
+
+const WATERMARK_STYLE =
+  "position:fixed;bottom:12px;right:12px;z-index:2147483647;display:flex;" +
+  "align-items:center;gap:6px;padding:6px 10px;border-radius:8px;" +
+  "background:rgba(2,6,23,.82);color:#cbd5e1;font:600 11px/1.4 system-ui,sans-serif;" +
+  "border:1px solid rgba(148,163,184,.35);pointer-events:none;user-select:none";
+
+const WATERMARK_HTML = `<div id="ebnili-watermark" data-ebnili-watermark="1" style="${WATERMARK_STYLE}">⚡ صنع بواسطة إبنيلي AI</div>`;
+
+function hasWatermark(html: string): boolean {
+  return /data-ebnili-watermark/i.test(html) || /id="ebnili-watermark"/i.test(html);
+}
+
+/**
+ * Add or remove the mark according to the SERVER-resolved tier.
+ * Free → marked. Paid → any existing mark is stripped.
+ */
+function applyWatermark(html: string, tier: Tier): string {
+  const doc = String(html ?? "");
+  if (!doc) return doc;
+
+  if (isPaidTier(tier)) {
+    // Paid: never ship a mark, and clean any that a previous (free) export
+    // already wrote into this document.
+    if (!hasWatermark(doc)) return doc;
+    return doc
+      .replace(/<div[^>]*data-ebnili-watermark[^>]*>[\s\S]*?<\/div>\s*/gi, "")
+      .replace(/<div[^>]*id="ebnili-watermark"[^>]*>[\s\S]*?<\/div>\s*/gi, "");
+  }
+
+  if (hasWatermark(doc)) return doc; // already marked — do not stack
+  // Before </body> when there is one, otherwise append.
+  if (/<\/body>/i.test(doc)) return doc.replace(/<\/body>/i, `${WATERMARK_HTML}\n</body>`);
+  return `${doc}\n${WATERMARK_HTML}`;
+}
 
 function base64url(buf: Buffer): string {
   return buf.toString("base64url");

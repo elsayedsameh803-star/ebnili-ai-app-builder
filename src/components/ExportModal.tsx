@@ -3,6 +3,7 @@ import { Download, X, Copy, Check, FileArchive, Terminal, Code } from 'lucide-re
 import JSZip from 'jszip';
 import { Language } from '../types';
 import { buildProjectExport, slugify } from '../lib/auth';
+import { exportProjectFiles } from '../lib/projects';
 
 interface ExportModalProps {
   projectName: string;
@@ -31,9 +32,14 @@ export const ExportModal = ({
       // src/app.js + package.json + README) instead of zipping the single
       // generated HTML page, which is what made the download look "broken".
       const project = buildProjectExport(projectName, files);
+
+      // The files are produced by the SERVER, which decides the watermark from
+      // this account's real subscription. Zipping the browser's own copy would
+      // hand every user a clean, mark-free export.
+      const result = await exportProjectFiles(project.files);
       const zip = new JSZip();
 
-      Object.entries(project.files).forEach(([path, content]) => {
+      Object.entries(result.files).forEach(([path, content]) => {
         zip.file(path, content);
       });
 

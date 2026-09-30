@@ -10,16 +10,24 @@ import { InfoPagesModal, type PageKey } from './components/InfoPagesModal';
 import { getDeviceFingerprint } from './utils/fingerprint';
 import { fetchCurrentUser, logout as authLogout, isOwnerAccount, fetchWithTimeout } from './lib/auth';
 import {
+  cacheProjectBody,
+  createRemoteProject,
   deleteProject,
+  deleteRemoteProject,
+  fetchRemoteProject,
+  fetchRemoteProjects,
   getActiveId,
   hasRealContent,
   listProjects,
   loadProject,
   newProjectId,
+  readCachedProjectBody,
   renameProject,
   saveProject,
   setActiveId,
+  updateRemoteProject,
   type ProjectSummary,
+  type RemoteProject,
 } from './lib/projects';
 
 // ── Code splitting ───────────────────────────────────────────────────────────
@@ -357,14 +365,46 @@ export default function App() {
   // real generation mints an id, and everything after that is saved against it.
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
+  // Set when the server store cannot be reached, so the UI can say so honestly
+  // instead of pretending the save landed.
+  const [projectsSyncError, setProjectsSyncError] = useState<string | null>(null);
 
-  const refreshProjectList = useCallback(() => {
-    try {
-      setProjectList(listProjects());
-    } catch {
-      setProjectList([]);
+  // Signed-in accounts read and write the server database; a guest keeps the
+  // on-device store so the studio still works before anyone logs in.
+  const useRemoteStore = Boolean(authUser);
+
+  const toSummary = (row: RemoteProject): ProjectSummary => ({
+    id: row.id,
+    name: row.name,
+    description: '',
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    preview: row.preview ?? '',
+    chatCount: 0,
+    versionCount: Array.isArray(row.versions) ? row.versions.length : 0,
+    hasContent: hasRealContent(row.code ?? ''),
+  });
+
+  const refreshProjectList = useCallback(async () => {
+    if (!authUser) {
+      try {
+        setProjectList(listProjects());
+      } catch {
+        setProjectList([]);
+      }
+      return;
     }
-  }, []);
+    try {
+      const rows = await fetchRemoteProjects();
+      setProjectList(rows.map(toSummary));
+      setProjectsSyncError(null);
+    } catch {
+      // Do NOT fall back to a stale local list here — that is exactly how one
+      // account ends up seeing another's projects.
+      setProjectList([]);
+      setProjectsSyncError('تعذّر تحميل مشاريعك من الخادم.');
+    }
+  }, [authUser]);
 
   // Auto-save: every project is stored under its own id, debounced, so a
   // refresh (or a crashed tab) never costs a generated site.
@@ -372,58 +412,132 @@ export default function App() {
     if (!projectId || isGenerating) return;
     if (!hasRealContent(project.code)) return;
     const timer = setTimeout(() => {
+      if (authUser) {
+        // The server owns the row; the id came from it, so this is an update.
+        void updateRemoteProject(projectId, {
+          name: project.name,
+          code: project.code,
+          files: project.files,
+          versions: project.versions,
+          theme: project.theme,
+        })
+          .then(() => {
+            cacheProjectBody(projectId, project);
+            void refreshProjectList();
+          })
+          .catch(() => setProjectsSyncError('تعذّر حفظ المشروع على الخادم.'));
+        return;
+      }
       saveProject(projectId, project, chatMessages);
-      refreshProjectList();
+      void refreshProjectList();
     }, 800);
     return () => clearTimeout(timer);
-  }, [projectId, project, chatMessages, isGenerating, refreshProjectList]);
+  }, [projectId, project, chatMessages, isGenerating, authUser, refreshProjectList]);
 
-  // Restore the last project on load.
+  // Restore the last project on load. For a signed-in account the server is the
+  // source of truth; the on-device copy is only a cache of what it confirmed.
   useEffect(() => {
-    refreshProjectList();
-    const activeId = getActiveId();
-    if (!activeId) return;
-    const stored = loadProject(activeId);
-    if (!stored?.project) return;
-    setProjectId(activeId);
-    setProject(stored.project);
-    setHasStarted(true);
-    if (Array.isArray(stored.chatMessages) && stored.chatMessages.length > 0) {
-      setChatMessages(stored.chatMessages);
-    }
+    void (async () => {
+      await refreshProjectList();
+      const activeId = getActiveId();
+      if (!activeId) return;
+
+      if (authUser) {
+        const remote = await fetchRemoteProject(activeId).catch(() => null);
+        if (remote) {
+          setProjectId(remote.id);
+          setProject((prev) => ({
+            ...prev,
+            name: remote.name,
+            code: remote.code,
+            files: remote.files ?? prev.files,
+            versions: remote.versions ?? prev.versions,
+            theme: remote.theme ?? prev.theme,
+          }));
+          setHasStarted(true);
+        }
+        return;
+      }
+
+      const stored = loadProject(activeId);
+      if (!stored?.project) return;
+      setProjectId(activeId);
+      setProject(stored.project);
+      setHasStarted(true);
+      if (Array.isArray(stored.chatMessages) && stored.chatMessages.length > 0) {
+        setChatMessages(stored.chatMessages);
+      }
+    })();
     // Restore pass — runs once on mount, not as a sync loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authUser]);
 
   // Switch to another project from the list.
-  const handleSelectProject = useCallback((id: string) => {
-    if (id === projectId) return;
-    const stored = loadProject(id);
-    if (!stored?.project) {
-      deleteProject(id);
-      refreshProjectList();
-      return;
-    }
-    setProjectId(id);
-    setActiveId(id);
-    setProject(stored.project);
-    setChatMessages(
-      Array.isArray(stored.chatMessages) && stored.chatMessages.length > 0
-        ? stored.chatMessages
-        : [
-            {
-              id: 'm-1',
-              sender: 'assistant',
-              text: `تم فتح المشروع "${stored.project.name}". اطلب أي تعديل وأنا جاهز.`,
-              timestamp: 'الآن',
-            },
-          ],
-    );
-    setHasStarted(true);
-    setSelectedElement(null);
-    refreshProjectList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, refreshProjectList]);
+  const handleSelectProject = useCallback(
+    (id: string) => {
+      if (id === projectId) return;
+      if (!authUser) {
+        const stored = loadProject(id);
+        if (!stored?.project) {
+          deleteProject(id);
+          void refreshProjectList();
+          return;
+        }
+        setProjectId(id);
+        setActiveId(id);
+        setProject(stored.project);
+        setChatMessages(
+          Array.isArray(stored.chatMessages) && stored.chatMessages.length > 0
+            ? stored.chatMessages
+            : [
+                {
+                  id: 'm-1',
+                  sender: 'assistant',
+                  text: `تم فتح المشروع "${stored.project.name}". اطلب أي تعديل وأنا جاهز.`,
+                  timestamp: 'الآن',
+                },
+              ],
+        );
+        setHasStarted(true);
+        setSelectedElement(null);
+        void refreshProjectList();
+        return;
+      }
+
+      // Server-side open. A 404 means the row is not this account's, so the
+      // list is refreshed rather than opening anything.
+      void (async () => {
+        const remote = await fetchRemoteProject(id).catch(() => null);
+        if (!remote) {
+          void refreshProjectList();
+          return;
+        }
+        const local = readCachedProjectBody(id);
+        setProjectId(remote.id);
+        setActiveId(remote.id);
+        setProject((prev) => ({
+          ...(local ?? prev),
+          name: remote.name,
+          code: remote.code,
+          files: remote.files ?? prev.files,
+          versions: remote.versions ?? prev.versions,
+          theme: remote.theme ?? prev.theme,
+        }));
+        setChatMessages([
+          {
+            id: 'm-1',
+            sender: 'assistant',
+            text: `تم فتح المشروع "${remote.name}". اطلب أي تعديل وأنا جاهز.`,
+            timestamp: 'الآن',
+          },
+        ]);
+        setHasStarted(true);
+        setSelectedElement(null);
+        void refreshProjectList();
+      })();
+    },
+    [projectId, authUser, refreshProjectList],
+  );
 
   // Start a clean project. The id is minted on the first real generation, so
   // the list never fills up with empty placeholders.
@@ -445,24 +559,48 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleDeleteProject = useCallback((id: string) => {
-    const wasActive = id === projectId;
-    deleteProject(id);
-    refreshProjectList();
-    if (wasActive) {
-      const next = listProjects()[0];
-      if (next) handleSelectProject(next.id);
-      else handleStartNewProject();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, refreshProjectList]);
+  const handleDeleteProject = useCallback(
+    (id: string) => {
+      const wasActive = id === projectId;
+      const advance = () => {
+        const next = projectList.find((p) => p.id !== id);
+        if (next) handleSelectProject(next.id);
+        else handleStartNewProject();
+      };
 
-  const handleRenameStoredProject = useCallback((id: string, name: string) => {
-    renameProject(id, name);
-    if (id === projectId) setProject((prev) => ({ ...prev, name }));
-    refreshProjectList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, refreshProjectList]);
+      if (authUser) {
+        void deleteRemoteProject(id)
+          .then(() => {
+            void refreshProjectList().then(() => {
+              if (wasActive) advance();
+            });
+          })
+          .catch(() => setProjectsSyncError('تعذّر حذف المشروع.'));
+        return;
+      }
+
+      deleteProject(id);
+      void refreshProjectList();
+      if (wasActive) advance();
+    },
+    [projectId, projectList, authUser, refreshProjectList, handleSelectProject, handleStartNewProject],
+  );
+
+  const handleRenameStoredProject = useCallback(
+    (id: string, name: string) => {
+      if (id === projectId) setProject((prev) => ({ ...prev, name }));
+      if (authUser) {
+        // The name is written to the database, so it survives signing out.
+        void updateRemoteProject(id, { name })
+          .then(() => void refreshProjectList())
+          .catch(() => setProjectsSyncError('تعذّر حفظ الاسم الجديد.'));
+        return;
+      }
+      renameProject(id, name);
+      void refreshProjectList();
+    },
+    [projectId, authUser, refreshProjectList],
+  );
 
 
   // Streaming finaliser shared by the SSE path and the fallback path: takes the
@@ -506,6 +644,28 @@ export default function App() {
       versions: [newVersion, ...prev.versions],
       updatedAt: new Date().toISOString(),
     }));
+
+    // A signed-in account's first generation CREATES the row on the server, and
+    // the server mints the id. That is what guarantees one row per project with
+    // a real owner — a reload can never leave a phantom or a duplicate behind.
+    if (authUser && !projectId) {
+      const nextProject: AppProject = {
+        ...project,
+        name,
+        description: prompt.slice(0, 80),
+        code: updatedCode,
+        files: { ...project.files, 'index.html': updatedCode },
+        versions: [newVersion, ...project.versions],
+      };
+      void createRemoteProject(nextProject)
+        .then((created) => {
+          setProjectId(created.id);
+          setActiveId(created.id);
+          cacheProjectBody(created.id, nextProject);
+          void refreshProjectList();
+        })
+        .catch(() => setProjectsSyncError('تعذّر إنشاء المشروع على الخادم.'));
+    }
 
     const assistantMsg: ChatMessage = {
       id: String(Date.now() + 1),
@@ -1086,10 +1246,34 @@ export default function App() {
           </button>
         </div>
       )}
+      {/* Honest failure notice: if the project store could not be reached we say
+          so, because a silent "saved" while nothing was stored is the one thing
+          a user must never be told. */}
+      {projectsSyncError && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-200 text-xs shrink-0">
+          <span className="shrink-0">⚠</span>
+          <span className="truncate">{projectsSyncError}</span>
+          <button
+            onClick={() => {
+              setProjectsSyncError(null);
+              void refreshProjectList();
+            }}
+            className="ms-auto text-amber-300 hover:text-white font-bold shrink-0"
+          >
+            {language === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+          </button>
+        </div>
+      )}
       {/* Top Application Header */}
       <Header
         projectName={project.name}
-        onRenameProject={(newName) => setProject((p) => ({ ...p, name: newName }))}
+        // Renaming from the studio writes through to the database (or the
+        // on-device store for a guest), so the new name is still there after a
+        // sign-out, another device, or a reload.
+        onRenameProject={(newName) => {
+          setProject((p) => ({ ...p, name: newName }));
+          if (projectId) handleRenameStoredProject(projectId, newName);
+        }}
         isGenerating={isGenerating}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
