@@ -5,14 +5,16 @@ import { Language } from '../types';
 interface IntegrationsModalProps {
   onClose: () => void;
   language: Language;
+  /** Opens the repository importer — the GitHub card is now a real action. */
+  onOpenGitHubImport?: () => void;
 }
 
 export const IntegrationsModal = ({
   onClose,
   language,
+  onOpenGitHubImport,
 }: IntegrationsModalProps) => {
   const [supabaseConnected, setSupabaseConnected] = useState(true);
-  const [githubConnected, setGithubConnected] = useState(false);
   const [stripeConnected, setStripeConnected] = useState(false);
 
   return (
@@ -73,28 +75,29 @@ export const IntegrationsModal = ({
             </button>
           </div>
 
-          {/* GitHub Sync */}
+          {/* GitHub import — REAL. This used to be a toggle that only flipped a
+              React state and showed "Synced" while nothing happened at all. It
+              now routes to the importer, which genuinely reads a repository
+              through the GitHub API on the server. */}
           <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-white">
                 <Github className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-bold text-xs text-white">GitHub 2-Way Sync</h4>
+                <h4 className="font-bold text-xs text-white">GitHub Import</h4>
                 <p className="text-[11px] text-slate-400">
-                  {language === 'ar' ? 'مزامنة الكود تلقائياً في مستودع GitHub لكل تعديل' : 'Auto-commit every prompt revision to your GitHub repo'}
+                  {language === 'ar'
+                    ? 'افتح مستودعاً من GitHub وابدأ تعديله هنا (قراءة فقط)'
+                    : 'Open a repository from GitHub and start editing it here (read-only)'}
                 </p>
               </div>
             </div>
             <button
-              onClick={() => setGithubConnected(!githubConnected)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                githubConnected
-                  ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-              }`}
+              onClick={() => onOpenGitHubImport?.()}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white"
             >
-              {githubConnected ? (language === 'ar' ? 'متصل ✔' : 'Synced') : (language === 'ar' ? 'مزامنة' : 'Connect')}
+              {language === 'ar' ? 'فتح' : 'Open'}
             </button>
           </div>
 

@@ -491,6 +491,415 @@ app.post("/api/projects/export", (req: Request, res: Response) => {
 });
 
 // ── Payment receipts (pending bucket) ────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// GitHub import — real repository import
+// ═══════════════════════════════════════════════════════════════════════════
+// WHY A SERVER ROUTE: listing a user's private repos and reading a tree both
+// need a GitHub access token. That token must never touch the browser, so every
+// call happens here and the browser only receives metadata and file contents.
+//
+// TWO WAYS IN, both handled explicitly:
+//   1. The user linked GitHub  → this project exchanged a code for a token and
+//      keeps it server-side, tied to the account.
+//   2. Google-only users       → there is no GitHub token, so the route reports
+//      `linked: false` and the UI offers either connecting GitHub or a PUBLIC
+//      repo URL, which needs no token at all.
+//
+// READ-ONLY BY DESIGN: nothing here writes to GitHub, and `scope` asks only for
+// `read:user`, so this feature cannot push or delete anything.
+
+const GH_TOKEN_COOKIE = "ebnili_gh_token";
+const GH_LINK_COOKIE = "ebnili_gh_link";
+const GH_SCOPES = "read:user";
+
+interface StoredGhToken {
+  userId: string;
+  login: string;
+  accessToken: string;
+  linkNonce: string;
+}
+
+function ghStateNonce(): string {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+/** Signed, so a hand-edited cookie cannot smuggle a token in. */
+function issueGhToken(value: StoredGhToken): string {
+  const payload = Buffer.from(JSON.stringify(value), "utf-8").toString("base64url");
+  return `${payload}.${hmacB64With(payload, planSigningSecret())}`;
+}
+
+function readGhToken(req: AuthReq): StoredGhToken | null {
+  const token = readCookie(req, GH_TOKEN_COOKIE);
+  if (!token) return null;
+  const sep = token.indexOf(".");
+  if (sep <= 0) return null;
+  const body = token.slice(0, sep);
+  if (!safeEqual(token.slice(sep + 1), hmacB64With(body, planSigningSecret()))) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as StoredGhToken;
+    if (!parsed?.accessToken || !parsed?.userId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function ghHeaders(token?: string): Record<string, string> {
+  return {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "Ebnili-App",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+/** Turn any user-typed form into `owner/repo`, or null if it is not one. */
+function parseRepoRef(input: string): { owner: string; repo: string } | null {
+  const cleaned = String(input ?? "")
+    .trim()
+    .replace(/^https?:\/\/(www\.)?github\.com\//i, "")
+    .replace(/^git@github\.com:/i, "")
+    .replace(/\.git$/i, "")
+    .replace(/^\/+|\/+$/g, "");
+  const parts = cleaned.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  const [owner, repo] = parts;
+  if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(repo)) return null;
+  return { owner, repo };
+}
+
+/**
+ * The token counts only when BOTH cookies agree AND the token belongs to this
+ * session's account — so a GitHub link made in one session cannot be used from
+ * another account on the same browser.
+ */
+function ghTokenForSession(req: AuthReq, session: AuthUser): StoredGhToken | null {
+  const stored = readGhToken(req);
+  const linkNonce = readCookie(req, GH_LINK_COOKIE);
+  if (!stored || !linkNonce) return null;
+  if (!safeEqual(stored.linkNonce, linkNonce)) return null;
+  return stored.userId === session.id ? stored : null;
+}
+
+/** Is GitHub connected for this session? */
+app.get("/api/github/status", (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  const stored = ghTokenForSession(req, session);
+  res.json({
+    success: true,
+    linked: Boolean(stored),
+    login: stored?.login ?? "",
+    // A public repo is importable with no GitHub connection at all.
+    publicImportAvailable: true,
+    provider: session.provider,
+  });
+});
+
+/** Step 1 — send the browser to GitHub to authorise a read-only link. */
+app.get("/api/github/connect", (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  const cfg = providerConfig("github");
+  if (!cfg.configured) {
+    return res.status(503).json({ success: false, message: "GitHub OAuth is not configured." });
+  }
+  const nonce = ghStateNonce();
+  res.cookie(AUTH_STATE_COOKIE, `ghlink.${nonce}`, authCookieOptions(AUTH_STATE_TTL_MS));
+
+  const url = new URL("https://github.com/login/oauth/authorize");
+  url.searchParams.set("client_id", cfg.clientId);
+  url.searchParams.set("redirect_uri", `${requestBaseUrl(req)}/api/github/callback`);
+  url.searchParams.set("scope", GH_SCOPES);
+  url.searchParams.set("state", nonce);
+  url.searchParams.set("allow_signup", "false");
+  res.redirect(url.toString());
+});
+
+/** Step 2 — GitHub calls back; exchange the code and store the token. */
+app.get("/api/github/callback", async (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  const home = requestBaseUrl(req);
+  const fail = (reason: string) => res.redirect(`${home}/?github_error=${encodeURIComponent(reason)}`);
+  if (!session) return fail("auth_required");
+
+  // Single-use nonce, as with the sign-in callback — a replayed callback URL
+  // cannot mint a second link.
+  const expected = readCookie(req, AUTH_STATE_COOKIE);
+  clearAuthCookie(res, AUTH_STATE_COOKIE);
+  if (!expected || !expected.startsWith("ghlink.")) return fail("state_cookie_missing");
+  const nonce = expected.slice("ghlink.".length);
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  if (!safeEqual(nonce, state)) return fail("state_mismatch");
+
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  if (!code) return fail("missing_code");
+
+  const cfg = providerConfig("github");
+  if (!cfg.configured) return fail("not_configured");
+
+  try {
+    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        client_id: cfg.clientId,
+        client_secret: cfg.clientSecret,
+        code,
+        redirect_uri: `${home}/api/github/callback`,
+      }).toString(),
+    });
+    const tokenJson = (await tokenRes.json()) as { access_token?: string; error?: string };
+    if (!tokenJson.access_token) return fail(tokenJson.error || "exchange_failed");
+
+    // Read the login so the UI can confirm which account was linked.
+    let login = "";
+    try {
+      const profile = await fetch("https://api.github.com/user", {
+        headers: ghHeaders(tokenJson.access_token),
+      });
+      if (profile.ok) {
+        const me = (await profile.json()) as { login?: string };
+        login = String(me.login || "");
+      }
+    } catch {
+      /* the link still works; the label is cosmetic */
+    }
+
+    // One nonce in BOTH cookies: ghTokenForSession requires them to match, so a
+    // token copied without its partner cookie is worthless.
+    const linkNonce = ghStateNonce();
+    res.cookie(GH_LINK_COOKIE, linkNonce, authCookieOptions(AUTH_SESSION_TTL_MS));
+    res.cookie(
+      GH_TOKEN_COOKIE,
+      issueGhToken({
+        userId: session.id,
+        login,
+        accessToken: tokenJson.access_token,
+        linkNonce,
+      }),
+      authCookieOptions(AUTH_SESSION_TTL_MS),
+    );
+    return res.redirect(`${home}/?github=linked`);
+  } catch (e) {
+    console.error("github link failed:", e instanceof Error ? e.message : String(e));
+    return fail("exchange_failed");
+  }
+});
+
+/** Disconnect GitHub — the stored token is destroyed, not merely ignored. */
+app.post("/api/github/disconnect", (req: AuthReq, res: AuthRes) => {
+  if (!readAuthSession(req)) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  clearAuthCookie(res, GH_TOKEN_COOKIE);
+  clearAuthCookie(res, GH_LINK_COOKIE);
+  res.json({ success: true, linked: false });
+});
+
+/**
+ * The user's own repositories. A GitHub link is required because private
+ * repositories are impossible to list without a token; a PUBLIC repo stays
+ * importable through /api/github/tree for any signed-in user.
+ */
+app.get("/api/github/repos", async (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  const stored = ghTokenForSession(req, session);
+  if (!stored) {
+    return res.status(403).json({
+      success: false,
+      code: "GITHUB_NOT_LINKED",
+      message: "اربط حساب GitHub لعرض مستودعاتك.",
+    });
+  }
+
+  try {
+    const page = Math.min(Math.max(Number(req.query.page) || 1, 1), 5);
+    const listRes = await fetch(
+      `https://api.github.com/user/repos?per_page=30&sort=updated&page=${page}` +
+        "&affiliation=owner,collaborator,organization_member",
+      { headers: ghHeaders(stored.accessToken) },
+    );
+    if (listRes.status === 401) {
+      return res.status(403).json({
+        success: false,
+        code: "GITHUB_TOKEN_EXPIRED",
+        message: "انتهت صلاحية الربط مع GitHub. أعد الربط من جديد.",
+      });
+    }
+    if (!listRes.ok) return res.status(502).json({ success: false, message: "GitHub did not answer." });
+
+    const repos = (await listRes.json()) as Array<{
+      id: number;
+      name: string;
+      full_name: string;
+      description: string | null;
+      private: boolean;
+      default_branch: string;
+      language: string | null;
+      stargazers_count: number;
+      updated_at: string;
+    }>;
+
+    res.json({
+      success: true,
+      login: stored.login,
+      repos: repos.map((r) => ({
+        id: r.id,
+        name: r.name,
+        fullName: r.full_name,
+        description: r.description || "",
+        private: r.private,
+        defaultBranch: r.default_branch,
+        language: r.language || "",
+        stars: r.stargazers_count,
+        updatedAt: r.updated_at,
+      })),
+    });
+  } catch (e) {
+    console.error("github repos failed:", e instanceof Error ? e.message : String(e));
+    res.status(502).json({ success: false, message: "تعذر الوصول إلى GitHub." });
+  }
+});
+
+/** Extensions worth opening in an editor; the rest would only bloat the project. */
+const IMPORTABLE_EXT =
+  /\.(html?|css|jsx?|tsx?|mjs|cjs|json|md|svg|txt|vue|svelte|astro|ya?ml|toml|sql|sh)$/i;
+/** Never read these: dependencies, build output, secrets and heavy lockfiles. */
+const SKIP_PATH =
+  /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.vercel|vendor|coverage|\.cache|__pycache__)(\/|$)/i;
+const SKIP_FILE =
+  /(^|\/)(\.env(\..*)?|\.gitignore|\.npmrc|\.DS_Store)$|package-lock\.json$|yarn\.lock$|pnpm-lock\.yaml$|\.(png|jpe?g|gif|webp|avif|ico|bmp|pdf|zip|gz|tar|woff2?|ttf|eot|mp4|mp3|wasm|so|dll|exe|bin)$/i;
+
+const MAX_IMPORT_FILES = 60;
+const MAX_FILE_BYTES = 400_000;
+const MAX_TOTAL_BYTES = 2_500_000;
+
+/**
+ * Import a repository's files through the Git Trees API.
+ *
+ * One `?recursive=1` tree request lists every blob (path, SHA, size) in a single
+ * call, then each blob is fetched as base64. Walking the contents API per
+ * directory instead would cost a request per folder and blow GitHub's rate
+ * limit on any real repository.
+ *
+ * A linked token unlocks private repositories; without one GitHub serves public
+ * ones (rate-limited, but enough for the fallback path). Nothing is written.
+ */
+app.post("/api/github/tree", async (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+
+  const body = (req.body as { owner?: string; repo?: string; ref?: string }) ?? {};
+  const ref = parseRepoRef(`${body.owner ?? ""}/${body.repo ?? ""}`);
+  if (!ref) return res.status(400).json({ success: false, message: "اسم المستودع غير صحيح." });
+
+  const branch = String(body.ref ?? "").trim() || "HEAD";
+  const token = ghTokenForSession(req, session)?.accessToken;
+
+  try {
+    const repoRes = await fetch(`https://api.github.com/repos/${ref.owner}/${ref.repo}`, {
+      headers: ghHeaders(token),
+    });
+    if (repoRes.status === 404) {
+      return res.status(404).json({
+        success: false,
+        message: token
+          ? "المستودع غير موجود أو لا تملك صلاحية الوصول إليه."
+          : "المستودع غير موجود أو خاص. اربط GitHub لاستيراد المستودعات الخاصة.",
+      });
+    }
+    if (!repoRes.ok) {
+      return res.status(502).json({ success: false, message: "تعذر قراءة بيانات المستودع." });
+    }
+    const meta = (await repoRes.json()) as { default_branch?: string; name?: string };
+
+    const target = branch === "HEAD" ? meta.default_branch || "main" : branch;
+    const treeRes = await fetch(
+      `https://api.github.com/repos/${ref.owner}/${ref.repo}/git/trees/` +
+        `${encodeURIComponent(target)}?recursive=1`,
+      { headers: ghHeaders(token) },
+    );
+    if (!treeRes.ok) return res.status(502).json({ success: false, message: "تعذر قراءة شجرة الملفات." });
+    const tree = (await treeRes.json()) as {
+      tree?: Array<{ path: string; type: string; sha: string; size?: number }>;
+      truncated?: boolean;
+    };
+
+    const all = (tree.tree ?? []).filter((n) => n.type === "blob");
+    const wanted = all
+      .filter((n) => !SKIP_PATH.test(n.path) && !SKIP_FILE.test(n.path) && IMPORTABLE_EXT.test(n.path))
+      .filter((n) => (n.size ?? 0) <= MAX_FILE_BYTES)
+      .sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+    // Open the entry point first when there is one.
+    const entry = wanted.find((n) => /(^|\/)(index|app|main)\.(html?|jsx?|tsx?)$/i.test(n.path));
+    const picked = (entry ? [entry, ...wanted.filter((n) => n !== entry)] : wanted).slice(
+      0,
+      MAX_IMPORT_FILES,
+    );
+
+    const unsupported = all.length - wanted.length;
+    let totalBytes = 0;
+    let fetched = 0;
+    let skippedTooLarge = 0;
+    const files: Record<string, string> = {};
+
+    for (const node of picked) {
+      if (totalBytes >= MAX_TOTAL_BYTES) {
+        skippedTooLarge = picked.length - fetched;
+        break;
+      }
+      try {
+        const blobRes = await fetch(
+          `https://api.github.com/repos/${ref.owner}/${ref.repo}/git/blobs/${node.sha}`,
+          { headers: ghHeaders(token) },
+        );
+        if (!blobRes.ok) continue;
+        const blob = (await blobRes.json()) as { content?: string; encoding?: string };
+        if (blob.encoding !== "base64" || !blob.content) continue;
+        const text = Buffer.from(blob.content.replace(/\s/g, ""), "base64").toString("utf-8");
+        // A blob can decode larger than its reported size; re-check for real.
+        const size = Buffer.byteLength(text, "utf-8");
+        if (size > MAX_FILE_BYTES) continue;
+        files[node.path] = text;
+        totalBytes += size;
+        fetched += 1;
+      } catch {
+        // One unreadable file must not abort the whole import.
+      }
+    }
+
+    if (Object.keys(files).length === 0) {
+      return res.status(422).json({
+        success: false,
+        message: "لم يتم العثور على ملفات قابلة للعرض في هذا المستودع.",
+      });
+    }
+
+    res.json({
+      success: true,
+      repo: {
+        owner: ref.owner,
+        name: meta.name || ref.repo,
+        fullName: `${ref.owner}/${meta.name || ref.repo}`,
+        branch: target,
+      },
+      files,
+      // An honest account of what did not make it in.
+      stats: {
+        imported: Object.keys(files).length,
+        skippedBinaryOrUnsupported: unsupported,
+        skippedTooLarge,
+        truncated: Boolean(tree.truncated),
+      },
+    });
+  } catch (e) {
+    console.error("github tree failed:", e instanceof Error ? e.message : String(e));
+    res.status(502).json({ success: false, message: "تعذر الاتصال بـ GitHub." });
+  }
+});
+
 app.post("/api/payments/receipt", async (req: Request, res: Response) => {
   if (!requireSignedIn(req, res)) return;
 

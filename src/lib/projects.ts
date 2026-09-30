@@ -119,6 +119,139 @@ export async function exportProjectFiles(files: Record<string, string>): Promise
   return data;
 }
 
+/**
+ * GitHub import — client.
+ *
+ * The access token never comes here. Every call is a plain request to our own
+ * server, which holds the token in an HttpOnly cookie and returns only
+ * repository metadata and file contents.
+ */
+
+export interface GitHubRepo {
+  id: number;
+  name: string;
+  fullName: string;
+  description: string;
+  private: boolean;
+  defaultBranch: string;
+  language: string;
+  stars: number;
+  updatedAt: string;
+}
+
+export interface GitHubStatus {
+  linked: boolean;
+  login: string;
+  publicImportAvailable: boolean;
+  provider: 'google' | 'github';
+}
+
+export interface GitHubImportResult {
+  repo: { owner: string; name: string; fullName: string; branch: string };
+  files: Record<string, string>;
+  stats: {
+    imported: number;
+    skippedBinaryOrUnsupported: number;
+    skippedTooLarge: number;
+    truncated: boolean;
+  };
+}
+
+export class GitHubNotLinkedError extends Error {
+  constructor(message = 'GitHub account is not linked') {
+    super(message);
+    this.name = 'GitHubNotLinkedError';
+  }
+}
+
+export class GitHubImportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GitHubImportError';
+  }
+}
+
+async function ghFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(path, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new Error('AUTH_REQUIRED');
+  if (res.status === 403 && (data as { code?: string }).code === 'GITHUB_NOT_LINKED') {
+    throw new GitHubNotLinkedError((data as { message?: string }).message);
+  }
+  if (!res.ok) {
+    throw new GitHubImportError((data as { message?: string }).message || `HTTP ${res.status}`);
+  }
+  return data as T;
+}
+
+/** Is a GitHub account linked to this session? Never throws. */
+export async function fetchGitHubStatus(): Promise<GitHubStatus> {
+  try {
+    return await ghFetch<GitHubStatus>('/api/github/status');
+  } catch {
+    // A failure here must not hide the feature — the modal falls back to the
+    // public-repo path, which needs no connection at all.
+    return { linked: false, login: '', publicImportAvailable: true, provider: 'google' };
+  }
+}
+
+/** Start the read-only GitHub link. The browser leaves the app and comes back. */
+export function startGitHubLink(): void {
+  window.location.href = '/api/github/connect';
+}
+
+export async function disconnectGitHub(): Promise<void> {
+  await ghFetch('/api/github/disconnect', { method: 'POST' });
+}
+
+/** The signed-in user's repositories. Requires a linked GitHub account. */
+export async function fetchMyRepos(): Promise<{ login: string; repos: GitHubRepo[] }> {
+  return ghFetch<{ login: string; repos: GitHubRepo[] }>('/api/github/repos');
+}
+
+/** Read a repository's files. `fullName` is `owner/repo` or any GitHub URL. */
+export async function importRepo(fullName: string, ref?: string): Promise<GitHubImportResult> {
+  const parts = fullName
+    .trim()
+    .replace(/^https?:\/\/(www\.)?github\.com\//i, '')
+    .replace(/^git@github\.com:/i, '')
+    .replace(/\.git$/i, '')
+    .split('/')
+    .filter(Boolean);
+  if (parts.length < 2) throw new GitHubImportError('أدخل رابط مستودع صحيح مثل owner/repo');
+  return ghFetch<GitHubImportResult>('/api/github/tree', {
+    method: 'POST',
+    body: JSON.stringify({ owner: parts[0], repo: parts[1], ref: ref ?? 'HEAD' }),
+  });
+}
+
+/**
+ * Pick the file to open first: a real document beats a config file, because the
+ * preview pane renders `code` and the studio should not start on something the
+ * user cannot see there.
+ */
+export function pickEntryFile(files: Record<string, string>): string {
+  const names = Object.keys(files);
+  const preferred = [
+    'index.html',
+    'App.tsx',
+    'App.jsx',
+    'app.tsx',
+    'app.jsx',
+    'src/App.tsx',
+    'src/App.jsx',
+  ];
+  for (const candidate of preferred) {
+    if (files[candidate]) return candidate;
+  }
+  const html = names.find((n) => /\.html?$/i.test(n));
+  return html ?? names[0] ?? 'index.html';
+}
+
 /** Cached list for the first paint; never used as a source of truth. */
 export function readCachedProjects(): RemoteProject[] {
   let raw: string | null = null;

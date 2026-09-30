@@ -8,7 +8,8 @@ import {
   MicOff,
   Globe,
   Play,
-  Crown
+  Crown,
+  Github
 } from 'lucide-react';
 import { StarterTemplate, Language, UserSubscription } from '../types';
 import { STARTER_TEMPLATES } from '../data/templates';
@@ -20,6 +21,8 @@ interface NewProjectHeroProps {
   onToggleLanguage: () => void;
   subscription?: UserSubscription;
   onOpenSubscription?: () => void;
+  /** Opens the repository importer — a separate action from generating. */
+  onOpenGitHubImport?: () => void;
 }
 
 export const NewProjectHero = ({
@@ -29,6 +32,7 @@ export const NewProjectHero = ({
   onToggleLanguage,
   subscription,
   onOpenSubscription,
+  onOpenGitHubImport,
 }: NewProjectHeroProps) => {
   const [promptText, setPromptText] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -219,6 +223,28 @@ export const NewProjectHero = ({
               </button>
             </div>
           </form>
+
+          {/* Import from GitHub — deliberately OUTSIDE the prompt form and
+              visually separate from it. Importing an existing repository is a
+              different action from describing a new one, and must never look
+              like part of the same submit. */}
+          {onOpenGitHubImport && (
+            <div className="w-full pt-3">
+              <button
+                type="button"
+                onClick={onOpenGitHubImport}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-700 hover:border-slate-600 text-slate-300 hover:text-white text-xs font-bold transition cursor-pointer"
+              >
+                <Github className="w-4 h-4" />
+                <span>{language === 'ar' ? 'استيراد من GitHub' : 'Import from GitHub'}</span>
+              </button>
+              <p className="text-[11px] text-slate-500 mt-2">
+                {language === 'ar'
+                  ? 'عندك مشروع على GitHub؟ افتحه هنا وابدأ التعديل عليه مباشرة.'
+                  : 'Already have a project on GitHub? Open it here and start editing it.'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Starter Templates Grid */}

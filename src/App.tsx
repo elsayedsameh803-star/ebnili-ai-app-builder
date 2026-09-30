@@ -28,6 +28,8 @@ import {
   updateRemoteProject,
   type ProjectSummary,
   type RemoteProject,
+  type GitHubImportResult,
+  pickEntryFile,
 } from './lib/projects';
 
 // ── Code splitting ───────────────────────────────────────────────────────────
@@ -40,6 +42,7 @@ const DeployModal = lazy(() => import('./components/DeployModal').then((m) => ({
 const IntegrationsModal = lazy(() => import('./components/IntegrationsModal').then((m) => ({ default: m.IntegrationsModal })));
 const SubscriptionModal = lazy(() => import('./components/SubscriptionModal').then((m) => ({ default: m.SubscriptionModal })));
 const GeminiStudioModal = lazy(() => import('./components/GeminiStudioModal').then((m) => ({ default: m.GeminiStudioModal })));
+const GitHubImportModal = lazy(() => import('./components/GitHubImportModal').then((m) => ({ default: m.GitHubImportModal })));
 const AdminDashboardModal = lazy(() => import('./components/AdminDashboardModal').then((m) => ({ default: m.AdminDashboardModal })));
 const PricingPage = lazy(() => import('./components/PricingPage').then((m) => ({ default: m.PricingPage })));
 const PayPage = lazy(() => import('./components/PayPage').then((m) => ({ default: m.PayPage })));
@@ -182,6 +185,7 @@ export default function App() {
   const [showIntegrations, setShowIntegrations] = useState<boolean>(false);
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
   const [showGeminiStudio, setShowGeminiStudio] = useState<boolean>(false);
+  const [showGitHubImport, setShowGitHubImport] = useState<boolean>(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   // Which of the site pages is open (About / Contact / Privacy / Terms).
@@ -247,6 +251,20 @@ export default function App() {
     }
     setShowAuthModal(Boolean(error));
 
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
+
+  // Returning from the GitHub link: `/?github=linked` or `/?github_error=<code>`.
+  // The importer opens straight away so the user picks a repository next, and
+  // the query string is scrubbed exactly like the auth one.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const linked = params.get('github');
+    const failure = params.get('github_error');
+    if (!linked && !failure) return;
+
+    setShowGitHubImport(true);
+    if (failure) setAuthError(`github:${failure}`);
     window.history.replaceState({}, '', window.location.pathname);
   }, []);
 
@@ -584,6 +602,54 @@ export default function App() {
       if (wasActive) advance();
     },
     [projectId, projectList, authUser, refreshProjectList, handleSelectProject, handleStartNewProject],
+  );
+
+  /**
+   * Take a repository's files and drop them straight into the studio.
+   *
+   * The imported tree becomes the project's `files`, and `code` (the document the
+   * preview renders) points at the real entry file. A brand-new project id is
+   * minted so the import lands in its own saved project rather than overwriting
+   * whatever was open.
+   */
+  const handleGitHubImported = useCallback(
+    (result: GitHubImportResult) => {
+      const files = result.files;
+      const activeFile = pickEntryFile(files);
+      const name = result.repo.name;
+      const importedAt = new Date().toISOString();
+
+      setProject({
+        id: '',
+        name,
+        description: `مستورد من ${result.repo.fullName} (${result.repo.branch})`,
+        code: files[activeFile] ?? '',
+        files,
+        activeFile,
+        versions: [],
+        createdAt: importedAt,
+        updatedAt: importedAt,
+        theme: createBlankProject().theme,
+      });
+      setProjectId(null);
+      setActiveId(null);
+      setSelectedElement(null);
+      setHasStarted(true);
+      setLastFailedPrompt(null);
+      setChatMessages([
+        {
+          id: 'm-1',
+          sender: 'assistant',
+          text:
+            language === 'ar'
+              ? `تم استيراد ${result.stats.imported} ملف من ${result.repo.fullName}. عدّل عليه مباشرة أو اطلب مني أي تعديل.`
+              : `Imported ${result.stats.imported} files from ${result.repo.fullName}. Edit them directly or ask me for any change.`,
+          timestamp: 'الآن',
+        },
+      ]);
+      void refreshProjectList();
+    },
+    [language, refreshProjectList],
   );
 
   const handleRenameStoredProject = useCallback(
@@ -1154,7 +1220,15 @@ export default function App() {
           onToggleLanguage={() => setLanguage((l) => (l === 'ar' ? 'en' : 'ar'))}
           subscription={subscription}
           onOpenSubscription={() => setShowSubscription(true)}
+          onOpenGitHubImport={() => setShowGitHubImport(true)}
         />
+        {showGitHubImport && (
+          <GitHubImportModal
+            onClose={() => setShowGitHubImport(false)}
+            language={language}
+            onImported={handleGitHubImported}
+          />
+        )}
         {showSubscription && (
           <SubscriptionModal
             currentSubscription={subscription}
@@ -1430,6 +1504,10 @@ export default function App() {
         {isOwner && showIntegrations && (
           <IntegrationsModal
             onClose={() => setShowIntegrations(false)}
+            onOpenGitHubImport={() => {
+              setShowIntegrations(false);
+              setShowGitHubImport(true);
+            }}
             language={language}
           />
         )}
