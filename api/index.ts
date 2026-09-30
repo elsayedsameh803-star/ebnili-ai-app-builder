@@ -70,11 +70,14 @@ const DEFAULT_SUBSCRIPTION = {
 
 /**
  * Site owner — always full access, no payment needed.
- * Resolved once, on the server, so the address is never shipped to the browser
- * and never has to be edited in (and redeployed) to change who owns the site.
+ *
+ * SECURITY: the address used to be hard-coded as a fallback, which published
+ * the owner's account in the server bundle. It is now env-only. With nothing
+ * configured, `isOwnerAccount()` is simply always false: the safest possible
+ * state (no owner surface at all) rather than a guessable one.
  */
 const OWNER_EMAIL = (
-  process.env.SITE_OWNER_EMAIL || process.env.OWNER_EMAIL || "elsayedsameh803@gmail.com"
+  process.env.SITE_OWNER_EMAIL || process.env.OWNER_EMAIL || ""
 )
   .trim()
   .toLowerCase();
@@ -1055,21 +1058,58 @@ const ADMIN_MAX_FAILS = 10;
 const adminLoginFailures = new Map<string, { count: number; resetAt: number }>();
 
 // Stateless environment: REAL defaults only (zero fabricated numbers).
+// `adminEmail` mirrors the server-side owner resolution so the settings form
+// shows the same address the server actually trusts — and never a hard-coded
+// one published in the bundle.
 const DEFAULT_ADMIN_SETTINGS = {
   orangeWalletNumber: "01207782741",
   defaultFreeLimit: 5,
   autoVerificationEnabled: true,
   supportWhatsappNumber: "01207782741",
   siteName: "إبنيلي | Ebnili AI Studio",
-  adminEmail: "elsayedsameh803@gmail.com",
+  adminEmail: OWNER_EMAIL,
 };
 
+/**
+ * Admin PIN.
+ *
+ * SECURITY: this was `process.env.ADMIN_PIN || "1977Sameh@"` — a real password
+ * committed to a public repository. It is removed from the source entirely.
+ *
+ * A local developer keeps working because `npm run dev` loads `.env`, but a
+ * deployment that never sets ADMIN_PIN can no longer be unlocked by reading the
+ * source: `isAdminPinConfigured()` is false, the login route answers 503 with
+ * setup instructions, and no session can be issued. Rotating the leaked PIN in
+ * Vercel is the remaining owner-side step.
+ */
 function expectedAdminPin(): string {
-  return (process.env.ADMIN_PIN || "1977Sameh@").trim();
+  return (process.env.ADMIN_PIN ?? "").trim();
 }
 
+/** False when no PIN is configured — admin access is then impossible, by design. */
+function isAdminPinConfigured(): boolean {
+  return expectedAdminPin().length >= 8;
+}
+
+/** Owner-facing Arabic explanation shown when admin login is not configured. */
+const ADMIN_PIN_MISSING_MESSAGE =
+  "لوحة الإدارة غير مُفعّلة: أضف ADMIN_PIN في Vercel (قيمة عشوائية من 8 أحرف على الأقل) ثم أعد النشر.";
+
+/**
+ * Admin session signing key.
+ *
+ * SECURITY: this was `ADMIN_SESSION_SECRET || expectedAdminPin()` — so the
+ * published PIN was ALSO the key that signs the admin session cookie, meaning
+ * anyone who knew the PIN could mint an unlimited admin session. The key is now
+ * a dedicated secret and never falls back to the PIN.
+ */
 function adminSessionSecret(): string {
-  return process.env.ADMIN_SESSION_SECRET || expectedAdminPin();
+  const explicit = (process.env.ADMIN_SESSION_SECRET ?? "").trim();
+  if (!isWeakSecret(explicit)) return explicit;
+  // No dedicated secret configured: sign with a value that cannot be derived
+  // from anything the source reveals, so an unconfigured deployment is locked
+  // rather than forgeable. A configured PIN still works locally.
+  return `admin-unconfigured-${INSECURE_DEV_SECRET}`;
 }
 
 function signAdminExpiry(exp: string): string {
@@ -1161,6 +1201,13 @@ app.post("/api/admin/auth", (req: Request, res: Response) => {
   if (!isOwnerAccount(readAuthSession(req as AuthReq))) {
     return res.status(404).json({ success: false, message: "Not found" });
   }
+  // No PIN configured in this deployment: fail loudly with the fix instead of
+  // rejecting every attempt as "wrong PIN", which would send the owner looking
+  // for a typo that does not exist.
+  if (!isAdminPinConfigured()) {
+    console.error("[SECURITY] ADMIN_PIN is not set. Admin dashboard is locked.");
+    return res.status(503).json({ success: false, message: ADMIN_PIN_MISSING_MESSAGE, error: ADMIN_PIN_MISSING_MESSAGE });
+  }
   const { pin } = (req.body as { pin?: string; email?: string }) ?? {};
   const failureRec = adminLoginFailures.get(adminClientKey(req));
   if (failureRec && Date.now() <= failureRec.resetAt && failureRec.count >= ADMIN_MAX_FAILS) {
@@ -1230,15 +1277,64 @@ for (const p of [
 const PLAN_COOKIE_NAME = "ebnili_plan";
 const PLAN_GRANT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-function planSigningSecret(): string {
-  return process.env.AUTH_SESSION_SECRET || process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_PIN || "ebnili";
+/**
+ * Signing keys — never derived from a human password.
+ *
+ * SECURITY: `planSigningSecret()` used to fall back to `ADMIN_PIN` and then to
+ * the literal `"ebnili"`. The admin PIN was hard-coded in this file, so anyone
+ * who read the public source could mint an `ebnili_plan` cookie for any email
+ * and keep Pro/Business forever — a one-line self-service upgrade. Plan grants
+ * are money, so they get their OWN secret with a mandatory, loud failure.
+ *
+ * `secretProblem()` explains exactly what to set, in Arabic, instead of letting
+ * the app quietly sign with a guessable key.
+ */
+const INSECURE_DEV_SECRET = "ebnili-insecure-dev-secret";
+
+/** True when a secret is missing or is a known-public placeholder. */
+function isWeakSecret(secret: string | undefined): boolean {
+  const s = (secret ?? "").trim();
+  if (!s) return true;
+  if (s.length < 24) return true;
+  return [INSECURE_DEV_SECRET, "ebnili", "ebnily", "secret", "change-me"].includes(s);
+}
+
+/**
+ * A dedicated secret for plan grants.
+ *
+ * Refuses to sign with a weak value: without a real secret, paying customers
+ * would silently get no subscription, so the endpoint answers 503 with setup
+ * instructions rather than shipping a forgeable free upgrade.
+ */
+function planSigningSecret(): string | null {
+  const explicit = (process.env.PLAN_GRANT_SECRET ?? "").trim();
+  if (explicit && !isWeakSecret(explicit)) return explicit;
+
+  // A strong AUTH_SESSION_SECRET is an acceptable key: it is already a
+  // high-entropy server-side secret and avoids one more variable to configure.
+  const session = (process.env.AUTH_SESSION_SECRET ?? "").trim();
+  if (!isWeakSecret(session)) return session;
+
+  return null;
+}
+
+/** Owner-facing setup message for a missing plan-grant secret. */
+function planSecretProblem(): string {
+  return "PLAN_GRANT_SECRET غير مُعد. أضفه في Vercel كقيمة عشوائية طويلة (32 حرفاً على الأقل) لتفعيل اشتراكات Pro/Business بأمان.";
+}
+
+/** Signing key for plan grants, or a thrown error — for routes that cannot continue. */
+function requirePlanSigningSecret(): string {
+  const secret = planSigningSecret();
+  if (!secret) throw new Error(planSecretProblem());
+  return secret;
 }
 
 function issuePlanGrant(email: string, tier: "pro" | "business"): string {
   const payload = Buffer.from(
     JSON.stringify({ email: String(email).trim().toLowerCase(), tier, exp: Date.now() + PLAN_GRANT_TTL_MS }),
   ).toString("base64url");
-  return `${payload}.${hmacB64With(payload, planSigningSecret())}`;
+  return `${payload}.${hmacB64With(payload, requirePlanSigningSecret())}`;
 }
 
 function hmacB64With(value: string, secret: string): string {
@@ -1248,10 +1344,13 @@ function hmacB64With(value: string, secret: string): string {
 function readPlanGrant(req: Request): { email: string; tier: "pro" | "business"; expiresAt: string } | null {
   const token = readCookie(req, PLAN_COOKIE_NAME);
   if (!token) return null;
+  // With no secret we cannot verify anything, so no grant can be trusted.
+  const secret = planSigningSecret();
+  if (!secret) return null;
   const sep = token.indexOf(".");
   if (sep <= 0) return null;
   const body = token.slice(0, sep);
-  if (!safeEqual(token.slice(sep + 1), hmacB64With(body, planSigningSecret()))) return null;
+  if (!safeEqual(token.slice(sep + 1), hmacB64With(body, secret))) return null;
   try {
     const parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as {
       email?: string;
@@ -1285,13 +1384,21 @@ app.post("/api/admin/transaction/update-status", requireAdmin, (req: Request, re
       res.status(400).json({ success: false, error: "بريد الحساب مطلوب لتفعيل الاشتراك." });
       return;
     }
-    res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(email, tier), {
-      httpOnly: true,
-      secure: Boolean(process.env.VERCEL),
-      sameSite: "lax",
-      path: "/",
-      maxAge: PLAN_GRANT_TTL_MS,
-    });
+    // Never fail with an unhandled 500: a paying customer must be told the
+    // setup is incomplete, not shown a generic server error.
+    try {
+      res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(email, tier), {
+        httpOnly: true,
+        secure: Boolean(process.env.VERCEL),
+        sameSite: "lax",
+        path: "/",
+        maxAge: PLAN_GRANT_TTL_MS,
+      });
+    } catch (e) {
+      console.error("plan grant could not be signed:", e);
+      res.status(503).json({ success: false, error: planSecretProblem() });
+      return;
+    }
   }
 
   res.json({
@@ -1371,13 +1478,33 @@ function clearAuthCookie(res: Response, name: string): void {
   res.clearCookie(name, authCookieOptions());
 }
 
+/**
+ * HMAC key for the sign-in session cookie.
+ *
+ * SECURITY: this used to fall back to `ADMIN_PIN` and then to a literal
+ * `"ebnili-insecure-dev-secret"` that is published in this repository. Any
+ * reader of the public source could therefore forge a session cookie for the
+ * owner's email and take the site over. Session cookies must be signed with a
+ * real server-side secret and nothing else.
+ *
+ * The value is memoised because it is read on every authenticated request and
+ * the resolution order is not free.
+ */
+let cachedAuthSecret: string | null = null;
+
 function authSessionSecret(): string {
-  return (
-    process.env.AUTH_SESSION_SECRET ||
-    process.env.ADMIN_SESSION_SECRET ||
-    process.env.ADMIN_PIN ||
-    "ebnili-insecure-dev-secret"
-  );
+  if (cachedAuthSecret !== null) return cachedAuthSecret;
+  const explicit = (process.env.AUTH_SESSION_SECRET ?? "").trim();
+  // A dedicated secret is the only acceptable key. Weak values are ignored on
+  // purpose: signing with a guessable key is worse than refusing to sign,
+  // because it looks like it works.
+  cachedAuthSecret = isWeakSecret(explicit) ? INSECURE_DEV_SECRET : explicit;
+  if (isWeakSecret(cachedAuthSecret)) {
+    console.warn(
+      "[SECURITY] AUTH_SESSION_SECRET is missing or too short. Set a random value of 32+ characters in Vercel, otherwise session cookies are forgeable.",
+    );
+  }
+  return cachedAuthSecret;
 }
 
 function hmacB64(input: string): string {
@@ -2371,6 +2498,74 @@ const REFINE_SYSTEM = `You are Ebnily AI's precision code refiner. Apply the use
 Return ONLY the complete updated HTML document (from <!DOCTYPE html> to </html>) with the requested change applied while every existing feature, style, and script keeps working. No explanations, no diffs, no markdown fences, no prose.
 ${CORE_RULES}`;
 
+// ── JSON extraction for the studio endpoints ────────────────────────────────
+// WHY: the studio asks the model for a strict JSON object, but models still
+// wrap it in ```json fences or add a sentence of prose around it. Returning the
+// raw text made the client read `data.enhancedPrompt` from a response that only
+// had `result`, so the Enhance button silently did nothing. These helpers turn
+// the model's answer into the exact shape the UI already reads, and NEVER return
+// an empty object: a failure has to look like a failure, not like "no result".
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const raw = (text || "").trim();
+  if (!raw) return null;
+
+  // 1) the whole answer is one fenced block
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidates: string[] = [];
+  if (fenced?.[1]) candidates.push(fenced[1].trim());
+  candidates.push(raw);
+
+  // 2) the first balanced {...} span, so prose before/after is ignored
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start >= 0 && end > start) candidates.push(raw.slice(start, end + 1));
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return null;
+}
+
+/** Coerce a model value into a non-empty string, or fall back. */
+function asText(value: unknown, fallback = ""): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+/** Coerce a model value into a string array, dropping anything unusable. */
+function asTextArray(value: unknown, fallback: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    const list = value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+    if (list.length) return list;
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, "").trim())
+      .filter(Boolean);
+  }
+  return fallback;
+}
+
+const STUDIO_FALLBACK_TAGS = ["SaaS", "Tailwind", "Responsive", "Interactive"];
+const STUDIO_FALLBACK_STEPS_AR = [
+  "تحليل المتطلبات وتحديد الصفحات والمكونات",
+  "بناء الواجهة المتجاوبة بأنماط Tailwind CSS",
+  "ربط التفاعلات والحالة",
+];
+const STUDIO_FALLBACK_STEPS_EN = [
+  "Analysing requirements and mapping pages and components",
+  "Building the responsive Tailwind CSS interface",
+  "Wiring interactions and state",
+];
+
 const STUDIO_SYSTEM = `You are the Ebnily AI studio assistant. Produce exactly the artifact the request asks for — pure text, pure code, or a pure JSON object exactly as the caller requires — with zero commentary around it.
 ${CORE_RULES}`;
 
@@ -2681,37 +2876,204 @@ app.post("/api/ai/refine-app", requireAiSession, async (req: Request, res: Respo
   }
 });
 
-for (const p of ["/api/ai/gemini-enhance-prompt", "/api/ai/gemini-architect", "/api/ai/gemini-code-doctor"]) {
-  app.post(p, requireAiSession, async (req: Request, res: Response) => {
-    try {
-      const session = readAuthSession(req as AuthReq);
-      if (session && aiQuotaExceeded(session.id)) {
-        return res.status(429).json({ success: false, message: "بلغت الحد الأقصى للطلبات اليومي" });
-      }
-      const ai = getGeminiClient();
-      if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
-      const { prompt = "", language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
-      const result = await generateWithGemini(ai, `(lang: ${language}) ${boundText(String(prompt), MAX_PROMPT_CHARS, "تم اختصار منتصف الطلب")}`, STUDIO_SYSTEM, {
-        budgetMs: STUDIO_BUDGET_MS,
-        attemptTimeoutMs: STUDIO_ATTEMPT_TIMEOUT_MS,
-        maxOutputTokens: DOCUMENT_MAX_OUTPUT_TOKENS,
-      });
-      const text = extractText(result);
-      if (!text) {
-        console.error(`${p}: Gemini returned empty text`);
-        return res.status(502).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
-      }
-      res.json({ success: true, result: text });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`${p} failed:`, msg);
-      if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
-        return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
-      }
-      res.status(502).json({ success: false, message: "فشل طلب الذكاء الاصطناعي" });
+// ── Studio endpoints ─────────────────────────────────────────────────────────
+// WHY these are separate handlers instead of one loop:
+// the old loop returned `{ success, result }` for every path, but each screen
+// reads a DIFFERENT shape — `enhancedPrompt`/`suggestedTags` in the chat +
+// generator, `htmlCode`/`reactComponent`/… in the architect, `diagnosis`/
+// `improvements` in the doctor. The keys never matched, so all three buttons
+// silently did nothing. Each handler below asks the model for its own JSON
+// contract and maps the answer onto the exact keys the UI already reads.
+app.post("/api/ai/gemini-enhance-prompt", requireAiSession, async (req: Request, res: Response) => {
+  try {
+    const session = readAuthSession(req as AuthReq);
+    if (session && aiQuotaExceeded(session.id)) {
+      return res.status(429).json({ success: false, message: "بلغت الحد الأقصى للطلبات اليومي" });
     }
-  });
-}
+    const ai = getGeminiClient();
+    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const body = (req.body ?? {}) as { prompt?: string; category?: string; language?: string };
+    const language = String(body.language ?? "ar");
+    const original = String(body.prompt ?? "").trim();
+    if (!original) return res.status(400).json({ success: false, message: "اكتب وصفاً أولاً ثم اطلب تحسينه" });
+
+    const instruction = [
+      `(language: ${language})`,
+      "Expand this web-app idea into a precise, buildable specification.",
+      `Category hint: ${String(body.category ?? "app")}.`,
+      'Return ONLY a JSON object: {"enhancedPrompt": string, "suggestedTags": string[], "appName": string}',
+      "enhancedPrompt must be one self-contained brief in the requested language naming the pages, sections, colour direction, the data shown, and the interactions.",
+    ].join("\n");
+
+    const result = await generateWithGemini(
+      ai,
+      `${instruction}\n\nIDEA:\n${boundText(original, MAX_PROMPT_CHARS, "تم اختصار منتصف الطلب")}`,
+      STUDIO_SYSTEM,
+      { budgetMs: STUDIO_BUDGET_MS, attemptTimeoutMs: STUDIO_ATTEMPT_TIMEOUT_MS, maxOutputTokens: 8192 },
+    );
+    const text = extractText(result);
+    if (!text) {
+      console.error("gemini-enhance-prompt: Gemini returned empty text");
+      return res.status(502).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
+    }
+
+    const parsed = extractJsonObject(text);
+    if (!parsed) {
+      // The model answered in prose instead of JSON. The text is still a usable
+      // specification, so hand it back rather than failing a click silently.
+      console.error("gemini-enhance-prompt: response was not JSON, using raw text");
+      return res.json({ success: true, enhancedPrompt: text, suggestedTags: STUDIO_FALLBACK_TAGS, appName: "", result: text });
+    }
+
+    const enhanced = asText(parsed.enhancedPrompt ?? parsed.prompt ?? parsed.result, "");
+    if (!enhanced) return res.status(502).json({ success: false, message: "تعذّر تحسين الوصف، حاول مرة أخرى" });
+
+    return res.json({
+      success: true,
+      enhancedPrompt: enhanced,
+      suggestedTags: asTextArray(parsed.suggestedTags, STUDIO_FALLBACK_TAGS),
+      appName: asText(parsed.appName, ""),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("gemini-enhance-prompt failed:", msg);
+    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+      return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
+    }
+    return res.status(502).json({ success: false, message: "فشل تحسين الوصف، حاول مرة أخرى" });
+  }
+});
+
+app.post("/api/ai/gemini-architect", requireAiSession, async (req: Request, res: Response) => {
+  try {
+    const session = readAuthSession(req as AuthReq);
+    if (session && aiQuotaExceeded(session.id)) {
+      return res.status(429).json({ success: false, message: "بلغت الحد الأقصى للطلبات اليومي" });
+    }
+    const ai = getGeminiClient();
+    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const body = (req.body ?? {}) as { prompt?: string; language?: string };
+    const language = String(body.language ?? "ar");
+    const original = String(body.prompt ?? "").trim();
+    if (!original) return res.status(400).json({ success: false, message: "اكتب وصفاً أولاً ثم اطلب التصميم" });
+
+    const instruction = [
+      `(language: ${language})`,
+      "Act as a software architect and produce four deliverables for this app idea.",
+      'Return ONLY a JSON object: {"appName": string, "thinkingSteps": string[], "htmlCode": string, "reactComponent": string, "apiEndpoint": string, "databaseSchema": string}',
+      "htmlCode: one complete runnable single-file HTML document (inline CSS and JS, Tailwind CDN).",
+      "reactComponent: one self-contained React + Tailwind component using useState.",
+      "apiEndpoint: one Express router snippet. databaseSchema: one SQL CREATE TABLE script.",
+      `thinkingSteps: 3-5 short steps in ${language}.`,
+      "Escape every newline inside the code strings as \\n so the JSON stays valid.",
+    ].join("\n");
+
+    const result = await generateWithGemini(
+      ai,
+      `${instruction}\n\nIDEA:\n${boundText(original, MAX_PROMPT_CHARS, "تم اختصار منتصف الطلب")}`,
+      STUDIO_SYSTEM,
+      { budgetMs: STUDIO_BUDGET_MS, attemptTimeoutMs: STUDIO_ATTEMPT_TIMEOUT_MS, maxOutputTokens: DOCUMENT_MAX_OUTPUT_TOKENS },
+    );
+    const text = extractText(result);
+    if (!text) {
+      console.error("gemini-architect: Gemini returned empty text");
+      return res.status(502).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول بصياغة مختلفة" });
+    }
+
+    const parsed = extractJsonObject(text);
+    if (!parsed) return res.status(502).json({ success: false, message: "تعذّر تحليل الرد، أعد المحاولة" });
+    const raw = (k: string) => asText(parsed[k], "");
+    // A tab that renders nothing reads as a broken feature, so refuse loudly
+    // rather than showing four empty panes.
+    if (!raw("htmlCode") && !raw("reactComponent") && !raw("apiEndpoint") && !raw("databaseSchema")) {
+      return res.status(502).json({ success: false, message: "تعذّر توليد المخرجات، أعد المحاولة" });
+    }
+
+    const fallbackSteps = language === "ar" ? STUDIO_FALLBACK_STEPS_AR : STUDIO_FALLBACK_STEPS_EN;
+    return res.json({
+      success: true,
+      appName: asText(parsed.appName, ""),
+      thinkingSteps: asTextArray(parsed.thinkingSteps, fallbackSteps),
+      htmlCode: raw("htmlCode"),
+      reactComponent: raw("reactComponent"),
+      apiEndpoint: raw("apiEndpoint"),
+      databaseSchema: raw("databaseSchema"),
+      result: text, // kept so older builds that read `result` still work
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("gemini-architect failed:", msg);
+    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+      return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
+    }
+    return res.status(502).json({ success: false, message: "فشل التصميم، حاول مرة أخرى" });
+  }
+});
+
+app.post("/api/ai/gemini-code-doctor", requireAiSession, async (req: Request, res: Response) => {
+  try {
+    const session = readAuthSession(req as AuthReq);
+    if (session && aiQuotaExceeded(session.id)) {
+      return res.status(429).json({ success: false, message: "بلغت الحد الأقصى للطلبات اليومي" });
+    }
+    const ai = getGeminiClient();
+    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const body = (req.body ?? {}) as { code?: string; issueDescription?: string; language?: string };
+    const language = String(body.language ?? "ar");
+    const code = String(body.code ?? "");
+    if (!code.trim()) return res.status(400).json({ success: false, message: "لا يوجد كود لفحصه" });
+    const focus = String(body.issueDescription ?? "Optimize and fix any bugs").trim();
+
+    const instruction = [
+      `(language: ${language})`,
+      "Review this HTML application for layout bugs, responsiveness problems, accessibility gaps and script performance issues.",
+      `Focus on: ${boundText(focus, 2000, "تم الاختصار")}`,
+      'Return ONLY a JSON object: {"diagnosis": string, "improvements": string[], "fixedCode": string}',
+      "diagnosis: a short plain-language summary in the requested language.",
+      "improvements: 3-7 concrete actionable strings in the requested language.",
+      "fixedCode: the complete corrected HTML document; if no change is needed, repeat the input unchanged.",
+      "Escape every newline inside fixedCode as \\n so the JSON stays valid.",
+    ].join("\n");
+
+    const result = await generateWithGemini(
+      ai,
+      `${instruction}\n\nCODE:\n${boundText(code, MAX_CURRENT_CODE_CHARS, "تم اختصار منتصف الكود")}`,
+      STUDIO_SYSTEM,
+      { budgetMs: STUDIO_BUDGET_MS, attemptTimeoutMs: STUDIO_ATTEMPT_TIMEOUT_MS, maxOutputTokens: DOCUMENT_MAX_OUTPUT_TOKENS },
+    );
+    const text = extractText(result);
+    if (!text) {
+      console.error("gemini-code-doctor: Gemini returned empty text");
+      return res.status(502).json({ success: false, message: "الذكاء الاصطناعي أعاد رداً فارغاً، حاول مرة أخرى" });
+    }
+
+    const parsed = extractJsonObject(text);
+    if (!parsed) return res.status(502).json({ success: false, message: "تعذّر تحليل الرد، أعد المحاولة" });
+    const diagnosis = asText(parsed.diagnosis, "");
+    const improvements = asTextArray(parsed.improvements, []);
+    const fixedCode = asText(parsed.fixedCode, "");
+    if (!diagnosis && !improvements.length && !fixedCode) {
+      return res.status(502).json({ success: false, message: "تعذّر فحص الكود، أعد المحاولة" });
+    }
+
+    return res.json({
+      success: true,
+      diagnosis,
+      improvements,
+      // An empty fixedCode would make "apply fix" a silent no-op, so hand back
+      // the original document rather than nothing.
+      fixedCode: fixedCode || code,
+      result: text, // kept so older builds that read `result` still work
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("gemini-code-doctor failed:", msg);
+    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+      return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
+    }
+    return res.status(502).json({ success: false, message: "فشل فحص الكود، حاول مرة أخرى" });
+  }
+});
 
 // ── Unknown /api paths → JSON 404 (never HTML, never crash) ─────────────────
 app.use("/api", (_req: Request, res: Response) => {

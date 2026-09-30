@@ -74,12 +74,20 @@ export const ChatSidebar = ({
   const [isListening, setIsListening] = useState(false);
   const [copiedWallet, setCopiedWallet] = useState(false);
   const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
+  /** Why the last enhance failed, so the button never fails silently. */
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
+  /**
+   * Shown when the Web Speech API is unavailable. Replaces a native `alert()`
+   * that could be blocked and did not match the page's design.
+   */
+  const [speechError, setSpeechError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
   const handleEnhanceCurrentPrompt = async () => {
     if (!inputText.trim() || isEnhancingPrompt) return;
     setIsEnhancingPrompt(true);
+    setEnhanceError(null);
     try {
       const res = await fetch('/api/ai/gemini-enhance-prompt', {
         method: 'POST',
@@ -87,11 +95,28 @@ export const ChatSidebar = ({
         body: JSON.stringify({ prompt: inputText.trim(), language }),
       });
       const data = await res.json().catch(() => ({}));
-      if (data && (data as { enhancedPrompt?: string }).enhancedPrompt) {
-        setInputText((data as { enhancedPrompt: string }).enhancedPrompt);
+      // A failed enhance used to be completely silent — the spinner stopped and
+      // the prompt was untouched, so the button looked broken with no reason
+      // given. Surface the server's message (or a generic one) instead.
+      if (!res.ok) {
+        setEnhanceError(
+          (data as { message?: string }).message ||
+            (language === 'ar' ? 'تعذّر تحسين الوصف، حاول مرة أخرى.' : 'Could not enhance the prompt. Please try again.'),
+        );
+        return;
       }
-    } catch (e) {
-      console.warn('Enhance prompt failed:', e);
+      const enhanced = (data as { enhancedPrompt?: string }).enhancedPrompt;
+      if (enhanced) {
+        setInputText(enhanced);
+      } else {
+        setEnhanceError(
+          language === 'ar' ? 'لم يُرجع الذكاء الاصطناعي نصاً محسّناً، جرّب صياغة أوضح.' : 'The engine returned no enhanced text. Try a clearer description.',
+        );
+      }
+    } catch {
+      setEnhanceError(
+        language === 'ar' ? 'تعذّر الاتصال بالخادم، تحقق من الإنترنت وحاول مجدداً.' : 'Could not reach the server. Check your connection.',
+      );
     } finally {
       setIsEnhancingPrompt(false);
     }
@@ -112,6 +137,9 @@ export const ChatSidebar = ({
       return;
     }
 
+    // Clear any previous "unsupported" note before retrying.
+    setSpeechError(null);
+
     type SpeechRecognitionInstance = {
       lang: string;
       continuous: boolean;
@@ -126,7 +154,14 @@ export const ChatSidebar = ({
     const win = window as unknown as Record<string, (new () => SpeechRecognitionInstance) | undefined>;
     const SpeechRecognitionCtor = win.SpeechRecognition || win.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
-      alert(language === 'ar' ? 'متصفحك لا يدعم التعرف الصوتي المباشر.' : 'Speech recognition not supported in this browser.');
+      // Firefox, Safari on iOS and most in-app browsers ship no Web Speech API.
+      // A native alert() broke the page's visual language and can be blocked
+      // outright, so the reason is shown inline with the mic button instead.
+      setSpeechError(
+        language === 'ar'
+          ? 'متصفحك لا يدعم التعرف الصوتي المباشر — اكتب طلبك نصاً بدلاً من ذلك.'
+          : 'This browser does not support speech recognition — just type your request.',
+      );
       return;
     }
 
@@ -146,9 +181,13 @@ export const ChatSidebar = ({
 
       recognitionRef.current = recognition;
       recognition.start();
-    } catch (e) {
-      console.error(e);
+    } catch {
       setIsListening(false);
+      setSpeechError(
+        language === 'ar'
+          ? 'تعذّر تشغيل الميكروفون — تحقق من أذونات المتصفح.'
+          : 'Could not start the microphone — check the browser permission.',
+      );
     }
   };
 
@@ -679,6 +718,26 @@ export const ChatSidebar = ({
             )}
           </div>
 
+          {/* Enhance failure — the reason must be visible, otherwise the button
+              simply looks unresponsive. */}
+          {enhanceError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200 leading-relaxed"
+            >
+              <span aria-hidden="true" className="shrink-0">⚠</span>
+              <span className="flex-1">{enhanceError}</span>
+              <button
+                type="button"
+                onClick={() => setEnhanceError(null)}
+                aria-label={language === 'ar' ? 'إخفاء' : 'Dismiss'}
+                className="shrink-0 text-rose-300 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <div className="relative bg-slate-900 border border-slate-800 rounded-xl focus-within:border-rose-500/70 focus-within:ring-1 focus-within:ring-rose-500/50 transition">
             <textarea
               value={inputText}
@@ -701,6 +760,7 @@ export const ChatSidebar = ({
             <button
               type="button"
               onClick={toggleSpeechRecognition}
+              aria-label={language === 'ar' ? 'إملاء صوتي' : 'Speech to text'}
               className={`absolute right-2.5 bottom-2.5 p-1.5 rounded-lg transition cursor-pointer ${
                 isListening
                   ? 'bg-rose-500 text-white animate-pulse'
@@ -711,6 +771,25 @@ export const ChatSidebar = ({
               {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
             </button>
           </div>
+
+          {/* Dictation unavailable — inline reason instead of a native alert(). */}
+          {speechError && (
+            <p
+              role="status"
+              className="flex items-start gap-2 text-[11px] leading-relaxed text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2"
+            >
+              <span aria-hidden="true" className="shrink-0">⚠</span>
+              <span className="flex-1">{speechError}</span>
+              <button
+                type="button"
+                onClick={() => setSpeechError(null)}
+                aria-label={language === 'ar' ? 'إخفاء' : 'Dismiss'}
+                className="shrink-0 text-amber-300 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </p>
+          )}
 
           <div className="flex items-center justify-between text-[11px] text-slate-400">
             <span className="hidden sm:inline">

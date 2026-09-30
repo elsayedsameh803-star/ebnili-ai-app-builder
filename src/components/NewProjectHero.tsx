@@ -38,6 +38,13 @@ export const NewProjectHero = ({
   const [isListening, setIsListening] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  /**
+   * Shown when dictation is unavailable. The previous `alert()` was a native
+   * modal that broke the visual language of the page (and can be blocked in
+   * some embedded browsers); this renders an inline note in the same place the
+   * mic button lives.
+   */
+  const [speechError, setSpeechError] = useState<string | null>(null);
 
   const toggleSpeech = () => {
     if (isListening) {
@@ -45,6 +52,8 @@ export const NewProjectHero = ({
       setIsListening(false);
       return;
     }
+
+    setSpeechError(null);
 
     const SpeechRecognitionCtor = (window as unknown as Record<string, new () => {
       lang: string;
@@ -64,7 +73,13 @@ export const NewProjectHero = ({
       stop: () => void;
     } | undefined>).webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
-      alert(language === 'ar' ? 'المتصفح لا يدعم التسجيل الصوتي' : 'Speech recognition not supported');
+      // Safari on iOS, Firefox and most in-app browsers do not ship the Web
+      // Speech API. Say so inline instead of firing a native dialog.
+      setSpeechError(
+        language === 'ar'
+          ? 'التسجيل الصوتي غير مدعوم في هذا المتصفح — اكتب الوصف نصاً بدلاً من ذلك.'
+          : 'Speech recognition is not supported in this browser — just type your description.',
+      );
       return;
     }
 
@@ -82,6 +97,11 @@ export const NewProjectHero = ({
       rec.start();
     } catch {
       setIsListening(false);
+      setSpeechError(
+        language === 'ar'
+          ? 'تعذّر تشغيل الميكروفون، تحقق من أذونات المتصفح.'
+          : 'Could not start the microphone. Check the browser permission.',
+      );
     }
   };
 
@@ -194,6 +214,7 @@ export const NewProjectHero = ({
                 <button
                   type="button"
                   onClick={toggleSpeech}
+                  aria-label={language === 'ar' ? 'إملاء صوتي' : 'Voice input'}
                   className={`p-2 rounded-xl text-xs transition cursor-pointer ${
                     isListening
                       ? 'bg-rose-500 text-white animate-pulse'
@@ -222,6 +243,26 @@ export const NewProjectHero = ({
                 {language === 'ar' ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
               </button>
             </div>
+
+            {/* Dictation unavailable — inline explanation in place of the old
+                native alert() dialog. */}
+            {speechError && (
+              <p
+                role="status"
+                className="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2"
+              >
+                <span aria-hidden="true" className="shrink-0">⚠</span>
+                <span className="flex-1">{speechError}</span>
+                <button
+                  type="button"
+                  onClick={() => setSpeechError(null)}
+                  aria-label={language === 'ar' ? 'إخفاء' : 'Dismiss'}
+                  className="shrink-0 text-amber-300 hover:text-white font-bold"
+                >
+                  ✕
+                </button>
+              </p>
+            )}
           </form>
 
           {/* Import from GitHub — deliberately OUTSIDE the prompt form and

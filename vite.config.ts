@@ -11,7 +11,7 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
-    // ── Performance: split the vendor code out of the app bundle ─────────────
+    // Performance: split the vendor code out of the app bundle.
     // Everything used to ship as one 570KB file, so a visitor paid for the
     // Monaco-sized editor and every icon on the first paint. Splitting the
     // long-lived libraries into cacheable chunks lets the browser reuse them
@@ -30,7 +30,6 @@ export default defineConfig(() => {
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},

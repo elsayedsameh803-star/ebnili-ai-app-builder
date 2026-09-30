@@ -109,6 +109,42 @@ this server always fails with `redirect_uri_mismatch`.
 | `GOOGLE_CLIENT_ID` / `_SECRET`      | Only for a **directly owned** Google app    | No — Supabase route is used when present   |
 | `GITHUB_CLIENT_ID` / `_SECRET`      | Only for a **directly owned** GitHub app    | No — Supabase route is used when present   |
 
+### Owner dashboard — required secrets
+
+The admin PIN used to be **hard-coded in the source** (`"1977Sameh@"`), and the
+same value doubled as the signing key for both the admin session cookie and the
+Pro/Business plan-grant cookie. Anyone who read the public repository could mint
+an unlimited admin session and a free upgrade. Both are gone: nothing sensitive
+is read from the code any more, and the secrets below are the only thing that
+grants access.
+
+| Variable                | Purpose                                              | Required |
+| ----------------------- | ---------------------------------------------------- | -------- |
+| `ADMIN_PIN`             | Owner PIN (≥ 8 chars)                                | Yes, for the admin dashboard |
+| `ADMIN_SESSION_SECRET`  | Signs the admin session cookie                        | Recommended |
+| `PLAN_GRANT_SECRET`     | Signs the Pro/Business grant cookie                   | Yes, for paid activations |
+| `SITE_OWNER_EMAIL`      | The owner account; gates every owner-only surface      | Yes, for owner features |
+
+Generate each secret with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Behaviour when they are missing:
+
+- No `ADMIN_PIN` → `POST /api/admin/auth` answers **503** with the setup
+  instruction, instead of "wrong PIN" forever.
+- No `SITE_OWNER_EMAIL` → `isOwnerAccount()` is always false, so no owner-only
+  surface is exposed at all.
+- No `PLAN_GRANT_SECRET` → a paid activation returns **503** rather than issuing
+  a plan grant signed with a guessable key.
+- A secret shorter than 24 characters is treated as unsafe and ignored, so a
+  short placeholder cannot silently become the real key.
+
+> **Rotate the old PIN.** It is no longer accepted by the code, but it was
+> published — treat it as compromised and use a new one.
+
 **Flow:** `/api/auth/google` → PKCE pair (verifier in an HttpOnly cookie) →
 Supabase `/auth/v1/authorize` → Google → Supabase → back to
 `/api/auth/callback/supabase?code=…` → we redeem the code and issue our own

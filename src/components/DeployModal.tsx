@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Share2, X, Check, Copy, QrCode, Globe } from 'lucide-react';
+import { Share2, X, Check, Copy, QrCode, Globe, Info } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { Language } from '../types';
 
 interface DeployModalProps {
@@ -8,6 +9,19 @@ interface DeployModalProps {
   language: Language;
 }
 
+/**
+ * /api/projects/export hands the project to the server, but there is no public
+ * hosting route behind this modal yet. The previous version invented a
+ * `https://ibnili.app/p/<slug>` link that has never existed and a box with
+ * `[QR]` printed in it, then labelled the result "منشور ونشط" — so a visitor
+ * copied a dead URL and scanned a fake code.
+ *
+ * The feature is kept (it is a real part of the product), but it now only ever
+ * shows something that is true:
+ *  • the app's own origin is the only host we can promise, so the share action
+ *    is driven by a real, openable link plus a genuine scannable QR of it;
+ *  • anything not yet available is labelled as such instead of faking success.
+ */
 export const DeployModal = ({
   projectName,
   onClose,
@@ -15,7 +29,8 @@ export const DeployModal = ({
 }: DeployModalProps) => {
   const [copied, setCopied] = useState(false);
   const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'app';
-  const publicUrl = `https://ibnili.app/p/${slug}`;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const publicUrl = `${origin}/preview/${slug}`;
 
   const handleCopy = () => {
     navigator.clipboard?.writeText(publicUrl).catch(() => undefined);
@@ -33,49 +48,56 @@ export const DeployModal = ({
             </div>
             <div>
               <h3 className="font-bold text-sm text-white">
-                {language === 'ar' ? 'نشر التطبيق ومشاركته' : 'Publish & Share App'}
+                {language === 'ar' ? 'مشاركة التطبيق' : 'Share Your App'}
               </h3>
               <p className="text-[11px] text-slate-400">
-                {language === 'ar' ? 'تطبيقك منشور الآن ومتاح عالمياً' : 'Your application is live on the cloud'}
+                {language === 'ar' ? 'شارك رابط المعاينة أو امسح الرمز لفتحه على هاتفك' : 'Share the preview link or scan the code to open it on your phone'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
+            aria-label={language === 'ar' ? 'إغلاق' : 'Close'}
             className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Live Status Badge */}
-        <div className="bg-emerald-950/40 border border-emerald-500/30 p-3 rounded-xl flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-            <span className="text-xs font-semibold text-emerald-300">
-              {language === 'ar' ? 'منشور ونشط على سحابة ابنيلي' : 'Live on Ibni-li Global Edge'}
+        {/* Status badge — honest wording.
+            The old badge claimed the app was "live on the global edge" before
+            anything was published, which is a promise the platform cannot keep. */}
+        <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
+            <span className="text-xs font-semibold text-slate-300 truncate">
+              {language === 'ar'
+                ? 'النشر على نطاق عام غير متاح بعد — استخدم المعاينة المباشرة أو صدّر المشروع'
+                : 'Public hosting is not available yet — use the live preview or export the project'}
             </span>
           </div>
-          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-mono">
-            HTTPS Ready
+          <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono shrink-0">
+            {language === 'ar' ? 'قريباً' : 'Coming soon'}
           </span>
         </div>
 
-        {/* Public Share URL Box */}
+        {/* Preview link box — a URL that actually resolves. */}
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-slate-300">
-            {language === 'ar' ? 'رابط المشاركة العام:' : 'Public Share Link:'}
+            {language === 'ar' ? 'رابط المعاينة:' : 'Preview link:'}
           </label>
           <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl p-2">
-            <Globe className="w-4 h-4 text-slate-500 ml-1 shrink-0" />
+            <Globe className="w-4 h-4 text-slate-500 ms-1 shrink-0" />
             <input
               type="text"
               readOnly
               value={publicUrl}
+              dir="ltr"
               className="bg-transparent text-xs text-white font-mono flex-1 outline-none truncate"
             />
             <button
               onClick={handleCopy}
+              aria-label={language === 'ar' ? 'نسخ الرابط' : 'Copy link'}
               className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-semibold transition shrink-0 flex items-center gap-1 cursor-pointer"
             >
               {copied ? (
@@ -93,30 +115,47 @@ export const DeployModal = ({
           </div>
         </div>
 
-        {/* Mobile QR Code Preview */}
+        {/* Mobile QR — a REAL, scannable code for the link above. The previous
+            markup rendered a literal "[QR]" placeholder, so scanning it did
+            nothing at all. */}
         <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-4">
           <div className="space-y-1">
             <h4 className="font-bold text-xs text-white flex items-center gap-1.5">
               <QrCode className="w-3.5 h-3.5 text-rose-400" />
-              <span>{language === 'ar' ? 'معاينة على هاتفك المحمول' : 'Scan to Test on Mobile'}</span>
+              <span>{language === 'ar' ? 'افتح على هاتفك' : 'Open on your phone'}</span>
             </h4>
             <p className="text-[11px] text-slate-400">
-              {language === 'ar' ? 'امسح الرمز بكاميرا الهاتف لتجربة التطبيق' : 'Scan QR code with your phone camera'}
+              {language === 'ar' ? 'امسح الرمز بكاميرا الهاتف لفتح المعاينة' : 'Scan with your phone camera to open the preview'}
             </p>
           </div>
-          {/* Stylized QR Code placeholder */}
-          <div className="w-16 h-16 bg-white p-1 rounded-lg flex items-center justify-center shrink-0">
-            <div className="w-full h-full border-2 border-slate-900 border-dashed rounded flex items-center justify-center text-slate-900 font-mono text-[10px] font-bold">
-              [QR]
-            </div>
+          <div className="w-20 h-20 bg-white p-1.5 rounded-lg flex items-center justify-center shrink-0">
+            <QRCodeSVG
+              value={publicUrl}
+              size={68}
+              level="M"
+              bgColor="#ffffff"
+              fgColor="#020617"
+              title={language === 'ar' ? 'رمز الاستجابة السريعة للمعاينة' : 'Preview QR code'}
+            />
           </div>
         </div>
 
-        {/* Custom Domain Section */}
-        <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+        {/* Honest note about what this does and does not do yet. */}
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[11px] text-amber-100 leading-relaxed">
+          <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
+          <span>
+            {language === 'ar'
+              ? 'النشر على نطاق خاص والدومين المخصص غير مفعّلين بعد. للحصول على موقع يعمل دائماً، صدّر المشروع كملف ZIP من نافذة التصدير.'
+              : 'Custom-domain publishing is not enabled yet. For a site that is always online, export the project as a ZIP from the export dialog.'}
+          </span>
+        </div>
+
+        {/* Custom Domain Section — clearly marked as unavailable, not a link
+            that goes nowhere. */}
+        <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 gap-2">
           <span>{language === 'ar' ? 'دومين مخصص (Custom Domain)' : 'Custom domain'}</span>
-          <span className="text-rose-400 hover:underline cursor-pointer">
-            {language === 'ar' ? 'إعداد النطاق ←' : 'Configure DNS →'}
+          <span className="text-slate-500">
+            {language === 'ar' ? 'غير متاح حالياً' : 'Not available yet'}
           </span>
         </div>
       </div>

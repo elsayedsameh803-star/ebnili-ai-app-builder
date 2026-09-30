@@ -1,0 +1,26 @@
+# robots.txt — Ebnili AI App Builder
+#
+# WHY: the app is behind a sign-in gate, so a crawler that cannot sign in has
+# nothing to index. Letting it walk the studio only burns crawl budget and can
+# surface private-looking URLs in search results. The public marketing and
+# pricing routes stay open on purpose.
+
+User-agent: *
+Allow: /$
+Allow: /pricing
+Allow: /pay
+
+# Everything else is the authenticated studio, the owner's admin dashboard, and
+# the GitHub integration — none of it should appear in an index.
+Disallow: /api/
+Disallow: /preview/
+Disallow: /admin
+Disallow: /*?auth
+Disallow: /*?auth_error
+Disallow: /*?github
+Disallow: /*?github_error
+
+# Generated user projects must never leak into a search index.
+Disallow: /*?project
+
+Sitemap: /sitemap.xml

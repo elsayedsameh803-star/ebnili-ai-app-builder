@@ -10,11 +10,42 @@ import {
   Wand2,
   CheckCircle2,
   FileCode,
-  Crown
+  Crown,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { Language, UserSubscription } from '../types';
 import { STARTER_TEMPLATES } from '../data/templates';
 import { ORANGE_CASH_WALLET_NUMBER } from '../data/plans';
+
+/**
+ * Inline, dismissible error strip.
+ *
+ * WHY this exists: every action in this modal used to fail silently — the error
+ * was only written to the console, so the user saw the button stop spinning and
+ * nothing else. A missing `GEMINI_API_KEY`, an expired session or a network
+ * drop all looked identical to "the app is broken". This puts the real reason
+ * on screen, in the panel it belongs to.
+ */
+function ErrorStrip({ message, onDismiss, language }: { message: string; onDismiss: () => void; language: Language }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-100 leading-relaxed"
+    >
+      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" aria-hidden="true" />
+      <span className="flex-1 min-w-0 break-words">{message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label={language === 'ar' ? 'إخفاء الرسالة' : 'Dismiss message'}
+        className="shrink-0 text-rose-300 hover:text-white transition"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
 
 interface GeminiStudioModalProps {
   isOpen: boolean;
@@ -45,6 +76,14 @@ export const GeminiStudioModal = ({
   const [suggestedTags, setSuggestedTags] = useState<string[]>([]);
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
   const [enhancedSuccess, setEnhancedSuccess] = useState(false);
+  /**
+   * One visible error per panel. Every button here used to swallow its failure
+   * (`catch { console.error }` + a silent `if (data.x)`), so a dead endpoint or
+   * a missing API key looked exactly like a button that does nothing.
+   */
+  const [generatorError, setGeneratorError] = useState<string | null>(null);
+  const [architectError, setArchitectError] = useState<string | null>(null);
+  const [doctorError, setDoctorError] = useState<string | null>(null);
 
   // Architect State
   const [architectPrompt, setArchitectPrompt] = useState('');
@@ -77,6 +116,7 @@ export const GeminiStudioModal = ({
     if (!prompt.trim() || isEnhancing) return;
     setIsEnhancing(true);
     setEnhancedSuccess(false);
+    setGeneratorError(null);
 
     try {
       const res = await fetch('/api/ai/gemini-enhance-prompt', {
@@ -89,14 +129,27 @@ export const GeminiStudioModal = ({
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setGeneratorError(
+          (data as { message?: string }).message ||
+            (language === 'ar' ? 'تعذّر تحسين الوصف، حاول مرة أخرى.' : 'Could not enhance the prompt. Please try again.'),
+        );
+        return;
+      }
       if ((data as { enhancedPrompt?: string }).enhancedPrompt) {
         setPrompt((data as { enhancedPrompt: string }).enhancedPrompt);
         setSuggestedTags((data as { suggestedTags?: string[] }).suggestedTags || []);
         setEnhancedSuccess(true);
         setTimeout(() => setEnhancedSuccess(false), 4000);
+      } else {
+        setGeneratorError(
+          language === 'ar' ? 'لم يُرجع المحرك نصاً محسّناً، جرّب صياغة أوضح.' : 'The engine returned no enhanced text. Try a clearer description.',
+        );
       }
-    } catch (err) {
-      console.error('Enhance error:', err);
+    } catch {
+      setGeneratorError(
+        language === 'ar' ? 'تعذّر الاتصال بالخادم، تحقق من الإنترنت.' : 'Could not reach the server. Check your connection.',
+      );
     } finally {
       setIsEnhancing(false);
     }
@@ -106,6 +159,7 @@ export const GeminiStudioModal = ({
   const handleGenerateApp = async () => {
     if (!prompt.trim() || isGenerating) return;
     setIsGenerating(true);
+    setGeneratorError(null);
     setThinkingSteps([
       language === 'ar' ? 'تهيئة محرك إبنيلي الذكي وتحليل متطلبات التطبيق' : 'Initializing the Ebnili engine & parsing prompt specifications',
       language === 'ar' ? 'صياغة نظام الألوان والتصميم المتجاوب بنظام Tailwind CSS' : 'Synthesizing responsive visual layout with Tailwind CSS',
@@ -124,6 +178,13 @@ export const GeminiStudioModal = ({
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setGeneratorError(
+          (data as { message?: string }).message ||
+            (language === 'ar' ? 'فشل توليد التطبيق، حاول مرة أخرى.' : 'Generation failed. Please try again.'),
+        );
+        return;
+      }
       if ((data as { code?: string }).code) {
         onApplyGeneratedCode(
           (data as { code: string }).code,
@@ -131,9 +192,17 @@ export const GeminiStudioModal = ({
           (data as { plan?: string[] }).plan,
         );
         onClose();
+      } else {
+        // Closing the modal with no code applied is the worst outcome: the user
+        // loses their prompt and has no idea anything went wrong.
+        setGeneratorError(
+          language === 'ar' ? 'لم يُرجع المحرك أي كود، أعد المحاولة بتفاصيل أكثر.' : 'The engine returned no code. Try again with more detail.',
+        );
       }
-    } catch (err) {
-      console.error('Generation error:', err);
+    } catch {
+      setGeneratorError(
+        language === 'ar' ? 'تعذّر الاتصال بالخادم، تحقق من الإنترنت.' : 'Could not reach the server. Check your connection.',
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -143,6 +212,7 @@ export const GeminiStudioModal = ({
   const handleRunArchitect = async () => {
     if (!architectPrompt.trim() || isArchitecting) return;
     setIsArchitecting(true);
+    setArchitectError(null);
 
     try {
       const res = await fetch('/api/ai/gemini-architect', {
@@ -154,11 +224,20 @@ export const GeminiStudioModal = ({
         }),
       });
       const data = await res.json().catch(() => null);
-      if (data) {
-        setArchitectResult(data);
+      if (!res.ok) {
+        setArchitectError(
+          (data as { message?: string } | null)?.message ||
+            (language === 'ar' ? 'فشل التصميم، حاول مرة أخرى.' : 'Architecture failed. Please try again.'),
+        );
+        return;
       }
-    } catch (err) {
-      console.error('Architect error:', err);
+      // Previously any truthy body became the result, so an error envelope
+      // rendered four empty tabs and looked like a finished, empty design.
+      setArchitectResult(data as typeof architectResult);
+    } catch {
+      setArchitectError(
+        language === 'ar' ? 'تعذّر الاتصال بالخادم، تحقق من الإنترنت.' : 'Could not reach the server. Check your connection.',
+      );
     } finally {
       setIsArchitecting(false);
     }
@@ -169,6 +248,7 @@ export const GeminiStudioModal = ({
     if (isDiagnosing || !currentCode) return;
     setIsDiagnosing(true);
     setDoctorSuccess(false);
+    setDoctorError(null);
 
     try {
       const res = await fetch('/api/ai/gemini-code-doctor', {
@@ -181,12 +261,19 @@ export const GeminiStudioModal = ({
         }),
       });
       const data = await res.json().catch(() => null);
-      if (data) {
-        setDoctorResult(data);
-        setDoctorSuccess(true);
+      if (!res.ok) {
+        setDoctorError(
+          (data as { message?: string } | null)?.message ||
+            (language === 'ar' ? 'فشل فحص الكود، حاول مرة أخرى.' : 'Code review failed. Please try again.'),
+        );
+        return;
       }
-    } catch (err) {
-      console.error('Doctor error:', err);
+      setDoctorResult(data as typeof doctorResult);
+      setDoctorSuccess(true);
+    } catch {
+      setDoctorError(
+        language === 'ar' ? 'تعذّر الاتصال بالخادم، تحقق من الإنترنت.' : 'Could not reach the server. Check your connection.',
+      );
     } finally {
       setIsDiagnosing(false);
     }
@@ -322,6 +409,9 @@ export const GeminiStudioModal = ({
           {/* TAB 1: Smart App Builder */}
           {activeTab === 'generator' && (
             <div className="space-y-6">
+              {generatorError && (
+                <ErrorStrip message={generatorError} onDismiss={() => setGeneratorError(null)} language={language} />
+              )}
               {/* Category selector */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-2">
@@ -470,6 +560,9 @@ export const GeminiStudioModal = ({
           {/* TAB 2: Multi-Tier Architect */}
           {activeTab === 'architect' && (
             <div className="space-y-6">
+              {architectError && (
+                <ErrorStrip message={architectError} onDismiss={() => setArchitectError(null)} language={language} />
+              )}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-2">
                   {language === 'ar' ? 'أدخل فكرة الميزة أو النظام المعماري المطلوب:' : 'Enter Target System Specification:'}
@@ -602,6 +695,9 @@ export const GeminiStudioModal = ({
           {/* TAB 3: Code Doctor */}
           {activeTab === 'doctor' && (
             <div className="space-y-6">
+              {doctorError && (
+                <ErrorStrip message={doctorError} onDismiss={() => setDoctorError(null)} language={language} />
+              )}
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
                 <div>
                   <h4 className="font-bold text-sm text-white flex items-center gap-2">

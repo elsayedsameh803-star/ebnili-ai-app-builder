@@ -179,9 +179,13 @@ function loadAdminSettings(): AdminSettings {
     autoVerificationEnabled: true,
     supportWhatsappNumber: "01207782741",
     siteName: "إبنيلي | Ebnili AI Studio",
-    adminEmail: "elsayedsameh803@gmail.com",
-    adminPin: "1977Sameh@",
-    totalGenerationsExecuted: 14,
+    adminEmail: process.env.SITE_OWNER_EMAIL || process.env.OWNER_EMAIL || "",
+    // SECURITY: the seeded `adminPin: "1977Sameh@"` was a real password
+    // committed to this repository. The fallback now carries NO PIN, so a fresh
+    // clone cannot be unlocked by anyone who reads the source. Set ADMIN_PIN in
+    // `.env` (which is git-ignored) or save one from the dashboard.
+    adminPin: "",
+    totalGenerationsExecuted: 0,
   };
 }
 
@@ -630,13 +634,18 @@ const ADMIN_FAIL_WINDOW_MS = 10 * 60 * 1000;
 const ADMIN_MAX_FAILS = 10;
 const adminLoginFailures = new Map<string, { count: number; resetAt: number }>();
 
+/**
+ * Admin session signing key (dev server).
+ *
+ * SECURITY: this chained down to the literal `"1977Sameh@"`, so the published
+ * PIN doubled as the key that signs the admin cookie. The key is now
+ * independent and never falls back to the PIN; an unconfigured local run is
+ * locked rather than forgeable.
+ */
 function adminSessionSecret(): string {
-  return (
-    process.env.ADMIN_SESSION_SECRET ||
-    process.env.ADMIN_PIN ||
-    adminSettings.adminPin ||
-    "1977Sameh@"
-  );
+  const explicit = (process.env.ADMIN_SESSION_SECRET ?? "").trim();
+  if (explicit.length >= 24) return explicit;
+  return "admin-unconfigured-ebnili-insecure-dev-secret";
 }
 
 function signAdminExpiry(exp: string): string {
@@ -689,10 +698,17 @@ function registerAdminLoginFailure(req: express.Request): void {
   }
 }
 
+/**
+ * Admin PIN candidates (dev server).
+ *
+ * SECURITY: the literal `"1977Sameh@"` used to be a third accepted candidate,
+ * i.e. a real owner password living in a public repository. It is removed — the
+ * PIN now has to come from `ADMIN_PIN` or the local settings file.
+ */
 function pinMatches(pin: unknown): boolean {
   const submitted = Buffer.from(typeof pin === "string" ? pin.trim() : "");
-  const candidates = [adminSettings.adminPin, process.env.ADMIN_PIN, "1977Sameh@"].filter(
-    (v): v is string => Boolean(v),
+  const candidates = [adminSettings.adminPin, process.env.ADMIN_PIN].filter(
+    (v): v is string => Boolean(v) && v.trim().length >= 8,
   );
   let match = false;
   // Constant-time comparison against every configured candidate.
@@ -715,6 +731,13 @@ function requireAdmin(req: express.Request, res: express.Response, next: express
 
 // Admin Authentication (PIN-only; issues signed HttpOnly session cookie)
 app.post("/api/admin/auth", (req, res) => {
+  // No PIN anywhere (env or the local settings file): say what is missing
+  // instead of answering "wrong PIN" forever.
+  if (!adminSettings.adminPin?.trim() && !process.env.ADMIN_PIN?.trim()) {
+    const msg = "لوحة الإدارة غير مُفعّلة: أضف ADMIN_PIN في ملف .env (8 أحرف على الأقل) ثم أعد تشغيل الخادم.";
+    return res.status(503).json({ error: msg, message: msg });
+  }
+
   const { pin } = req.body ?? {};
   const failureRec = adminLoginFailures.get(adminClientKey(req));
   if (failureRec && Date.now() <= failureRec.resetAt && failureRec.count >= ADMIN_MAX_FAILS) {

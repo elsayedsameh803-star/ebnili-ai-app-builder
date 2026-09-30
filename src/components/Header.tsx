@@ -251,10 +251,14 @@ export const Header = ({
 
       {/* Center: View Modes & Device Controls */}
       <div className="hidden md:flex items-center gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
-        {/* Device Controls */}
-        <div className="flex items-center bg-slate-900 rounded-lg p-0.5">
+        {/* Device Controls.
+            The three buttons are icon-only, so each needs an accessible name —
+            a `title` alone is not announced reliably by screen readers. */}
+        <div className="flex items-center bg-slate-900 rounded-lg p-0.5" role="group" aria-label={language === 'ar' ? 'حجم الشاشة' : 'Preview size'}>
           <button
             onClick={() => onDeviceModeChange('desktop')}
+            aria-label={language === 'ar' ? 'معاينة سطح المكتب' : 'Desktop preview'}
+            aria-pressed={deviceMode === 'desktop'}
             className={`p-1.5 rounded-md text-xs transition ${
               deviceMode === 'desktop' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -264,6 +268,8 @@ export const Header = ({
           </button>
           <button
             onClick={() => onDeviceModeChange('tablet')}
+            aria-label={language === 'ar' ? 'معاينة التابلت' : 'Tablet preview'}
+            aria-pressed={deviceMode === 'tablet'}
             className={`p-1.5 rounded-md text-xs transition ${
               deviceMode === 'tablet' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -273,6 +279,8 @@ export const Header = ({
           </button>
           <button
             onClick={() => onDeviceModeChange('mobile')}
+            aria-label={language === 'ar' ? 'معاينة الهاتف' : 'Mobile preview'}
+            aria-pressed={deviceMode === 'mobile'}
             className={`p-1.5 rounded-md text-xs transition ${
               deviceMode === 'mobile' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -285,9 +293,10 @@ export const Header = ({
         <div className="h-4 w-px bg-slate-800" />
 
         {/* View Layout Modes */}
-        <div className="flex items-center bg-slate-900 rounded-lg p-0.5">
+        <div className="flex items-center bg-slate-900 rounded-lg p-0.5" role="group" aria-label={language === 'ar' ? 'طريقة العرض' : 'View mode'}>
           <button
             onClick={() => onViewModeChange('preview')}
+            aria-pressed={viewMode === 'preview'}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
               viewMode === 'preview' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -298,6 +307,7 @@ export const Header = ({
 
           <button
             onClick={() => onViewModeChange('split')}
+            aria-pressed={viewMode === 'split'}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
               viewMode === 'split' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
             }`}
@@ -308,6 +318,7 @@ export const Header = ({
 
           <button
             onClick={() => onViewModeChange('code')}
+            aria-pressed={viewMode === 'code'}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
               viewMode === 'code' ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
             }`}
