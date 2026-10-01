@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Share2, X, Check, Copy, QrCode, Globe, Info } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Language } from '../types';
+import { useModalAccessibility } from './useModalAccessibility';
 
 interface DeployModalProps {
   projectName: string;
@@ -28,6 +29,8 @@ export const DeployModal = ({
   language,
 }: DeployModalProps) => {
   const [copied, setCopied] = useState(false);
+  const handleClose = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useModalAccessibility(true, handleClose);
   const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'app';
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const publicUrl = `${origin}/preview/${slug}`;
@@ -40,7 +43,13 @@ export const DeployModal = ({
 
   return (
     <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={language === 'ar' ? 'مشاركة التطبيق' : 'Share your app'}
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150"
+      >
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">

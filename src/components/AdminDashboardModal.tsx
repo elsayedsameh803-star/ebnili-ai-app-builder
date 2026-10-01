@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   ShieldAlert, 
   ShieldCheck, 
@@ -17,6 +17,7 @@ import {
   Ban
 } from 'lucide-react';
 import { Language, PlatformRealStats, AdminSettings, DeviceProtectionInfo, OrangeCashTransaction } from '../types';
+import { useModalAccessibility } from './useModalAccessibility';
 
 interface AdminDashboardModalProps {
   isOpen: boolean;
@@ -142,6 +143,11 @@ export const AdminDashboardModal = ({
   onClose,
   language,
 }: AdminDashboardModalProps) => {
+  // Focus management must come before any conditional return so the effect is
+  // registered consistently across renders.
+  const handleClose = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useModalAccessibility(isOpen, handleClose);
+
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -350,14 +356,35 @@ export const AdminDashboardModal = ({
       });
       if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
-      if (data.success) {
-        // Only replace when the server returned the updated device (stateless
-        // serverless backend answers without one — never store undefined).
-        if (data.device) setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
-        showToast(device.isBlocked ? 'تم فك حظر الجهاز بنجاح' : 'تم حظر الجهاز بنجاح');
+      if (!res.ok || !(data as { success?: boolean }).success) {
+        // The old code checked `data.success` only and stayed silent otherwise, so
+        // a failed block looked exactly like a successful one.
+        showToast(
+          (data as { message?: string }).message || 'تعذّر تحديث حالة الجهاز. تأكد من تنفيذ supabase/projects.sql',
+        );
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      // Flip the flag locally so the row reflects the decision immediately, then
+      // re-read for the canonical values. The server answers with
+      // `{ deviceId, isBlocked }`, not a `device` object — waiting for one that
+      // never arrived left a successful block still showing as unblocked.
+      setDevices(prev =>
+        prev.map((d) =>
+          d.deviceId === device.deviceId
+            ? {
+                ...d,
+                isBlocked: !device.isBlocked,
+                blockReason: device.isBlocked
+                  ? undefined
+                  : 'حظر بواسطة صاحب الموقع لمخالفة الاستخدام',
+              }
+            : d,
+        ),
+      );
+      void fetchAdminData();
+      showToast(device.isBlocked ? 'تم فك حظر الجهاز بنجاح' : 'تم حظر الجهاز بنجاح');
+    } catch {
+      showToast('تعذّر الاتصال بالخادم، حاول مرة أخرى');
     }
   };
 
@@ -375,12 +402,30 @@ export const AdminDashboardModal = ({
       });
       if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
-      if (data.success) {
-        if (data.device) setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
-        showToast('تم تصفير استهلاك الجهاز وتجديد رصيده بنجاح');
+      if (!res.ok || !(data as { success?: boolean }).success) {
+        showToast(
+          (data as { message?: string }).message || 'تعذّر تصفير رصيد الجهاز. تأكد من تنفيذ supabase/projects.sql',
+        );
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      // Reflect the reset locally instead of waiting for a `device` object the
+      // server does not return — otherwise the counter stayed stale on screen
+      // even though the write had landed.
+      setDevices(prev =>
+        prev.map((d) =>
+          d.deviceId === device.deviceId
+            ? {
+                ...d,
+                freeGenerationsUsed: 0,
+                freeGenerationsLimit: newLimit ?? d.freeGenerationsLimit,
+              }
+            : d,
+        ),
+      );
+      void fetchAdminData();
+      showToast('تم تصفير استهلاك الجهاز وتجديد رصيده بنجاح');
+    } catch {
+      showToast('تعذّر الاتصال بالخادم، حاول مرة أخرى');
     }
   };
 
@@ -397,18 +442,25 @@ export const AdminDashboardModal = ({
       });
       if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
-      if (data.success) {
-        if (data.device) setDevices(prev => prev.map(d => d.deviceId === device.deviceId ? data.device : d));
-        showToast(`تم ترقية الجهاز إلى باقة: ${tier.toUpperCase()}`);
+      if (!res.ok || !(data as { success?: boolean }).success) {
+        showToast(
+          (data as { message?: string }).message || 'تعذّر تحديث باقة الجهاز. تأكد من تنفيذ supabase/projects.sql',
+        );
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      setDevices(prev =>
+        prev.map((d) => (d.deviceId === device.deviceId ? { ...d, associatedTier: tier } : d)),
+      );
+      void fetchAdminData();
+      showToast(`تم تحديث باقة الجهاز إلى: ${tier.toUpperCase()}`);
+    } catch {
+      showToast('تعذّر الاتصال بالخادم، حاول مرة أخرى');
     }
   };
 
-  // SECURITY: approving a payment is the ONLY way a paid tier is granted, so the
-  // customer's email MUST travel with the request — the server mints the signed
-  // plan grant for that address and nothing else.
+  // SECURITY: approving a payment is the ONLY way a paid tier is granted. The
+  // customer's address is read from the stored payment row by the server, never
+  // from this request, so a crafted call cannot grant a plan to anyone else.
   const handleUpdateTransactionStatus = async (
     txId: string,
     status: 'confirmed' | 'rejected',
@@ -500,8 +552,18 @@ export const AdminDashboardModal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-md overflow-y-auto animate-fadeIn select-none" dir="rtl">
-      <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[92vh]">
-        
+      {/*
+        The dialog element carries the ref the focus hook watches and is marked
+        as a modal for assistive tech, so the window below is not announced
+        alongside it.
+      */}
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={language === 'ar' ? 'لوحة إدارة المنصة' : 'Platform administration'}
+        className="relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[92vh]">
+
         {/* Top Header */}
         <div className="px-6 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Database, X, Github, CreditCard } from 'lucide-react';
 import { Language } from '../types';
+import { useModalAccessibility } from './useModalAccessibility';
 
 interface IntegrationsModalProps {
   onClose: () => void;
@@ -16,10 +17,18 @@ export const IntegrationsModal = ({
 }: IntegrationsModalProps) => {
   const [supabaseConnected, setSupabaseConnected] = useState(true);
   const [stripeConnected, setStripeConnected] = useState(false);
+  const handleClose = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useModalAccessibility(true, handleClose);
 
   return (
     <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={language === 'ar' ? 'التكاملات والخدمات' : 'Integrations'}
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150"
+      >
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">

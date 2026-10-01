@@ -47,6 +47,7 @@ const AdminDashboardModal = lazy(() => import('./components/AdminDashboardModal'
 const PricingPage = lazy(() => import('./components/PricingPage').then((m) => ({ default: m.PricingPage })));
 const PayPage = lazy(() => import('./components/PayPage').then((m) => ({ default: m.PayPage })));
 const AuthModal = lazy(() => import('./components/AuthModal').then((m) => ({ default: m.AuthModal })));
+const NotFoundPage = lazy(() => import('./components/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
 import { 
   AppProject, 
   ChatMessage, 
@@ -1241,7 +1242,7 @@ export default function App() {
     );
   }
 
-  // ── Public routes: /pricing and /pay ────────────────────────────────────────
+  // ── Public routes: /pricing, /pay and /404 ──────────────────────────────────
   // Rendered above the auth gate so a visitor can read the prices and pay
   // without an account; the studio itself still requires a session.
   const { path, params } = currentRoute();
@@ -1249,6 +1250,23 @@ export default function App() {
     window.history.pushState({}, '', to);
     window.dispatchEvent(new PopStateEvent('popstate'));
   };
+
+  // A mistyped or dead link used to land on the full studio / login wall, which
+  // looks like the site is broken. A real 404 page says what happened and
+  // offers a way back.
+  if (path === '/404' || path === '/not-found') {
+    return (
+      <Suspense
+        fallback={
+          <div className="h-screen bg-slate-950 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full border-2 border-slate-800 border-t-indigo-400 animate-spin" />
+          </div>
+        }
+      >
+        <NotFoundPage language={language} onNavigate={navigate} />
+      </Suspense>
+    );
+  }
 
   if (path === '/pricing' || path === '/pay') {
     return (
@@ -1415,8 +1433,9 @@ export default function App() {
           streamSeconds={streamSeconds}
         />
 
-        {/* Right Workspace: Preview, Code Editor, or Split View */}
-        <main className="flex-1 min-h-0 flex overflow-hidden relative">
+        {/* Right Workspace: Preview, Code Editor, or Split View.
+            `id` is the skip-link target declared in main.tsx. */}
+        <main id="main-content" tabIndex={-1} className="flex-1 min-h-0 flex overflow-hidden relative focus:outline-none">
           {viewMode === 'preview' && (
             <PreviewFrame
               code={project.code}

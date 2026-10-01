@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import type { FormEvent, ChangeEvent } from 'react';
 import {
   X,
@@ -27,6 +27,7 @@ import {
   ORANGE_CASH_STEPS_EN 
 } from '../data/plans';
 import { getDeviceFingerprint } from '../utils/fingerprint';
+import { useModalAccessibility } from './useModalAccessibility';
 
 interface SubscriptionModalProps {
   isOpen?: boolean;
@@ -79,6 +80,10 @@ export const SubscriptionModal = ({
   const [successCelebration, setSuccessCelebration] = useState(false);
   // Payment is submitted for MANUAL review — never activated on the spot.
   const [pendingReview, setPendingReview] = useState(false);
+
+  // Before the `if (!isOpen) return null` below, so the effect is never skipped.
+  const handleClose = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useModalAccessibility(isOpen, handleClose);
 
   if (!isOpen) return null;
 
@@ -195,7 +200,11 @@ export const SubscriptionModal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md overflow-y-auto animate-fadeIn select-none">
-      <div 
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={language === 'ar' ? 'باقات واشتراكات المنصة' : 'Plans and subscriptions'}
         className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[92vh]"
         dir={language === 'ar' ? 'rtl' : 'ltr'}
       >

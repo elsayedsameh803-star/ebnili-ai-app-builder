@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useCallback, type ReactNode } from 'react';
 import {
   X, Phone, Mail, MapPin, Clock, Building2, ShieldCheck, Scale, Info, Copy, Check, ExternalLink,
 } from 'lucide-react';
 import { Language } from '../types';
+import { useModalAccessibility } from './useModalAccessibility';
 
 /**
  * SITE PAGES — About / Contact / Privacy / Terms.
@@ -40,6 +41,8 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
   const [page, setPage] = useState<PageKey>(initialPage);
   const [copied, setCopied] = useState(false);
   const ar = language === 'ar';
+  const handleClose = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useModalAccessibility(true, handleClose);
 
   const copyPhone = async () => {
     try {
@@ -71,6 +74,9 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
         className="w-full max-w-3xl max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
       >
         <div className="px-5 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between shrink-0">

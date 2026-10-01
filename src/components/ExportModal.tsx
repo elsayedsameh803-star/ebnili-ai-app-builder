@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Download, X, Copy, Check, FileArchive, Terminal, Code, AlertCircle } from 'lucide-react';
 import JSZip from 'jszip';
 import { Language } from '../types';
 import { buildProjectExport, slugify } from '../lib/auth';
 import { exportProjectFiles } from '../lib/projects';
+import { useModalAccessibility } from './useModalAccessibility';
 
 interface ExportModalProps {
   projectName: string;
@@ -20,6 +21,8 @@ export const ExportModal = ({
 }: ExportModalProps) => {
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
+  const handleClose = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useModalAccessibility(true, handleClose);
   /**
    * A failed export used to call the native `alert()`, which is jarring, can be
    * suppressed by the browser, and carries no recovery hint. The reason is now
@@ -102,7 +105,13 @@ export const ExportModal = ({
 
   return (
     <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={language === 'ar' ? 'تصدير مشروع التطبيق' : 'Export project code'}
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150"
+      >
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">

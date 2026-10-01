@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import {
   Sparkles,
   Cpu,
@@ -17,6 +17,7 @@ import {
 import { Language, UserSubscription } from '../types';
 import { STARTER_TEMPLATES } from '../data/templates';
 import { ORANGE_CASH_WALLET_NUMBER } from '../data/plans';
+import { useModalAccessibility } from './useModalAccessibility';
 
 /**
  * Inline, dismissible error strip.
@@ -84,6 +85,11 @@ export const GeminiStudioModal = ({
   const [generatorError, setGeneratorError] = useState<string | null>(null);
   const [architectError, setArchitectError] = useState<string | null>(null);
   const [doctorError, setDoctorError] = useState<string | null>(null);
+
+  // Registered before the `if (!isOpen) return null` below so the focus effect
+  // is never skipped on a render.
+  const handleClose = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useModalAccessibility(isOpen, handleClose);
 
   // Architect State
   const [architectPrompt, setArchitectPrompt] = useState('');
@@ -287,7 +293,13 @@ export const GeminiStudioModal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={language === 'ar' ? 'استوديو إبنيلي الذكي' : 'Ebnili AI Studio'}
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-slate-100"
+      >
         
         {/* Modal Top Header */}
         <div className="px-6 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">

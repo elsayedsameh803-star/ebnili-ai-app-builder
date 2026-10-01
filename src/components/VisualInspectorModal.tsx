@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import type { FormEvent } from 'react';
 import { MousePointerClick, Sparkles, X, Palette, Type, Trash2 } from 'lucide-react';
 import { SelectedElementInfo, Language } from '../types';
+import { useModalAccessibility } from './useModalAccessibility';
 
 interface VisualInspectorModalProps {
   elementInfo: SelectedElementInfo;
@@ -17,6 +18,8 @@ export const VisualInspectorModal = ({
   language,
 }: VisualInspectorModalProps) => {
   const [promptText, setPromptText] = useState('');
+  const handleClose = useCallback(() => onClose(), [onClose]);
+  const dialogRef = useModalAccessibility(true, handleClose);
 
   interface QuickAction {
     titleAr: string;
@@ -66,7 +69,13 @@ export const VisualInspectorModal = ({
 
   return (
     <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4 text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={language === 'ar' ? 'تعديل العنصر المحدد' : 'Edit selected element'}
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4 text-slate-100 animate-in fade-in zoom-in-95 duration-150"
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">

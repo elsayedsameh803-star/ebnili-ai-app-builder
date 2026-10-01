@@ -20,10 +20,21 @@ export default defineConfig(() => {
       chunkSizeWarningLimit: 700,
       rollupOptions: {
         output: {
-          manualChunks: {
-            react: ['react', 'react-dom'],
-            icons: ['lucide-react'],
-            zip: ['jszip'],
+          manualChunks(id) {
+            // Only split modules that actually exist in this dependency graph.
+            // Naming a package that is not imported produces an empty chunk, and
+            // several tools treat an empty chunk as a build error.
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('react-dom') || id.includes('react\\') || id.includes('/react/')) {
+              return 'react';
+            }
+            if (id.includes('lucide-react')) return 'icons';
+            // JSZip is only needed once the visitor opens the export dialog, so
+            // it gets its own chunk instead of blocking the first paint.
+            if (id.includes('jszip')) return 'zip';
+            if (id.includes('@google/genai')) return 'genai';
+            if (id.includes('qrcode.react')) return 'qrcode';
+            return undefined;
           },
         },
       },
