@@ -248,16 +248,45 @@ vercel --prod --yes
 > **Note**: Without `GEMINI_API_KEY` the app still deploys and the UI works, but every
 > call to a `/api/ai/*` endpoint returns an error.
 
-### Filesystem caveat on serverless
+### ⚠️ Vercel deployment — the serverless filesystem is read-only
 
-The backend persists state in JSON files (`subscriptions_db.json`, `devices_db.json`,
-`admin_settings.json`) through `fs`. Vercel's serverless filesystem is **read-only**
-(except `/tmp`), so:
+`server.ts` (the local dev server) still persists state in JSON files
+(`subscriptions_db.json`, `devices_db.json`, `admin_settings.json`) through `fs`.
+**That file-based path does NOT work on Vercel**, where the function filesystem is
+read-only outside `/tmp`.
 
-- ✅ Read endpoints (`/api/subscriptions/current`, `/api/admin/overview`, …) work.
-- ⚠️ Write endpoints (submitting an Orange Cash payment, blocking a device, …) will not
-  persist on Vercel. For production, migrate this state to a database
-  (Vercel Postgres, Upstash Redis, Supabase, …).
+All stateful endpoints on `api/index.ts` therefore use **Supabase (PostgREST)**
+instead. On Vercel you must:
+
+1. Create a Supabase project.
+2. Run **`supabase/projects.sql`** in the SQL editor. It creates:
+   | Table                | Holds                                                   |
+   | -------------------- | ------------------------------------------------------- |
+   | `ebnily_projects`    | Per-account projects                                    |
+   | `ebnily_payments`    | The Orange Cash review queue                            |
+   | `ebnily_devices`     | The device registry (blocks, quota, tier)               |
+   | `ebnily_settings`    | Owner-editable platform values                          |
+3. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in Vercel.
+
+Until that is done every stateful endpoint answers **503 `DB_UNAVAILABLE`** and the
+dashboard shows "نفّذ supabase/projects.sql" — it never shows a page of zeros that
+looks like a working dashboard with no data.
+
+The one thing to run in the **Supabase dashboard → Storage** is a public bucket named
+`payments-pending` (override with `PAYMENTS_BUCKET`) so receipt images can be stored.
+
+### How a payment is actually activated
+
+This is the flow that used to be broken end to end:
+
+1. The customer submits from `/pay` or the subscription dialog → a row is written to
+   `ebnily_payments` with `status = 'pending'` and `account_email` taken from the
+   session cookie.
+2. The owner opens the dashboard → **Transactions** lists the request.
+3. Approving writes `status = 'confirmed'` plus `reviewed_at`. The account and tier
+   are read from the stored row, never from the request body.
+4. `/api/subscriptions/current` returns the paid tier to that account on any device,
+   with the expiry measured from `reviewed_at`.
 
 ### Troubleshooting
 
