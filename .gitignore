@@ -21,3 +21,11 @@ subscriptions_db.json
 
 tsc-out.txt
 .env
+
+# Scratch files produced while debugging the AI endpoints. `pr.json` is a
+# hand-typed request body left over from curl-ing /api/ai/* — not project data.
+_*.txt
+_*.cmd
+_*.ps1
+_*.log
+pr.json
