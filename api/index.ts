@@ -741,6 +741,35 @@ app.get("/api/github/status", (req: AuthReq, res: AuthRes) => {
   });
 });
 
+/**
+ * The exact callback URL this server sends to GitHub.
+ *
+ * WHY this exists: GitHub rejects the authorisation screen with "The
+ * redirect_uri is not associated with this application" when the URL we send is
+ * not registered on the OAuth app — character for character, host included. That
+ * used to be unguessable: the value depends on `APP_URL`, and nothing in the UI
+ * displayed it, so the only way to find it was to read the source.
+ *
+ * It is derived from the SAME helper `/api/github/connect` uses, so the string
+ * shown here is guaranteed to be the string GitHub will compare against. Copy it
+ * into the OAuth app's "Callback URL" field.
+ */
+app.get("/api/github/config", (req: AuthReq, res: AuthRes) => {
+  const cfg = providerConfig("github");
+  const base = requestBaseUrl(req);
+  res.json({
+    success: true,
+    configured: cfg.configured,
+    clientId: cfg.configured ? `${cfg.clientId.slice(0, 4)}…${cfg.clientId.slice(-4)}` : "",
+    callbackUrl: `${base}/api/github/callback`,
+    // Surfaced so a misconfigured APP_URL is visible instead of mysterious: if
+    // this does not match the domain the visitor is on, that is the bug.
+    baseUrl: base,
+    appUrlConfigured: Boolean((process.env.APP_URL || "").trim()),
+    scopes: GH_SCOPES,
+  });
+});
+
 /** Step 1 — send the browser to GitHub to authorise a read-only link. */
 app.get("/api/github/connect", (req: AuthReq, res: AuthRes) => {
   const session = readAuthSession(req);

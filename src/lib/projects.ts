@@ -204,6 +204,42 @@ export function startGitHubLink(): void {
   window.location.href = '/api/github/connect';
 }
 
+/** What the server needs registered on the GitHub OAuth app. */
+export interface GitHubOAuthConfig {
+  configured: boolean;
+  clientId: string;
+  callbackUrl: string;
+  baseUrl: string;
+  appUrlConfigured: boolean;
+  scopes: string;
+}
+
+/**
+ * The exact callback URL to paste into the GitHub OAuth app.
+ *
+ * WHY: GitHub answers with "The redirect_uri is not associated with this
+ * application" when the registered URL differs from the one sent — by even a
+ * missing slash or a different host. Guessing it is impossible, so the server
+ * reports the precise value it will use.
+ */
+export async function fetchGitHubOAuthConfig(): Promise<GitHubOAuthConfig | null> {
+  try {
+    const res = await fetch('/api/github/config', { credentials: 'same-origin' });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Partial<GitHubOAuthConfig>;
+    return {
+      configured: data.configured === true,
+      clientId: data.clientId ?? '',
+      callbackUrl: data.callbackUrl ?? '',
+      baseUrl: data.baseUrl ?? '',
+      appUrlConfigured: data.appUrlConfigured === true,
+      scopes: data.scopes ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function disconnectGitHub(): Promise<void> {
   await ghFetch('/api/github/disconnect', { method: 'POST' });
 }

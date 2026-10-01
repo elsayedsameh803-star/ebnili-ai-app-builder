@@ -10,11 +10,14 @@ import {
   Loader2,
   AlertTriangle,
   Star,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Language } from '../types';
 import {
   disconnectGitHub,
   fetchGitHubStatus,
+  fetchGitHubOAuthConfig,
   fetchMyRepos,
   importRepo,
   startGitHubLink,
@@ -22,6 +25,7 @@ import {
   GitHubNotLinkedError,
   type GitHubRepo,
   type GitHubImportResult,
+  type GitHubOAuthConfig,
 } from '../lib/projects';
 
 interface GitHubImportModalProps {
@@ -29,6 +33,15 @@ interface GitHubImportModalProps {
   language: Language;
   /** Hands the imported files to the studio. */
   onImported: (result: GitHubImportResult) => void;
+  /**
+   * A failure from a previous link attempt, already phrased for the user.
+   *
+   * WHY: when GitHub refuses the callback URL it never redirects back, so the
+   * visitor is stranded on github.com with a generic error. The codes our own
+   * callback does return were previously shown raw (`github:state_mismatch`);
+   * the caller translates them and passes the readable text in.
+   */
+  initialError?: string | null;
 }
 
 /**
@@ -41,7 +54,12 @@ interface GitHubImportModalProps {
  *
  * The token stays on the server; this component only ever sees names and text.
  */
-export const GitHubImportModal = ({ onClose, language, onImported }: GitHubImportModalProps) => {
+export const GitHubImportModal = ({
+  onClose,
+  language,
+  onImported,
+  initialError,
+}: GitHubImportModalProps) => {
   const ar = language === 'ar';
   const [status, setStatus] = useState<{ linked: boolean; login: string } | null>(null);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
@@ -50,7 +68,15 @@ export const GitHubImportModal = ({ onClose, language, onImported }: GitHubImpor
   const [query, setQuery] = useState('');
   const [repoInput, setRepoInput] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Seeded from a failed link attempt so the reason is on screen immediately.
+  const [error, setError] = useState<string | null>(initialError ?? null);
+  /**
+   * The callback URL GitHub must have registered. Fetched on open so the fix for
+   * "redirect_uri is not associated with this application" is a copy-and-paste
+   * instead of a guess.
+   */
+  const [oauthConfig, setOauthConfig] = useState<GitHubOAuthConfig | null>(null);
+  const [copiedCallback, setCopiedCallback] = useState(false);
 
   const t = useCallback((en: string, arabic: string) => (ar ? arabic : en), [ar]);
 
@@ -58,8 +84,9 @@ export const GitHubImportModal = ({ onClose, language, onImported }: GitHubImpor
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const s = await fetchGitHubStatus();
+      const [s, cfg] = await Promise.all([fetchGitHubStatus(), fetchGitHubOAuthConfig()]);
       if (cancelled) return;
+      if (cfg) setOauthConfig(cfg);
       setStatus({ linked: s.linked, login: s.login });
       if (!s.linked) {
         setLoading(false);
@@ -296,6 +323,93 @@ export const GitHubImportModal = ({ onClose, language, onImported }: GitHubImpor
                 <Github className="w-4 h-4" />
                 {t('Connect GitHub', 'ربط حساب GitHub')}
               </button>
+
+              {/* The callback URL GitHub must have registered.
+                  WHY this exists: clicking Connect with the URL unregistered
+                  sends the visitor to GitHub's generic "redirect_uri is not
+                  associated with this application" error page, which explains
+                  nothing about what to fix. Showing the exact value — derived
+                  server-side from the same helper the OAuth request uses —
+                  turns that dead end into a copy-and-paste. */}
+              {oauthConfig && oauthConfig.callbackUrl ? (
+                <details className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 group">
+                  <summary className="flex items-center gap-2 text-[11px] text-amber-200 cursor-pointer select-none list-none">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span className="font-bold">
+                      {t(
+                        'GitHub says "redirect_uri not associated"? Register this URL',
+                        'جيتهاب يقول «الرابط غير مسجّل»؟ سجّل هذا الرابط',
+                      )}
+                    </span>
+                  </summary>
+
+                  <div className="mt-2.5 space-y-2">
+                    <p className="text-[11px] text-amber-100/80 leading-relaxed">
+                      {t(
+                        'In your GitHub OAuth App settings, set the Callback URL to exactly:',
+                        'في إعدادات GitHub OAuth App، اجعل حقل Callback URL تماماً:',
+                      )}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code
+                        dir="ltr"
+                        className="flex-1 select-all break-all rounded-lg bg-slate-950/70 border border-amber-500/25 px-2.5 py-1.5 text-[10px] text-amber-100 font-mono"
+                      >
+                        {oauthConfig.callbackUrl}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(oauthConfig.callbackUrl);
+                          setCopiedCallback(true);
+                          setTimeout(() => setCopiedCallback(false), 2000);
+                        }}
+                        aria-label={t('Copy callback URL', 'نسخ رابط الرجوع')}
+                        className="shrink-0 px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedCallback ? (
+                          <>
+                            <Check className="w-3 h-3" />
+                            {t('Copied', 'تم')}
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            {t('Copy', 'نسخ')}
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {oauthConfig.clientId ? (
+                      <p className="text-[10px] text-amber-200/70">
+                        {t('Application ID', 'معرّف التطبيق')}:{' '}
+                        <code className="font-mono" dir="ltr">
+                          {oauthConfig.clientId}
+                        </code>
+                      </p>
+                    ) : null}
+
+                    {!oauthConfig.configured ? (
+                      <p className="text-[10px] text-rose-300 leading-relaxed">
+                        {t(
+                          'GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are not set on the server yet.',
+                          'مفتاحي GITHUB_CLIENT_ID و GITHUB_CLIENT_SECRET غير مضبوطين على الخادم بعد.',
+                        )}
+                      </p>
+                    ) : null}
+
+                    {!oauthConfig.appUrlConfigured ? (
+                      <p className="text-[10px] text-amber-200/80 leading-relaxed">
+                        {t(
+                          'Heads up: APP_URL is not set, so the callback host follows whichever domain you are on. If that ever changes, update this URL in GitHub too.',
+                          'ملاحظة: APP_URL غير مضبوط، لذا يتبع رابط الرجوع النطاق الذي تفتح منه. لو تغيّر النطاق، حدّث الرابط في GitHub أيضاً.',
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                </details>
+              ) : null}
 
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-px bg-slate-800" />

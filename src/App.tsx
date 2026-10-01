@@ -187,6 +187,8 @@ export default function App() {
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
   const [showGeminiStudio, setShowGeminiStudio] = useState<boolean>(false);
   const [showGitHubImport, setShowGitHubImport] = useState<boolean>(false);
+  /** Why a GitHub link attempt came back failed, shown inside the import dialog. */
+  const [gitHubLinkError, setGitHubLinkError] = useState<string | null>(null);
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   // Which of the site pages is open (About / Contact / Privacy / Terms).
@@ -265,9 +267,33 @@ export default function App() {
     if (!linked && !failure) return;
 
     setShowGitHubImport(true);
-    if (failure) setAuthError(`github:${failure}`);
+    if (failure) {
+      // GitHub itself refuses to even show its consent screen when the callback
+      // URL is not registered, so it never redirects back here — meaning the
+      // visitor lands on github.com's error page with no idea what to change.
+      // These codes are the ones our own callback produces; explain each one in
+      // plain language instead of showing a raw identifier.
+      const messages: Record<string, string> = {
+        auth_required:
+          'انتهت جلستك قبل اكتمال الربط مع GitHub. سجّل الدخول مجدداً ثم أعد المحاولة.',
+        state_mismatch:
+          'انتهت صلاحية طلب الربط. أعد المحاولة من جديد.',
+        exchange_failed:
+          'تعذّر إتمام الربط مع GitHub. تأكد من صحة مفاتيح GITHUB_CLIENT_ID و GITHUB_CLIENT_SECRET.',
+        not_configured:
+          'الربط مع GitHub غير مُعد على الخادم. أضف مفاتيح GITHUB_CLIENT_ID و GITHUB_CLIENT_SECRET في Vercel.',
+        account_required:
+          'الربط متاح فقط بعد تسجيل الدخول بحسابك أولاً.',
+      };
+      setGitHubLinkError(
+        messages[failure] ||
+          (language === 'ar'
+            ? 'تعذّر إتمام الربط مع GitHub. حاول مرة أخرى.'
+            : 'Could not complete the GitHub link. Please try again.'),
+      );
+    }
     window.history.replaceState({}, '', window.location.pathname);
-  }, []);
+  }, [language]);
 
   const handleLogout = useCallback(async () => {
     await authLogout();
@@ -1225,9 +1251,14 @@ export default function App() {
         />
         {showGitHubImport && (
           <GitHubImportModal
-            onClose={() => setShowGitHubImport(false)}
+            onClose={() => {
+              setShowGitHubImport(false);
+              // Clear the failure so it does not reappear next time the dialog opens.
+              setGitHubLinkError(null);
+            }}
             language={language}
             onImported={handleGitHubImported}
+            initialError={gitHubLinkError}
           />
         )}
         {showSubscription && (

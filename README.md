@@ -160,6 +160,31 @@ https://ebnily.vercel.app/api/auth/callback/supabase
 and the **Site URL** should be `https://ebnily.vercel.app`. Supabase silently
 refuses to redirect to any host that is not on that allowlist.
 
+### GitHub repository import (separate from sign-in)
+
+Importing a repository is a **different flow** from signing in, and it needs its
+own OAuth app. Sign-in is brokered by Supabase; repository import talks to GitHub
+directly, so **your own** GitHub OAuth App must have this callback registered:
+
+1. Create the app at `github.com/settings/developers` → **OAuth Apps** → **New OAuth App**.
+2. **Authorization callback URL** must be exactly:
+
+   ```
+   https://ebnily.vercel.app/api/github/callback
+   ```
+
+   Note the path: `/api/github/callback` — **not** `/api/auth/callback/github`,
+   which belongs to the (Supabase-brokered) sign-in flow. Mixing the two is what
+   produces GitHub's *"The redirect_uri is not associated with this application"*
+   error.
+3. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in Vercel.
+
+The import dialog shows the exact URL the server sends, with a copy button, so
+there is nothing to guess. You can also read it from
+`GET /api/github/config`. If `APP_URL` is not set, the host follows whichever
+domain you opened the app from — set `APP_URL=https://ebnily.vercel.app` so the
+callback stays stable.
+
 ## Project Structure
 
 ```
