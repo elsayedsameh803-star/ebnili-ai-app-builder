@@ -199,7 +199,25 @@ export const AdminDashboardModal = ({
           try { window.sessionStorage.removeItem('ebnili_admin_auth'); } catch { /* noop */ }
           return;
         }
-        if (!res.ok) throw new Error(`تعذر التحقق من الجلسة (${res.status})`);
+        if (!res.ok) {
+          // A 503 with `configured: false` means the dashboard's tables have not
+          // been created yet. That is an owner-side setup step, not a session
+          // problem, so it must not be reported as "your session expired".
+          if (res.status === 503) {
+            const payload = (await res.json().catch(() => ({}))) as { message?: string };
+            setDataError(
+              payload.message ||
+                'قاعدة بيانات لوحة الإدارة غير مهيأة. نفّذ supabase/projects.sql في Supabase ثم أعد المحاولة.',
+            );
+            setIsDataReady(true);
+            return;
+          }
+          if (res.status === 401) {
+            try { window.sessionStorage.removeItem('ebnili_admin_auth'); } catch { /* noop */ }
+            return;
+          }
+          throw new Error(`تعذر التحقق من الجلسة (${res.status})`);
+        }
 
         const data: unknown = await res.json().catch(() => null);
         if (!isRecord(data) || data.success !== true) {
@@ -398,6 +416,9 @@ export const AdminDashboardModal = ({
     tier?: string,
   ) => {
     try {
+      // A confirm needs an account to grant to. The server reads the address from
+      // the stored payment (never from this body), so the guard here is only
+      // about telling the owner *why* nothing will happen.
       if (status === 'confirmed' && !customerEmail) {
         showToast('لا يوجد بريد مسجل لهذه المعاملة — لا يمكن التفعيل بدونه');
         return;
@@ -405,19 +426,39 @@ export const AdminDashboardModal = ({
       const res = await fetch('/api/admin/transaction/update-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactionId: txId, status, email: customerEmail, tier }),
+        body: JSON.stringify({ transactionId: txId, status }),
       });
       if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
-      if (data.success) {
-        if (data.transaction) setTransactions(prev => prev.map(t => t.id === txId ? data.transaction : t));
-        fetchAdminData();
-        showToast(status === 'confirmed' ? 'تم تأكيد وتفعيل المعاملة بنجاح' : 'تم رفض المعاملة');
+      if (res.ok && (data as { success?: boolean }).success) {
+        // Update the row in place immediately, then re-read for the totals.
+        // The server no longer echoes a `transaction` object, and waiting for
+        // the refetch left the row showing "approve" for a decided payment.
+        setTransactions(prev =>
+          prev.map((t) =>
+            t.id === txId
+              ? {
+                  ...t,
+                  status,
+                  verifiedAt: new Date().toISOString(),
+                }
+              : t,
+          ),
+        );
+        void fetchAdminData();
+        showToast(
+          (data as { message?: string }).message ||
+            (status === 'confirmed' ? 'تم تأكيد وتفعيل المعاملة بنجاح' : 'تم رفض المعاملة'),
+        );
       } else {
-        showToast((data as { error?: string; message?: string }).error || 'تعذّر تنفيذ العملية');
+        showToast(
+          (data as { error?: string; message?: string }).error ||
+            (data as { message?: string }).message ||
+            'تعذّر تنفيذ العملية',
+        );
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      showToast('تعذّر الاتصال بالخادم، حاول مرة أخرى');
     }
   };
 
@@ -431,11 +472,22 @@ export const AdminDashboardModal = ({
       });
       if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json().catch(() => ({}));
-      if (data.success) {
+      if (res.ok && (data as { success?: boolean }).success) {
+        // Adopt the server's normalised values: it clamps the free limit and
+        // fills any missing field, so the form then shows what was really saved.
+        const saved = (data as { settings?: AdminSettings }).settings;
+        if (saved) setSettings(saved);
         showToast('تم حفظ إعدادات المنصة بنجاح!');
+      } else {
+        // The old code said "saved!" for any 200 response, which is how the
+        // owner ended up believing a wallet number change had taken effect when
+        // the server had discarded it.
+        showToast(
+          (data as { message?: string }).message || 'تعذّر حفظ الإعدادات. تأكد من تنفيذ supabase/projects.sql',
+        );
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      showToast('تعذّر الاتصال بالخادم، حاول مرة أخرى');
     }
   };
 

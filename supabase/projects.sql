@@ -29,4 +29,108 @@ create index if not exists ebnily_projects_owner_updated_idx
 -- projects even if someone changes the request headers.
 alter table public.ebnily_projects enable row level security;
 
-revoke all on public.ebnily_projects from anon, authenticated;
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PAYMENT REQUESTS  (Orange Cash review queue)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- WHY THIS EXISTS: a payment used to be written only as a file in object
+-- storage, so /api/admin/overview always answered `recentTransactions: []` and
+-- the owner could never see or approve a payment from the dashboard. The row
+-- below is the reviewable record; the receipt image stays in storage and this
+-- table only holds its path.
+--
+-- account_email is the signed-in address that submitted the request, and it is
+-- what the plan grant is minted for — so it must be filled by the SERVER from
+-- the session cookie, never from the request body.
+
+create table if not exists public.ebnily_payments (
+  id                   text primary key,
+  account_email        text        not null default '',
+  account_id           text        not null default '',
+  plan_id              text        not null default 'pro',
+  billing_cycle        text        not null default 'monthly',
+  amount_egp           numeric(10,2) not null default 0,
+  amount_usd           numeric(10,2) not null default 0,
+  sender_phone         text        not null default '',
+  transaction_ref      text        not null default '',
+  receipt_path         text,               -- object key inside the payments bucket
+  receipt_file_name    text,
+  notes                text,
+  status               text        not null default 'pending'
+                         check (status in ('pending','confirmed','rejected')),
+  submitted_at         timestamptz not null default now(),
+  reviewed_at          timestamptz,
+  reviewed_by          text
+);
+
+-- The dashboard sorts by newest and filters by status.
+create index if not exists ebnily_payments_status_submitted_idx
+  on public.ebnily_payments (status, submitted_at desc);
+
+create index if not exists ebnily_payments_account_idx
+  on public.ebnily_payments (account_email);
+
+alter table public.ebnily_payments enable row level security;
+
+revoke all on public.ebnily_payments from anon, authenticated;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- DEVICES  (abuse protection registry)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- WHY THIS EXISTS: /api/protection/status answered `isBlocked: false` for
+-- everyone and the dashboard's device list was always empty, so the block /
+-- quota / tier buttons had nothing to act on and silently did nothing.
+--
+-- device_id comes from the client fingerprint (see src/utils/fingerprint.ts) and
+-- is the lookup key the admin actions use.
+
+create table if not exists public.ebnily_devices (
+  device_id            text primary key,
+  fingerprint_hash     text        not null default '',
+  account_email        text,
+  screen               text,
+  timezone             text,
+  platform             text,
+  user_agent           text,
+  ip_address           text,
+  is_blocked           boolean     not null default false,
+  block_reason         text,
+  free_used            integer     not null default 0,
+  free_limit           integer     not null default 5,
+  tier                 text        not null default 'free'
+                         check (tier in ('free','pro','business')),
+  first_seen_at        timestamptz not null default now(),
+  last_seen_at         timestamptz not null default now()
+);
+
+create index if not exists ebnily_devices_last_seen_idx
+  on public.ebnily_devices (last_seen_at desc);
+
+alter table public.ebnily_devices enable row level security;
+
+revoke all on public.ebnily_devices from anon, authenticated;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PLATFORM SETTINGS  (owner-editable values that survive a redeploy)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- WHY THIS EXISTS: POST /api/admin/settings used to answer `persisted: false`
+-- and throw the values away, so changing the Orange Cash wallet number in the
+-- dashboard did nothing at all.
+
+create table if not exists public.ebnily_settings (
+  key                    text primary key,
+  value                  jsonb       not null default '{}'::jsonb,
+  updated_at             timestamptz not null default now()
+);
+
+alter table public.ebnily_settings enable row level security;
+
+revoke all on public.ebnily_settings from anon, authenticated;
+
+-- Seed the single settings row so the first read has something to return.
+insert into public.ebnily_settings (key, value)
+values (
+  'platform',
+  '{"orangeWalletNumber":"01207782741","defaultFreeLimit":5,"autoVerificationEnabled":true,"supportWhatsappNumber":"01207782741","siteName":"إبنيلي | Ebnili AI Studio"}'::jsonb
+)
+on conflict (key) do nothing;
+

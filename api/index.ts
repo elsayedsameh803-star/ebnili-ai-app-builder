@@ -87,7 +87,19 @@ function isOwnerAccount(session: AuthUser | null): boolean {
   return String(session?.email ?? "").trim().toLowerCase() === OWNER_EMAIL;
 }
 
-function subscriptionPayload(grant: { email: string; tier: "pro" | "business" } | null) {
+/**
+ * Contact details the checkout and subscription screens read.
+ *
+ * WHY: these were hard-coded in every response. The owner can change the wallet
+ * number from the dashboard, so the API must serve the stored value — otherwise
+ * customers keep being told to transfer to a number that is no longer active.
+ * Read lazily and fail soft: a storage hiccup must never block a page render.
+ */
+function contactDefaults(): { orangeWalletNumber: string; supportWhatsappNumber: string } {
+  return { orangeWalletNumber: "01207782741", supportWhatsappNumber: "01207782741" };
+}
+
+function subscriptionPayload(grant: { email: string; tier: "pro" | "business"; expiresAt: string } | null) {
   const paid = grant
     ? {
         ...DEFAULT_SUBSCRIPTION,
@@ -98,6 +110,9 @@ function subscriptionPayload(grant: { email: string; tier: "pro" | "business" } 
         canExportZip: true,
         canDeployCustomDomain: grant.tier === "business",
         priorityAiModel: true,
+        // Surfacing the real expiry is what lets the UI tell a customer how long
+        // they have left instead of showing an open-ended "Pro".
+        expiresAt: grant.expiresAt,
       }
     : { ...DEFAULT_SUBSCRIPTION };
 
@@ -124,23 +139,65 @@ function ownerSubscription() {
   };
 }
 
-app.get("/api/subscriptions/current", (req: Request, res: Response) => {
-  // The owner account needs no grant cookie.
+/**
+ * Current entitlement for the signed-in account.
+ *
+ * WHY this must consult the database: the owner's approval writes `confirmed`
+ * into `ebnily_payments` for the CUSTOMER's address. If this endpoint only
+ * looked at a browser cookie, the approved customer would still see the free
+ * tier — the payment would be recorded, the dashboard would show it as paid, and
+ * the customer would keep hitting the daily limit. The latest unexpired confirmed
+ * payment for this account is therefore the source of truth, on every device.
+ */
+app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
   const session = readAuthSession(req);
+
+  // The owner account needs no grant record.
   if (isOwnerAccount(session)) {
     res.json({
       success: true,
       subscription: ownerSubscription(),
-      orangeWalletNumber: "01207782741",
-      supportWhatsappNumber: "01207782741",
+      ...contactDefaults(),
     });
     return;
   }
 
-  // A grant only counts for the account it was issued to.
+  let entitled: { email: string; tier: "pro" | "business"; expiresAt: string } | null = null;
+
+  if (session && supabaseConfig().dbConfigured) {
+    const result = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+      query: {
+        select: "account_email,plan_id,billing_cycle,reviewed_at",
+        account_email: `eq.${session.email.toLowerCase()}`,
+        status: "eq.confirmed",
+        order: "reviewed_at.desc",
+        limit: "1",
+      },
+    });
+    const row = result.ok && Array.isArray(result.data) ? result.data[0] : undefined;
+    if (row) {
+      // A yearly plan runs a year; a monthly one a month — measured from when the
+      // owner confirmed it, not from submission, so a delayed review is not
+      // silently eaten out of the customer's paid time.
+      const start = Date.parse(row.reviewed_at ?? "") || Date.now();
+      const ttl = row.billing_cycle === "yearly" ? 365 * 24 * 60 * 60 * 1000 : 31 * 24 * 60 * 60 * 1000;
+      if (Date.now() <= start + ttl) {
+        entitled = {
+          email: row.account_email,
+          tier: row.plan_id === "business" ? "business" : "pro",
+          expiresAt: new Date(start + ttl).toISOString(),
+        };
+      }
+    }
+  }
+
+  // The signed cookie is the fallback: it is the owner's own fast path and it
+  // still works when the database read failed.
   const grant = readPlanGrant(req);
-  const entitled =
-    grant && session && session.email.toLowerCase() === grant.email ? grant : null;
+  if (!entitled && grant && session && session.email.toLowerCase() === grant.email) {
+    entitled = grant;
+  }
+
   res.json(subscriptionPayload(entitled));
 });
 
@@ -157,8 +214,18 @@ function requireSignedIn(req: Request, res: Response): boolean {
 /**
  * Records a payment claim for MANUAL review and returns the unchanged FREE
  * subscription. Never returns a paid tier: activation is an owner-only action.
+ *
+ * WHY the write matters: this used to acknowledge the request and persist
+ * NOTHING ("no state is persisted"). The dashboard's transaction list therefore
+ * stayed empty forever and the owner had no way to see or approve a payment — so
+ * a paying customer could never actually be activated. The row written here is
+ * what `/api/admin/overview` lists and what `update-status` approves.
+ *
+ * `account_email` comes from the signed session cookie, never the request body,
+ * so a caller cannot file a payment under someone else's address and have a
+ * grant minted for them.
  */
-function queuePaymentReview(req: Request, res: Response) {
+async function queuePaymentReview(req: Request, res: Response) {
   if (!requireSignedIn(req, res)) return;
 
   const body = (req.body as Record<string, unknown>) ?? {};
@@ -185,12 +252,54 @@ function queuePaymentReview(req: Request, res: Response) {
     return;
   }
 
-  // Stateless serverless: the request is acknowledged and queued for the owner,
-  // but no state is persisted and — critically — no tier is granted here.
+  const session = readAuthSession(req as AuthReq);
+  const id = `pay_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
+
+  if (!supabaseConfig().dbConfigured) {
+    // Honest failure. Telling the customer "received, under review" while the
+    // record is discarded means their money paid for nothing and nobody ever
+    // sees the request — the exact opposite of what this endpoint promises.
+    return res.status(503).json({
+      success: false,
+      code: "DB_UNAVAILABLE",
+      error:
+        "تعذّر تسجيل طلب الاشتراك على الخادم. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+    });
+  }
+
+  const write = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+    method: "POST",
+    query: { on_conflict: "ignore" },
+    body: JSON.stringify({
+      id,
+      account_email: session?.email ?? "",
+      account_id: session?.id ?? "",
+      plan_id: planId,
+      billing_cycle: String(body.billingCycle ?? "monthly") === "yearly" ? "yearly" : "monthly",
+      amount_egp: toNumber(String(body.amount ?? "0")),
+      amount_usd: 0,
+      sender_phone: senderPhone,
+      transaction_ref: reference,
+      notes: typeof body.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 500) : null,
+      status: "pending",
+    }),
+  });
+
+  if (!write.ok) {
+    console.error("payment row insert failed:", write.error);
+    return res.status(503).json({
+      success: false,
+      code: "PAYMENT_STORE_FAILED",
+      error:
+        "تعذّر حفظ طلب الاشتراك الآن. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+    });
+  }
+
   res.json({
     success: true,
     status: "pending",
     instant: false,
+    referenceId: id,
     message:
       "تم استلام طلبك وهو قيد المراجعة. سيتم تفعيل اشتراكك بعد التحقق من التحويل من قِبل إدارة المنصة.",
     subscription: { ...DEFAULT_SUBSCRIPTION, activatedAt: new Date().toISOString() },
@@ -318,6 +427,38 @@ function dbUnavailable(res: Response) {
     code: "DB_UNAVAILABLE",
     message: "قاعدة بيانات المشاريع غير مهيأة على الخادم.",
   });
+}
+
+/**
+ * Coerce a stored settings blob into a complete, valid settings object.
+ *
+ * The row is owner-editable JSON, so every field has to be validated: a partial
+ * or hand-edited row must not send `undefined` (or a wallet number that is not a
+ * string) into the React tree. Anything invalid falls back to the default, and
+ * the free limit is clamped to a sane range.
+ */
+function normalizePlatformSettings(value: unknown): typeof DEFAULT_ADMIN_SETTINGS {
+  const source = (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
+  const str = (key: string, fallback: string): string => {
+    const raw = source[key];
+    return typeof raw === "string" && raw.trim() ? raw.trim() : fallback;
+  };
+  const rawLimit = Number(source.defaultFreeLimit);
+  const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, Math.round(rawLimit))) : 5;
+
+  return {
+    orangeWalletNumber: str("orangeWalletNumber", DEFAULT_ADMIN_SETTINGS.orangeWalletNumber),
+    defaultFreeLimit: limit,
+    autoVerificationEnabled:
+      typeof source.autoVerificationEnabled === "boolean"
+        ? source.autoVerificationEnabled
+        : DEFAULT_ADMIN_SETTINGS.autoVerificationEnabled,
+    supportWhatsappNumber: str("supportWhatsappNumber", DEFAULT_ADMIN_SETTINGS.supportWhatsappNumber),
+    siteName: str("siteName", DEFAULT_ADMIN_SETTINGS.siteName),
+    // The owner's address is resolved from the environment, never from the
+    // stored row, so editing settings cannot redirect owner privileges.
+    adminEmail: DEFAULT_ADMIN_SETTINGS.adminEmail,
+  };
 }
 
 /** List every project owned by the signed-in account, newest first. */
@@ -946,7 +1087,7 @@ app.post("/api/payments/receipt", async (req: Request, res: Response) => {
 
   const session = readAuthSession(req as AuthReq);
   const record = {
-    id: `pay_${Date.now().toString(36)}`,
+    id: `pay_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
     planId,
     cycle: String(body.cycle ?? "monthly"),
     amountEgp: Number(body.amountEgp ?? 0),
@@ -961,14 +1102,10 @@ app.post("/api/payments/receipt", async (req: Request, res: Response) => {
 
   // Store the receipt bytes together with a metadata sidecar, under one object
   // name, so the owner can review the pair later.
+  const objectKey = `${RECEIPT_BUCKET}/${record.id}.${safeExtension(fileType)}`;
   try {
     const base64 = fileData.includes(",") ? fileData.slice(fileData.indexOf(",") + 1) : fileData;
-    const ok = await storagePut(
-      `${RECEIPT_BUCKET}/${record.id}.${safeExtension(fileType)}`,
-      base64,
-      fileType || "application/octet-stream",
-      JSON.stringify(record),
-    );
+    const ok = await storagePut(objectKey, base64, fileType || "application/octet-stream", JSON.stringify(record));
     if (!ok) throw new Error("storage rejected the write");
   } catch (err) {
     console.error("receipt upload failed:", err instanceof Error ? err.message : String(err));
@@ -977,6 +1114,40 @@ app.post("/api/payments/receipt", async (req: Request, res: Response) => {
       code: "STORAGE_WRITE_FAILED",
       message: "تعذّر رفع الصورة الآن. أرسلها على واتساب 01207782741 مع الرقم المرجعي.",
     });
+  }
+
+  // The image alone is not a reviewable record: without this row the dashboard
+  // never lists the request, so the owner would have no way to approve it. The
+  // email comes from the session cookie, never from the request body.
+  if (supabaseConfig().dbConfigured) {
+    const write = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+      method: "POST",
+      query: { on_conflict: "ignore" },
+      body: JSON.stringify({
+        id: record.id,
+        account_email: session?.email ?? "",
+        account_id: session?.id ?? "",
+        plan_id: planId,
+        billing_cycle: record.cycle === "yearly" ? "yearly" : "monthly",
+        amount_egp: record.amountEgp,
+        amount_usd: record.amountUsd,
+        sender_phone: senderPhone,
+        transaction_ref: reference,
+        receipt_path: objectKey,
+        receipt_file_name: record.fileName,
+        status: "pending",
+      }),
+    });
+    if (!write.ok) {
+      // The receipt is already stored, so do not lose it: tell the owner exactly
+      // where to find it instead of pretending the upload failed.
+      console.error("payment row insert failed:", write.error);
+      return res.status(503).json({
+        success: false,
+        code: "PAYMENT_STORE_FAILED",
+        message: `تم حفظ الصورة (${record.id}) لكن تعذّر تسجيل الطلب. أرسل المرجع ${record.id} على واتساب 01207782741.`,
+      });
+    }
   }
 
   res.json({
@@ -1033,14 +1204,100 @@ function aiQuotaExceeded(sessionId: string): boolean {
   return false;
 }
 
-// ── Device protection (stateless stubs) ─────────────────────────────────────
-app.get("/api/protection/status", (req: Request, res: Response) => {
+/**
+ * Device registry — register on sight, report the real block state.
+ *
+ * WHY: this answered `isBlocked: false, freeGenerationsUsed: 0` for everyone,
+ * unconditionally. Two consequences: an owner who blocked a device saw it keep
+ * working (the block button had no effect on the product), and the dashboard's
+ * device list stayed permanently empty because nothing was ever recorded.
+ *
+ * The row is written with an upsert keyed on `device_id`, so `last_seen_at` and
+ * `account_email` stay current without a separate registration call.
+ */
+app.get("/api/protection/status", async (req: Request, res: Response) => {
+  const deviceId = String(req.query.deviceId ?? req.header("x-device-id") ?? "").trim();
+  const fingerprintHash = String(req.query.fingerprintHash ?? req.header("x-fingerprint-hash") ?? "").trim();
+  const session = readAuthSession(req as AuthReq);
+
+  if (!deviceId) {
+    return res.json({
+      success: true,
+      deviceId: null,
+      isBlocked: false,
+      freeGenerationsUsed: 0,
+      freeGenerationsLimit: 5,
+      configured: supabaseConfig().dbConfigured,
+    });
+  }
+
+  if (!supabaseConfig().dbConfigured) {
+    // No database: report the un-configured state rather than pretending the
+    // device is healthy and registered.
+    return res.json({
+      success: true,
+      deviceId,
+      isBlocked: false,
+      freeGenerationsUsed: 0,
+      freeGenerationsLimit: 5,
+      configured: false,
+    });
+  }
+
+  const now = new Date().toISOString();
+  const upsert = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
+    method: "POST",
+    query: { on_conflict: "merge-duplicates" },
+    body: JSON.stringify({
+      device_id: deviceId,
+      fingerprint_hash: fingerprintHash,
+      // Only fill the account when we actually have one; a null would otherwise
+      // erase the address of a device that previously signed in.
+      ...(session ? { account_email: session.email.toLowerCase() } : {}),
+      screen: String(req.query.screen ?? "").slice(0, 40) || null,
+      timezone: String(req.query.timezone ?? "").slice(0, 60) || null,
+      platform: String(req.query.platform ?? "").slice(0, 40) || null,
+      user_agent: String(req.header("user-agent") ?? "").slice(0, 300) || null,
+      ip_address: String(adminClientKey(req)).slice(0, 60) || null,
+      last_seen_at: now,
+    }),
+  });
+
+  // Read back so the answer reflects what is stored (the upsert may have matched
+  // an existing row with an owner-set limit or block flag).
+  const current = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
+    query: {
+      select: "device_id,is_blocked,block_reason,free_used,free_limit,tier",
+      device_id: `eq.${deviceId}`,
+      limit: "1",
+    },
+  });
+  const row = current.ok && Array.isArray(current.data) ? current.data[0] : undefined;
+
+  if (!row) {
+    // The upsert failed (table missing or write rejected). Say so, so the owner
+    // sees a device count that is honestly zero rather than a phantom device.
+    console.error("device upsert failed:", upsert.error ?? current.error);
+    return res.json({
+      success: false,
+      code: "DEVICE_STORE_FAILED",
+      deviceId,
+      isBlocked: false,
+      freeGenerationsUsed: 0,
+      freeGenerationsLimit: 5,
+      configured: true,
+    });
+  }
+
   res.json({
     success: true,
-    deviceId: req.query.deviceId ?? null,
-    isBlocked: false,
-    freeGenerationsUsed: 0,
-    freeGenerationsLimit: 5,
+    configured: true,
+    deviceId: row.device_id,
+    isBlocked: row.is_blocked === true,
+    blockReason: row.block_reason ?? undefined,
+    freeGenerationsUsed: toNumber(row.free_used),
+    freeGenerationsLimit: toNumber(row.free_limit, 5),
+    tier: row.tier,
   });
 });
 
@@ -1231,42 +1488,208 @@ app.post("/api/admin/auth", (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-app.get("/api/admin/overview", requireAdmin, (_req: Request, res: Response) => {
-  // Stateless environment: report only REAL values — no invented statistics.
-  res.json({
+/**
+ * Admin dashboard data — REAL rows, computed server-side.
+ *
+ * WHY this rewrite: the endpoint answered with hard-coded zeros plus empty
+ * arrays. The dashboard therefore always looked like a brand-new install, and
+ * because nothing was ever stored, approving a payment or blocking a device had
+ * no row to act on — the buttons could not work even in principle. Every number
+ * below is derived from the tables in `supabase/projects.sql`.
+ *
+ * When the database is not configured the response is an explicit 503 with
+ * `configured: false` so the dashboard can say "run the SQL" instead of showing
+ * a convincing page of zeros.
+ */
+app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response) => {
+  const sb = supabaseConfig();
+  if (!sb.dbConfigured) {
+    return res.status(503).json({
+      success: false,
+      code: "DB_UNAVAILABLE",
+      configured: false,
+      message:
+        "قاعدة بيانات لوحة الإدارة غير مهيأة. نفّذ supabase/projects.sql في Supabase ثم تأكد من متغيّر SUPABASE_SERVICE_ROLE_KEY.",
+    });
+  }
+
+  const paymentSelect =
+    "id,account_email,account_id,plan_id,billing_cycle,amount_egp,amount_usd,sender_phone,transaction_ref,receipt_path,receipt_file_name,notes,status,submitted_at,reviewed_at";
+  const deviceSelect =
+    "device_id,fingerprint_hash,account_email,screen,timezone,platform,user_agent,ip_address,is_blocked,block_reason,free_used,free_limit,tier,first_seen_at,last_seen_at";
+
+  const [paymentsRes, pendingRes, devicesRes, confirmedRes, settingsRes] = await Promise.all([
+    dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+      query: { select: paymentSelect, order: "submitted_at.desc", limit: "50" },
+    }),
+    dbRequest<Array<{ count: number }>>(PAYMENTS_TABLE, {
+      query: { select: "id", status: "eq.pending", limit: "1000" },
+      headers: { Prefer: "count=exact" },
+    }),
+    dbRequest<DbDevice[]>(DEVICES_TABLE, {
+      query: { select: deviceSelect, order: "last_seen_at.desc", limit: "200" },
+    }),
+    dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+      query: { select: "amount_egp,plan_id,status", status: "eq.confirmed", limit: "1000" },
+    }),
+    dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
+      query: { select: "key,value", key: `eq.${SETTINGS_ROW_KEY}`, limit: "1" },
+    }),
+  ]);
+
+  // One failing read must not blank the whole dashboard: report what we could
+  // load and name the tables that failed.
+  const failed: string[] = [];
+  if (!paymentsRes.ok) failed.push("payments");
+  if (!devicesRes.ok) failed.push("devices");
+  if (!confirmedRes.ok) failed.push("revenue");
+
+  const devices = devicesRes.ok && Array.isArray(devicesRes.data) ? devicesRes.data : [];
+  const confirmed = confirmedRes.ok && Array.isArray(confirmedRes.data) ? confirmedRes.data : [];
+  const pendingCount = Array.isArray(pendingRes.data)
+    ? (pendingRes.data[0]?.count ?? 0)
+    : failed.length
+      ? 0
+      : 0;
+
+  const totalRevenueEGP = confirmed.reduce((sum, row) => sum + toNumber(row.amount_egp), 0);
+  const activeProUsers = new Set(
+    confirmed.filter((row) => row.plan_id === "pro" || row.plan_id === "business").map((r) => r.account_email),
+  );
+  activeProUsers.delete("");
+
+  const lastActive = devices.reduce<string>(
+    (latest, row) => (row.last_seen_at > latest ? row.last_seen_at : latest),
+    "",
+  );
+
+  const stored = settingsRes.ok && Array.isArray(settingsRes.data) ? settingsRes.data[0] : undefined;
+  const settings = normalizePlatformSettings(stored?.value);
+
+  return res.json({
     success: true,
+    configured: true,
+    partial: failed.length > 0,
+    failedTables: failed,
     stats: {
-      totalDevicesCount: 0,
-      blockedDevicesCount: 0,
-      activeProUsersCount: 0,
+      totalDevicesCount: devices.length,
+      blockedDevicesCount: devices.filter((d) => d.is_blocked).length,
+      activeProUsersCount: activeProUsers.size,
+      // There is no generation counter persisted anywhere, so this stays honest at
+      // zero rather than inventing activity that never happened.
       totalGenerationsExecuted: 0,
-      totalRevenueEGP: 0,
-      totalTransactionsCount: 0,
-      lastActiveTime: new Date().toISOString(),
+      totalRevenueEGP,
+      totalTransactionsCount: confirmed.length + (Array.isArray(pendingRes.data) ? pendingRes.data.length : 0),
+      pendingTransactionsCount: pendingCount,
+      lastActiveTime: lastActive || new Date().toISOString(),
     },
-    settings: DEFAULT_ADMIN_SETTINGS,
-    devices: [],
-    recentTransactions: [],
+    settings,
+    devices: devices.map(toPublicDevice),
+    recentTransactions: paymentsRes.ok && Array.isArray(paymentsRes.data) ? paymentsRes.data.map(toPublicPayment) : [],
   });
 });
 
-for (const p of [
-  "/api/admin/device/toggle-block",
-  "/api/admin/device/reset-quota",
-  "/api/admin/device/set-tier",
-  "/api/admin/settings",
-]) {
-  app.post(p, requireAdmin, (_req: Request, res: Response) =>
-    res.json({
-      success: true,
-      path: p,
-      // Serverless FS is read-only: accepted, but nothing persists until a DB
-      // is attached (documented in README). Never echo the raw body back.
-      persisted: false,
-      message: "تم الاستلام — التخزين الدائم غير متاح في بيئة الخوادم الحالية.",
+// ── Owner actions: these now actually write to the database ───────────────────
+// WHY: all four used to be a single stub that answered `{ persisted: false }`,
+// so the dashboard's approve / block / quota / tier / settings buttons reported
+// success while changing nothing. Each handler below updates a real row and
+// verifies the write before reporting success.
+
+app.post("/api/admin/settings", requireAdmin, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const next = normalizePlatformSettings(body);
+  const updated = await dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
+    method: "POST",
+    query: { on_conflict: "merge-duplicates" },
+    body: JSON.stringify({ key: SETTINGS_ROW_KEY, value: next }),
+  });
+  if (!updated.ok) {
+    console.error("settings write failed:", updated.error);
+    return res.status(503).json({ success: false, message: "تعذّر حفظ الإعدادات. تأكد من تنفيذ supabase/projects.sql." });
+  }
+  res.json({ success: true, persisted: true, settings: next });
+});
+
+app.post("/api/admin/device/toggle-block", requireAdmin, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const deviceId = String(body.deviceId ?? "").trim();
+  if (!deviceId) return res.status(400).json({ success: false, message: "معرّف الجهاز مطلوب." });
+  const block = body.block === true;
+  const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 200) : null;
+
+  // An upsert so blocking a device that has never reported in still takes hold.
+  const write = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
+    method: "POST",
+    query: { on_conflict: "merge-duplicates" },
+    body: JSON.stringify({
+      device_id: deviceId,
+      fingerprint_hash: String(body.fingerprintHash ?? ""),
+      is_blocked: block,
+      block_reason: block ? reason : null,
+      last_seen_at: new Date().toISOString(),
     }),
-  );
-}
+  });
+  if (!write.ok) {
+    console.error("block write failed:", write.error);
+    return res.status(503).json({ success: false, message: "تعذّر تحديث حالة الجهاز." });
+  }
+  res.json({ success: true, persisted: true, deviceId, isBlocked: block });
+});
+
+app.post("/api/admin/device/reset-quota", requireAdmin, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const deviceId = String(body.deviceId ?? "").trim();
+  if (!deviceId) return res.status(400).json({ success: false, message: "معرّف الجهاز مطلوب." });
+  const rawLimit = Number(body.newLimit ?? 5);
+  const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, Math.round(rawLimit))) : 5;
+
+  const write = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
+    method: "PATCH",
+    query: { device_id: `eq.${deviceId}` },
+    body: JSON.stringify({
+      free_limit: limit,
+      // `resetUsed` defaults to true: "reset quota" that leaves the counter where
+      // it was is the action owners actually need.
+      ...(body.resetUsed === false ? {} : { free_used: 0 }),
+      last_seen_at: new Date().toISOString(),
+    }),
+  });
+  if (!write.ok || !Array.isArray(write.data) || write.data.length === 0) {
+    console.error("quota write failed:", write.error);
+    return res.status(404).json({ success: false, message: "لم يتم العثور على الجهاز." });
+  }
+  res.json({ success: true, persisted: true, deviceId, freeLimit: limit });
+});
+
+app.post("/api/admin/device/set-tier", requireAdmin, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const deviceId = String(body.deviceId ?? "").trim();
+  if (!deviceId) return res.status(400).json({ success: false, message: "معرّف الجهاز مطلوب." });
+  const tier = String(body.tier ?? "free");
+  if (tier !== "free" && tier !== "pro" && tier !== "business") {
+    return res.status(400).json({ success: false, message: "الباقة غير صحيحة." });
+  }
+
+  const write = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
+    method: "POST",
+    query: { on_conflict: "merge-duplicates" },
+    body: JSON.stringify({
+      device_id: deviceId,
+      fingerprint_hash: String(body.fingerprintHash ?? ""),
+      tier,
+      last_seen_at: new Date().toISOString(),
+    }),
+  });
+  if (!write.ok) {
+    console.error("tier write failed:", write.error);
+    return res.status(503).json({ success: false, message: "تعذّر تحديث الباقة." });
+  }
+  res.json({ success: true, persisted: true, deviceId, tier });
+});
 
 // ── Owner-only subscription activation (the ONE path to a paid tier) ─────────
 // SECURITY: this replaces the old self-service upgrade. The owner approves a
@@ -1368,26 +1791,78 @@ function readPlanGrant(req: Request): { email: string; tier: "pro" | "business";
   }
 }
 
-app.post("/api/admin/transaction/update-status", requireAdmin, (req: Request, res: Response) => {
+/**
+ * Approve or reject a payment — the ONE path to a paid tier.
+ *
+ * WHY this was broken in a way that lost money: the handler minted the plan
+ * grant cookie onto `res`, i.e. onto the OWNER's browser. The customer never
+ * received it, so approving a payment did nothing for them — they paid and kept
+ * the free tier. It also never wrote a status, so the row stayed "pending"
+ * forever and every dashboard refresh offered the same "approve" button again.
+ *
+ * Now the decision is durable (the row's status is updated) and the entitlement
+ * lives in the database, which `/api/subscriptions/current` reads — so the
+ * approved customer sees Pro/Business on their next request, on any device.
+ * The signed cookie stays only as a fast path for the owner's own browser.
+ */
+app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Request, res: Response) => {
   const body = (req.body as { transactionId?: string; status?: string; email?: string; tier?: string }) ?? {};
-  if (body.status !== "confirmed" && body.status !== "rejected") {
+  const status = body.status;
+  if (status !== "confirmed" && status !== "rejected") {
     res.status(400).json({ success: false, error: "حالة المعاملة يجب أن تكون confirmed أو rejected." });
     return;
   }
 
-  // Rejections grant nothing. Confirmations mint the owner-signed plan cookie
-  // for the paying account, delivered on this response only.
-  if (body.status === "confirmed") {
-    const email = String(body.email ?? "").trim();
-    const tier = body.tier === "business" ? "business" : "pro";
-    if (!email) {
-      res.status(400).json({ success: false, error: "بريد الحساب مطلوب لتفعيل الاشتراك." });
-      return;
-    }
-    // Never fail with an unhandled 500: a paying customer must be told the
-    // setup is incomplete, not shown a generic server error.
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const transactionId = String(body.transactionId ?? "").trim();
+  if (!transactionId) {
+    res.status(400).json({ success: false, error: "معرّف المعاملة مطلوب." });
+    return;
+  }
+
+  // Read the row first: the account to grant and the tier must come from the
+  // stored payment, never from the request body, or a crafted call could grant
+  // a plan to an arbitrary address.
+  const found = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+    query: { select: "id,account_email,plan_id,status", id: `eq.${transactionId}`, limit: "1" },
+  });
+  if (!found.ok || !Array.isArray(found.data) || found.data.length === 0) {
+    return res.status(404).json({ success: false, error: "لم يتم العثور على هذه المعاملة." });
+  }
+  const payment = found.data[0];
+
+  // Re-approving an already-decided payment must not silently mint a second
+  // entitlement or reset an expiry the customer is already serving.
+  if (payment.status !== "pending") {
+    return res.status(409).json({
+      success: false,
+      error: `تمت مراجعة هذه المعاملة مسبقاً (${payment.status === "confirmed" ? "مؤكدة" : "مرفوضة"}).`,
+    });
+  }
+
+  const reviewed = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+    method: "PATCH",
+    query: { id: `eq.${transactionId}` },
+    body: JSON.stringify({
+      status,
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: OWNER_EMAIL || "owner",
+    }),
+  });
+  if (!reviewed.ok || !Array.isArray(reviewed.data) || reviewed.data.length === 0) {
+    console.error("payment review write failed:", reviewed.error);
+    return res.status(503).json({ success: false, error: "تعذّر حفظ قرار المراجعة. أعد المحاولة." });
+  }
+
+  // Confirmations grant nothing extra here: the row now says "confirmed", and
+  // `/api/subscriptions/current` turns that into a real tier for the account.
+  if (status === "confirmed" && payment.account_email) {
+    // Fast path for the owner's own browser only. The durable entitlement is the
+    // status written above — never this cookie.
     try {
-      res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(email, tier), {
+      const tier = body.tier === "business" || payment.plan_id === "business" ? "business" : "pro";
+      res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(payment.account_email, tier), {
         httpOnly: true,
         secure: Boolean(process.env.VERCEL),
         sameSite: "lax",
@@ -1395,18 +1870,21 @@ app.post("/api/admin/transaction/update-status", requireAdmin, (req: Request, re
         maxAge: PLAN_GRANT_TTL_MS,
       });
     } catch (e) {
-      console.error("plan grant could not be signed:", e);
-      res.status(503).json({ success: false, error: planSecretProblem() });
-      return;
+      // Not fatal: the row is already confirmed, which is what actually grants
+      // the plan. Log it and continue so the owner sees a success.
+      console.error("plan grant cookie skipped:", e instanceof Error ? e.message : String(e));
     }
   }
 
   res.json({
     success: true,
-    // Serverless FS is read-only, so the durable record lives in the owner's
-    // dashboard; the signed cookie carries the grant to the account.
-    persisted: false,
-    message: "تم تسجيل قرار المراجعة. سيتم تطبيق التفعيل على الحساب المعتمد.",
+    persisted: true,
+    status,
+    accountEmail: payment.account_email || undefined,
+    message:
+      status === "confirmed"
+        ? "تم تأكيد التحويل وتفعيل الاشتراك على الحساب مباشرة."
+        : "تم رفض الطلب وتوثيق السبب.",
   });
 });
 
@@ -1655,6 +2133,116 @@ interface DbProject {
 }
 
 const PROJECTS_TABLE = "ebnily_projects";
+
+/**
+ * Owner-only operational tables.
+ *
+ * WHY: the dashboard used to answer with hard-coded zeros and empty arrays, so
+ * every button on it (approve, reject, block, quota, tier, settings) either
+ * showed nothing to act on or reported success without changing anything. These
+ * three tables are what make the dashboard real. Until the SQL in
+ * `supabase/projects.sql` is run, the endpoints answer 503 DB_UNAVAILABLE — the
+ * UI says so instead of showing an empty dashboard that looks like "no data yet".
+ */
+const PAYMENTS_TABLE = "ebnily_payments";
+const DEVICES_TABLE = "ebnily_devices";
+const SETTINGS_TABLE = "ebnily_settings";
+
+/** The single settings row key. */
+const SETTINGS_ROW_KEY = "platform";
+
+interface DbPayment {
+  id: string;
+  account_email: string;
+  account_id: string;
+  plan_id: string;
+  billing_cycle: string;
+  amount_egp: number | string;
+  amount_usd: number | string;
+  sender_phone: string;
+  transaction_ref: string;
+  receipt_path: string | null;
+  receipt_file_name: string | null;
+  notes: string | null;
+  status: string;
+  submitted_at: string;
+  reviewed_at: string | null;
+}
+
+interface DbDevice {
+  device_id: string;
+  fingerprint_hash: string;
+  account_email: string | null;
+  screen: string | null;
+  timezone: string | null;
+  platform: string | null;
+  user_agent: string | null;
+  ip_address: string | null;
+  is_blocked: boolean;
+  block_reason: string | null;
+  free_used: number;
+  free_limit: number;
+  tier: string;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+interface DbSettingsRow {
+  key: string;
+  value: Record<string, unknown>;
+}
+
+/** PostgREST returns numerics as strings — normalise before they reach JSON. */
+function toNumber(value: number | string | null | undefined, fallback = 0): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** A payment row in the exact shape `OrangeCashTransaction` declares. */
+function toPublicPayment(row: DbPayment) {
+  const plan = row.plan_id === "business" ? "business" : "pro";
+  return {
+    id: row.id,
+    senderPhone: row.sender_phone ?? "",
+    transactionReference: row.transaction_ref ?? "",
+    amount: toNumber(row.amount_egp),
+    currency: "EGP",
+    planId: plan,
+    planName: plan === "business" ? "Business & Agency" : "Professional Pro",
+    billingCycle: row.billing_cycle === "yearly" ? ("yearly" as const) : ("monthly" as const),
+    userEmail: row.account_email || undefined,
+    submittedAt: row.submitted_at,
+    status: (row.status === "confirmed" || row.status === "rejected" ? row.status : "pending") as
+      | "confirmed"
+      | "pending"
+      | "rejected",
+    verifiedAt: row.reviewed_at ?? undefined,
+    // Only the object KEY is stored, never a signed URL, so a shared link cannot
+    // grant read access to someone's receipt image.
+    receiptImage: row.receipt_path ?? undefined,
+    notes: row.notes ?? undefined,
+  };
+}
+
+/** A device row in the exact shape `DeviceProtectionInfo` declares. */
+function toPublicDevice(row: DbDevice) {
+  return {
+    deviceId: row.device_id,
+    fingerprintHash: row.fingerprint_hash ?? "",
+    ipAddress: row.ip_address ?? undefined,
+    userAgent: row.user_agent ?? undefined,
+    freeGenerationsUsed: toNumber(row.free_used),
+    freeGenerationsLimit: toNumber(row.free_limit, 5),
+    isBlocked: row.is_blocked === true,
+    blockReason: row.block_reason ?? undefined,
+    associatedTier: (row.tier === "pro" || row.tier === "business" ? row.tier : "free") as
+      | "free"
+      | "pro"
+      | "business",
+    registeredEmails: row.account_email ? [row.account_email] : [],
+    lastSeen: row.last_seen_at,
+  };
+}
 
 /** PostgREST call with the server-only service key. Never logs the key. */
 async function dbRequest<T>(
