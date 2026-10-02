@@ -14,6 +14,7 @@ export const PricingPage = ({ language, onNavigate }: { language: Language; onNa
   const [cycle, setCycle] = useState<BillingCycle>('monthly');
   const ar = language === 'ar';
   const Arrow = ar ? ArrowLeft : ArrowRight;
+  const BackArrow = ar ? ArrowRight : ArrowLeft;
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -21,7 +22,22 @@ export const PricingPage = ({ language, onNavigate }: { language: Language; onNa
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100" dir={ar ? 'rtl' : 'ltr'}>
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
+      {/* Reached from a search result or a shared link there is no header to go
+          back to, so this page carries its own way out. */}
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => onNavigate('/')}
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition cursor-pointer"
+          >
+            <BackArrow className="w-3.5 h-3.5" />
+            {ar ? 'العودة للرئيسية' : 'Back to home'}
+          </button>
+          <span className="text-xs font-extrabold text-rose-300">⚡ Ebnili</span>
+        </div>
+      </div>
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:px-16">
         <div className="text-center mb-10">
           <span className="inline-block text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-full px-3 py-1">
             {ar ? 'الأسعار' : 'Pricing'}
@@ -132,11 +148,82 @@ export const PricingPage = ({ language, onNavigate }: { language: Language; onNa
           })}
         </div>
 
-        <p className="text-center text-[11px] text-slate-500 mt-8">
+        <p className="text-center text-[11px] text-slate-500 mt-8 leading-6">
           {ar
-            ? `سعر الصرف المعتمد ${USD_TO_EGP} جنيه للدولار. الدفع عبر محفظة أورانج كاش فقط.`
-            : `Reference rate ${USD_TO_EGP} EGP per USD. Payment is via the Orange Cash wallet only.`}
+            ? 'الدفع عبر محفظة أورانج كاش بالجنيه المصري فقط. المرجع المحاسبي المعتمد ' +
+              `${USD_TO_EGP} ج.م للدولار، وتظهر القيمة الدقيقة المطلوبة للتحويل في صفحة الدفع.`
+            : 'Payment is via the Orange Cash wallet in Egyptian pounds only. The accounting reference rate is ' +
+              `${USD_TO_EGP} EGP per USD; the exact amount to transfer is shown on the checkout page.`}
         </p>
+
+        {/* ── Frequently asked questions ────────────────────────────────────
+            A pricing page reached from Google gets read by people who cannot
+            yet commit. Answering the four questions that actually stop the
+            purchase — is it really free, is the money safe, will I be able to
+            keep the code, what happens if I stop paying — is worth more than
+            another feature list, and it is also valid structured content for
+            search engines. */}
+        <div className="mt-14 max-w-2xl mx-auto">
+          <h2 className="text-center text-base font-extrabold text-white mb-6">
+            {ar ? 'أسئلة شائعة قبل الاشتراك' : 'Questions before you subscribe'}
+          </h2>
+          <dl className="space-y-3">
+            {(ar
+              ? [
+                  {
+                    q: 'هل فعلاً يمكنني البدء مجاناً دون بطاقة بنكية؟',
+                    a: 'نعم. الباقة المجانية تمنحك 5 عمليات توليد يومياً، ومعاينة فورية، ومحرر كود كاملاً، بلا أي بيانات بطاقة. كل ما تحتاجه هو تسجيل الدخول بحساب Google أو GitHub.',
+                  },
+                  {
+                    q: 'هل أدفع بالدولار أم بالجنيه؟',
+                    a: 'الأسعار معروضة بالدولار للشفافية، لكن الدفع يتم فعلياً عبر محفظة أورانج كاش بالجنيه المصري. رقم المحفظة وقيمة التحويل الدقيقة تظهران في صفحة الدفع.',
+                  },
+                  {
+                    q: 'هل أستطيع إلغاء الاشتراك في أي وقت؟',
+                    a: 'نعم، الاشتراك شهري أو سنوي بلا التزام طويل. عند التجديد يُفعَّل تلقائياً، ويمكنك إيقافه في أي وقت.',
+                  },
+                  {
+                    q: 'ماذا يحدث إذا تجاوزت عدد التوليدات؟',
+                    a: 'تتوقف التوليدات الجديدة فقط، ويبقى كل ما أنشأته محفوظاً في حسابك ومتاحاً للتحميل. يمكنك الترقية في أي لحظة للعودة للبناء بلا حدود.',
+                  },
+                ]
+              : [
+                  {
+                    q: 'Can I really start free, with no card?',
+                    a: 'Yes. The free tier gives you 5 generations per day, the live preview and the full code editor — no payment details required. Just sign in with Google or GitHub.',
+                  },
+                  {
+                    q: 'Do I pay in USD or Egyptian pounds?',
+                    a: 'Prices are shown in USD for transparency, but payment happens through the Orange Cash wallet in Egyptian pounds. The wallet number and the exact transfer amount appear on the checkout page.',
+                  },
+                  {
+                    q: 'Can I cancel at any time?',
+                    a: 'Yes — monthly or yearly, with no long lock-in. It renews automatically, and you can stop it whenever you like.',
+                  },
+                  {
+                    q: 'What happens if I hit the generation limit?',
+                    a: 'Only new generations pause. Everything you already built stays in your account and remains downloadable. Upgrade whenever you want to keep building without limits.',
+                  },
+                ]
+            ).map((item) => (
+              <div key={item.q} className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3.5">
+                <dt className="text-xs font-bold text-slate-100">{item.q}</dt>
+                <dd className="mt-1.5 text-[11px] leading-6 text-slate-400">{item.a}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="mt-8 text-center">
+            <button
+              type="button"
+              onClick={() => onNavigate('/')}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 via-pink-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white text-xs font-bold transition shadow-lg shadow-rose-500/25 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {ar ? 'ابدأ الآن مجاناً' : 'Start building free'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

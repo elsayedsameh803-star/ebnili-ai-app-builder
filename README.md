@@ -83,7 +83,29 @@ npm run build
 npm start
 ```
 
-The app runs on `http://localhost:3000`.
+The app runs on `http://localhost:3000`. Override the port with the `PORT`
+environment variable — `server.ts` reads it, so any PaaS (Render, Railway, Fly,
+Docker) that injects a public port works without a code change:
+
+```bash
+PORT=8080 npm start
+```
+
+### One API, two runners
+
+The HTTP surface lives in exactly one file, `api/index.ts`. It is the Vercel
+serverless entry point, and `server.ts` — the runner used by `npm run dev`,
+`npm start` and any self-hosted deployment — **mounts that same app** instead of
+declaring its own routes.
+
+This matters: `server.ts` previously carried a second, much smaller copy of the
+API. It had no `/api/auth/*`, no `/api/projects*` and no `/api/github/*`, so a
+self-hosted deployment served a site where the login wall listed no providers,
+the project store returned 404, and repository import did not exist at all. The
+two runners are now structurally incapable of drifting apart.
+
+If you add a route, add it to `api/index.ts` — it is immediately available in
+both environments.
 
 ## Environment Variables
 
@@ -91,6 +113,63 @@ The app runs on `http://localhost:3000`.
 | ----------------- | ---------------------------------------- | -------- |
 | `GEMINI_API_KEY`  | Google Gemini API key for AI calls       | Yes      |
 | `APP_URL`         | Public URL of the deployed app           | No       |
+| `PORT`            | Listen port for `npm start` (default 3000) | No      |
+
+## Launch checklist
+
+The application builds and every endpoint is verified working. These are the
+remaining steps that only the site owner can perform — they require credentials
+that must never be committed.
+
+### 1. Environment variables (Vercel → Settings → Environment Variables)
+
+Generate each secret with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+| Variable                                        | Purpose                                  |
+| ----------------------------------------------- | ---------------------------------------- |
+| `GEMINI_API_KEY`                                 | AI generation (site is unusable without) |
+| `APP_URL`                                        | Pins the OAuth callbacks to one domain   |
+| `AUTH_SESSION_SECRET`                            | Signs the sign-in session cookie         |
+| `ADMIN_PIN` (8+ chars) · `ADMIN_SESSION_SECRET`  | Owner dashboard                          |
+| `SITE_OWNER_EMAIL`                               | The single owner account                 |
+| `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY`         | Sign-in + project database               |
+| `SUPABASE_SERVICE_ROLE_KEY`                      | Server-side database access              |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`      | Repository import (separate OAuth app)   |
+
+### 2. Supabase
+
+1. Run `supabase/projects.sql` once in the SQL editor.
+2. Create a **public** bucket named `payments-pending` (receipt images).
+
+Until the database is reachable, stateful endpoints answer `503 DB_UNAVAILABLE`
+and the dashboard says so explicitly — it never shows a convincing page of
+zeros that looks like working data.
+
+### 3. OAuth callback URLs
+
+Register these **exactly** (a trailing slash or `/api` difference is rejected):
+
+| Provider | Callback URL                                        |
+| -------- | --------------------------------------------------- |
+| Google   | `https://<domain>/api/auth/callback/google`         |
+| GitHub sign-in | `https://<domain>/api/auth/callback/github`   |
+| GitHub import  | `https://<domain>/api/github/callback`      |
+
+The import dialog displays the exact URL the server sends with a copy button,
+and `GET /api/github/config` returns it as JSON — nothing has to be guessed.
+
+### 4. Verify after deploy
+
+```bash
+curl -s https://<domain>/api/health     # {"status":"ok","hasKey":true}
+```
+
+If `hasKey` is `false`, the AI calls will fail — the key is missing from the
+deployment, not from the code.
 
 ### Sign-in (Google / GitHub)
 

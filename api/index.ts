@@ -32,7 +32,12 @@ app.use((req, res, next) => {
 // ── Health & status ─────────────────────────────────────────────────────────
 // NOTE: getApiKey is defined in the Gemini section below (function hoisting
 // makes it available here at runtime).
-app.get(["/api/health", "/api", "/", "/health"], (_req: Request, res: Response) => {
+//
+// WHY the path list contains only /api paths: this same app is mounted onto the
+// self-hosted runner (see `server.ts`). Registering "/" here would sit in front
+// of that host's static file server and answer the home page with a JSON health
+// payload instead of the website.
+app.get(["/api/health", "/api"], (_req: Request, res: Response) => {
   res.json({
     status: "ok",
     service: "ebnili-api",
@@ -3713,5 +3718,30 @@ app.use(
 );
 
 export default app;
+
+/**
+ * Mount the whole API surface onto another Express instance.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * `api/index.ts` is the single implementation of every `/api/*` route (auth,
+ * projects, GitHub import, AI, admin). `server.ts` is the self-hosted runner
+ * (`npm start`, Docker, any Node host) and used to declare its OWN, much smaller
+ * set of routes — it had no `/api/auth/*`, no `/api/projects*`, no `/api/github/*`.
+ * The result was that running the project outside Vercel served a frontend that
+ * could never sign anyone in: the login wall listed no providers, the project
+ * store 404'd, and repository import was simply absent. The site was effectively
+ * broken on every self-hosted deployment.
+ *
+ * `server.ts` now mounts THIS app instead of re-implementing the routes, so both
+ * runners execute exactly one copy of the API and can never drift apart.
+ *
+ * Usage: `app.use(mountApi())` — mounted at the ROOT, not at `/api`, because
+ * every route here is already declared with its full `/api/...` path. Mounting
+ * at `/api` would make Express look for `/api/api/health`.
+ */
+export function mountApi(): express.Express {
+  return app;
+}
 
 
