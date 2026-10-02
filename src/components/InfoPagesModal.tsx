@@ -66,7 +66,12 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/85 backdrop-blur-sm p-3 sm:p-6"
+      // WHY z-[300]: this dialog is opened FROM the AuthGate, which is itself
+      // `z-[200]`. At the old `z-[120]` the entire legal page rendered BEHIND
+      // the sign-in wall, so clicking Privacy / Terms / Contact did nothing
+      // visible — the exact symptom that was reported. It must outrank every
+      // surface that can sit underneath it.
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/85 backdrop-blur-sm p-3 sm:p-6"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

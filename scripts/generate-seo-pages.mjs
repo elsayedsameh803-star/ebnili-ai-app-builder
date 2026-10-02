@@ -53,6 +53,30 @@ const CTA = `      <p style="margin:32px 0 0">
         <a href="/pricing" style="display:inline-block;padding:13px 24px;border-radius:14px;border:1px solid #334155;color:#cbd5e1;font-weight:700;text-decoration:none;margin-inline-start:10px">عرض الأسعار</a>
       </p>`;
 
+/**
+ * The persistent footer every generated static page carries.
+ *
+ * WHY: these pages are plain HTML with no React, so they cannot open the
+ * InfoPagesModal. Without a footer they were a dead end — a visitor landing on
+ * /pricing from Google had no way to reach the privacy policy, the terms or
+ * the support number from that page at all. The links are real URLs so a
+ * crawler follows them and the documents are indexable in their own right.
+ */
+const FOOTER = `      <footer style="margin-top:56px;padding-top:24px;border-top:1px solid #1e293b;text-align:center;font-size:13px;color:#64748b">
+        <nav style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:14px">
+          <a href="${ORIGIN}/about" style="padding:7px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-weight:700">من نحن</a>
+          <a href="${ORIGIN}/contact" style="padding:7px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-weight:700">اتصل بنا</a>
+          <a href="${ORIGIN}/privacy" style="padding:7px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-weight:700">سياسة الخصوصية</a>
+          <a href="${ORIGIN}/terms" style="padding:7px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-weight:700">الشروط والأحكام</a>
+        </nav>
+        <p style="margin:0 0 6px">
+          <a href="tel:+201207782741" dir="ltr" style="color:#34d399;font-weight:700;text-decoration:none">01207782741</a>
+          <span style="margin:0 8px;color:#334155">·</span>
+          <a href="mailto:elsayedsameh803@gmail.com" dir="ltr" style="color:#94a3b8;text-decoration:none">elsayedsameh803@gmail.com</a>
+        </p>
+        <p style="margin:0;font-size:12px;color:#475569">© 2026 إبنيلي — كل الحقوق محفوظة</p>
+      </footer>`;
+
 function page({ path, title, description, inner, nav = '', jsonLdBlocks }) {
   return `<!doctype html>
 <html lang="ar" dir="rtl">
@@ -88,6 +112,7 @@ ${jsonLdBlocks.map((b) => `    <script type="application/ld+json">${jsonLd(b)}</
   <body style="margin:0;background:#020617;color:#e2e8f0;font-family:'Cairo',system-ui,sans-serif;line-height:1.9">
     <div style="max-width:1000px;margin:0 auto;padding:48px 20px">
 ${nav}${inner}
+${FOOTER}
     </div>
   </body>
 </html>
@@ -168,6 +193,135 @@ const crumb = (label) =>
   `      <nav style="font-size:13px;color:#64748b;margin-bottom:26px"><a href="/" style="color:#94a3b8">إبنيلي</a> › <span style="color:#cbd5e1">${label}</span></nav>`;
 
 const PAGES = [
+  // ── The legal / company pages ──────────────────────────────────────────────
+  // WHY THEY ARE GENERATED STATICALLY: the footer links to them by real URL,
+  // so /privacy, /terms, /contact and /about must resolve to a document with
+  // actual text. A dead-end link on a legal page is worse than no link, and a
+  // crawler following the footer needs a real body to index.
+  {
+    file: 'privacy.html',
+    path: '/privacy',
+    nav: crumb('سياسة الخصوصية'),
+    title: 'سياسة الخصوصية | إبنيلي',
+    description:
+      'سياسة خصوصية منصة إبنيلي: ما البيانات التي نجمعها (البريد الإلكتروني واسم الحساب فقط)، لماذا نستخدم كوكيز HttpOnly للجلسة، وكيف نطلب حذف بياناتك أو تصدير مشاريعك.',
+    inner: `      <h1 style="font-size:34px;font-weight:800;margin:0 0 10px">سياسة الخصوصية</h1>
+      <p style="color:#94a3b8;margin:0 0 26px">آخر تحديث: 27 سبتمبر 2026 — هذه السياسة تشرح بالضبط ما نجمعه منك ولماذا.</p>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">البيانات التي نجمعها</h2>
+      <ul style="color:#cbd5e1;font-size:15px;padding-inline-start:22px">
+        <li style="margin-bottom:8px">عند تسجيل الدخول عبر Google أو GitHub: اسم حسابك وبريدك الإلكتروني وصورتك الرمزية فقط.</li>
+        <li style="margin-bottom:8px">المشاريع التي تنشئها داخل المنصة، ومحتوى محادثاتك مع محرك البناء.</li>
+        <li>سجل الاشتراك وحالة الدفع (الباقة، تاريخ التجديد، عدد عمليات التوليد).</li>
+      </ul>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">ما لا نجمعه ولا نشاركه</h2>
+      <ul style="color:#cbd5e1;font-size:15px;padding-inline-start:22px">
+        <li style="margin-bottom:8px">لا نحفظ كلمة مرورك إطلاقاً — تسجيل الدخول يتم عبر مزوّد OAuth مباشرة.</li>
+        <li style="margin-bottom:8px">لا نبيع بياناتك ولا نشاركها مع أي طرف ثالث لأغراض تسويقية.</li>
+        <li>لا نستخدم أدوات تتبع إعلانية.</li>
+      </ul>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">ملفات الارتباط (Cookies)</h2>
+      <p style="color:#cbd5e1;font-size:15px;margin:0">نستخدم كوكيز HttpOnly للجلسة ولحساب الإدارة فقط. لا توجد كوكيز تتبع أو إعلانات.</p>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">حقوقك</h2>
+      <p style="color:#cbd5e1;font-size:15px;margin:0">يمكنك في أي وقت طلب حذف بياناتك أو تصدير مشاريعك. راسلنا على الرقم <a href="tel:+201207782741" dir="ltr" style="color:#34d399;font-weight:700">01207782741</a> وسننفّذ الطلب.${CTA}</p>`,
+    jsonLd: [
+      { '@context': 'https://schema.org', '@type': 'WebPage', name: 'سياسة الخصوصية — إبنيلي', url: `${ORIGIN}/privacy`, inLanguage: 'ar' },
+    ],
+  },
+  {
+    file: 'terms.html',
+    path: '/terms',
+    nav: crumb('الشروط والأحكام'),
+    title: 'الشروط والأحكام | إبنيلي',
+    description:
+      'شروط استخدام منصة إبنيلي: قبول الشروط، قواعد الاستخدام العادل، ملكية المخرجات، سياسة الدفع عبر أورانج كاش والاسترجاع خلال 14 يوماً، وحدود المسؤولية.',
+    inner: `      <h1 style="font-size:34px;font-weight:800;margin:0 0 10px">الشروط والأحكام</h1>
+      <p style="color:#94a3b8;margin:0 0 26px">آخر تحديث: 27 سبتمبر 2026 — باستخدامك منصة إبنيلي فإنك توافق على هذه الشروط.</p>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">قبول الشروط</h2>
+      <p style="color:#cbd5e1;font-size:15px;margin:0">باستخدامك منصة إبنيلي فإنك توافق على هذه الشروط. إن لم توافق، يرجى عدم استخدام المنصة.</p>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">استخدام المنصة</h2>
+      <ul style="color:#cbd5e1;font-size:15px;padding-inline-start:22px">
+        <li style="margin-bottom:8px">لكل مستخدم حساب واحد. مشاركة الحساب أو بيعه مخالفة.</li>
+        <li style="margin-bottom:8px">الاستخدام الآلي المكثف (سكربتات / بوتات) ممنوع لأنه يكسر خطة الاستخدام العادل.</li>
+        <li>ممنوع إنتاج محتوى غير قانوني أو مضلل أو ينتهك حقوق الآخرين.</li>
+      </ul>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">الملكية الفكرية</h2>
+      <p style="color:#cbd5e1;font-size:15px;margin:0">يحق لك ملكية كل ما تولّده من مشاريع وأكواد. اسم "إبنيلي" وشعاره ومحرك المنصة مملوك لنا ولا يجوز استخدامه بدون إذن.</p>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">المدفوعات والاسترجاع</h2>
+      <ul style="color:#cbd5e1;font-size:15px;padding-inline-start:22px">
+        <li style="margin-bottom:8px">الدفع عبر محفظة أورانج كاش على 01207782741 فقط.</li>
+        <li style="margin-bottom:8px">لا يتم التفعيل تلقائياً — التحقق يدوي ثم التفعيل.</li>
+        <li>الاسترجاع ممكن خلال 14 يوماً إذا لم يتجاوز الاستهلاك حداً معقولاً.</li>
+      </ul>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">حدود المسؤولية</h2>
+      <p style="color:#cbd5e1;font-size:15px;margin:0">الخدمة تُقدَّم "كما هي"، ومسؤوليتنا محدودة بقيمة ما دفعته في آخر 30 يوماً.${CTA}</p>`,
+    jsonLd: [
+      { '@context': 'https://schema.org', '@type': 'WebPage', name: 'الشروط والأحكام — إبنيلي', url: `${ORIGIN}/terms`, inLanguage: 'ar' },
+    ],
+  },
+  {
+    file: 'contact.html',
+    path: '/contact',
+    nav: crumb('اتصل بنا'),
+    title: 'اتصل بنا | إبنيلي — الدعم الفني',
+    description:
+      'تواصل مع فريق إبنيلي: الدعم الفني عبر واتساب والرقم 01207782741، والبريد الإلكتروني elsayedsameh803@gmail.com، وخطوات التحويل عبر محفظة أورانج كاش وتفعيل الاشتراك.',
+    inner: `      <h1 style="font-size:34px;font-weight:800;margin:0 0 10px">اتصل بنا</h1>
+      <p style="color:#94a3b8;margin:0 0 26px">فريق الدعم متاح للرد على استفساراتك حول الاشتراك، التحويل عبر أورانج كاش، أو مشاكل في البناء.</p>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">طرق التواصل</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
+        <div style="background:#0b1220;border:1px solid #1e293b;border-radius:14px;padding:18px">
+          <div style="font-weight:800;color:#fff;margin-bottom:6px">واتساب / هاتف</div>
+          <a href="tel:+201207782741" dir="ltr" style="color:#34d399;font-weight:700;font-size:18px;text-decoration:none">01207782741</a>
+          <p style="color:#64748b;font-size:13px;margin:8px 0 0">للدعم الفني والتفعيل الفوري.</p>
+        </div>
+        <div style="background:#0b1220;border:1px solid #1e293b;border-radius:14px;padding:18px">
+          <div style="font-weight:800;color:#fff;margin-bottom:6px">البريد الإلكتروني</div>
+          <a href="mailto:elsayedsameh803@gmail.com" dir="ltr" style="color:#94a3b8;text-decoration:none;word-break:break-all">elsayedsameh803@gmail.com</a>
+          <p style="color:#64748b;font-size:13px;margin:8px 0 0">للاستفسارات العامة والخاصة.</p>
+        </div>
+      </div>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">تحويل الاشتراك عبر أورانج كاش</h2>
+      <ol style="color:#cbd5e1;font-size:15px;padding-inline-start:22px">
+        <li style="margin-bottom:8px">حوّل المبلغ على الرقم <a href="tel:+201207782741" dir="ltr" style="color:#34d399;font-weight:700">01207782741</a>.</li>
+        <li style="margin-bottom:8px">من صفحة الاشتراك داخل الاستوديو، أرسل طلب التفعيل.</li>
+        <li>يتم التحقق من التحويل يدوياً ثم تفعيل الباقة.</li>
+      </ol>${CTA}`,
+    jsonLd: [
+      { '@context': 'https://schema.org', '@type': 'ContactPage', name: 'اتصل بنا — إبنيلي', url: `${ORIGIN}/contact`, inLanguage: 'ar' },
+    ],
+  },
+  {
+    file: 'about.html',
+    path: '/about',
+    nav: crumb('من نحن'),
+    title: 'من نحن | إبنيلي — منصة بناء التطبيقات بالذكاء الاصطناعي',
+    description:
+      'إبنيلي منصة عربية لبناء المواقع والتطبيقات بالذكاء الاصطناعي: تصف فكرتك بالعربي فتحصل على تطبيق ويب كامل بمعاينة فورية ومحرر كود وتصدير ZIP ونشر مباشر.',
+    inner: `      <h1 style="font-size:34px;font-weight:800;margin:0 0 10px">من نحن</h1>
+      <p style="color:#94a3b8;margin:0 0 26px;max-width:720px">إبنيلي منصة عربية مبنية في مصر لبناء المواقع والتطبيقات بالذكاء الاصطناعي.</p>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">رسالتنا</h2>
+      <p style="color:#cbd5e1;font-size:15px;margin:0">أن نجعل بناء منتج ويب حقيقياً متاحاً لأي شخص يكتب بالعربية — بدون فريق تقني وبدون انتظار أسابيع.</p>
+
+      <h2 style="font-size:20px;font-weight:800;margin:32px 0 12px;color:#fff">ماذا نقدّم</h2>
+      <ul style="color:#cbd5e1;font-size:15px;padding-inline-start:22px">
+${FEATURES.map((f) => `        <li style="margin-bottom:8px">${f}</li>`).join('\n')}
+      </ul>${CTA}`,
+    jsonLd: [
+      { '@context': 'https://schema.org', '@type': 'AboutPage', name: 'من نحن — إبنيلي', url: `${ORIGIN}/about`, inLanguage: 'ar' },
+    ],
+  },
   {
     file: 'pricing.html',
     path: '/pricing',

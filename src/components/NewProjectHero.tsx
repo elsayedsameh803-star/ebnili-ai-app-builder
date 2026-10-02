@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { StarterTemplate, Language, UserSubscription } from '../types';
 import { STARTER_TEMPLATES } from '../data/templates';
+import { SiteFooter } from './SiteFooter';
 
 interface NewProjectHeroProps {
   onStartProject: (prompt: string, templateId?: string) => void;
@@ -33,6 +34,14 @@ interface NewProjectHeroProps {
    * and press a button that then refuses and shows the gate.
    */
   onOpenAuth?: () => void;
+  /**
+   * Opens the site pages (About / Contact / Privacy / Terms) from the footer.
+   *
+   * WHY: the public site's legal documents had no reachable link at all — the
+   * old footer was one line of plain text. A visitor who wanted to read the
+   * privacy policy simply had no way to do it.
+   */
+  onOpenInfoPage?: (page: 'about' | 'contact' | 'privacy' | 'terms') => void;
 }
 
 export const NewProjectHero = ({
@@ -44,6 +53,7 @@ export const NewProjectHero = ({
   onOpenSubscription,
   onOpenGitHubImport,
   onOpenAuth,
+  onOpenInfoPage,
 }: NewProjectHeroProps) => {
   const [promptText, setPromptText] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -362,10 +372,15 @@ export const NewProjectHero = ({
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="py-6 border-t border-slate-900 text-center text-xs text-slate-500 font-['Cairo',sans-serif]">
-        <p>منصة ابنيلي لتطوير التطبيقات بالذكاء الاصطناعي &bull; Ibni-li Web Studio</p>
-      </footer>
+      {/* Footer — real links, permanently on screen. This used to be a single
+          line of text with no navigation at all, which is why the platform's
+          privacy policy, terms and contact details had no discoverable home
+          anywhere on the public site. */}
+      <SiteFooter
+        language={language}
+        onOpenInfoPage={onOpenInfoPage}
+        className="max-w-5xl w-full mx-auto px-4 sm:px-6"
+      />
     </div>
   );
 };

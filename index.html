@@ -5,8 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#020617" />
     <style>@keyframes ebnily-spin { to { transform: rotate(360deg); } }</style>
+    <!-- ONE favicon link per `rel` value. The file previously declared two
+         `<link rel="icon">` tags; browsers honour only the last one, so the
+         `/icon.svg` declaration was silently dead and `/favicon.png` won
+         everywhere. The SVG is the one that scales on a high-DPI display, so
+         it is now the only `icon` and the PNG stays as `apple-touch-icon`,
+         which is a different `rel` and does not conflict. -->
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="icon" href="/favicon.png" sizes="64x64" type="image/png" />
     <!-- Both raster icons point at generated PNGs (see scripts/generate-brand-images.mjs).
          An SVG apple-touch-icon is silently dropped by iOS, which then shows a
          white square on the home screen. -->

@@ -1333,6 +1333,7 @@ export default function App() {
           // offers sign-in) is not mounted until a session exists, so the button
           // has to be wired here or a visitor has no visible way to sign in.
           onOpenAuth={() => setShowAuthModal(true)}
+          onOpenInfoPage={setInfoPage}
         />
         {showGitHubImport && (
           <GitHubImportModal
@@ -1371,6 +1372,16 @@ export default function App() {
             errorCode={authError}
           />
         </Suspense>
+
+        {/* The footer on the marketing page opens the same site pages. Without
+            this the new footer links would be dead buttons for a guest. */}
+        {infoPage && (
+          <InfoPagesModal
+            language={language}
+            initialPage={infoPage}
+            onClose={() => setInfoPage(null)}
+          />
+        )}
       </>
     );
   }
@@ -1399,8 +1410,24 @@ export default function App() {
     );
   }
 
+  // The sign-in wall is the FIRST thing a guest ever sees, so it is the screen
+  // that most needed a visible route to the privacy policy and the terms —
+  // and it had none. `InfoPagesModal` must be mounted HERE, not only in the
+  // studio tree below: this branch returns before that tree exists, so a guest
+  // clicking a footer link would flip state and see nothing.
   if (!authUser) {
-    return <AuthGate language={language} errorCode={authError} />;
+    return (
+      <>
+        <AuthGate language={language} errorCode={authError} onOpenInfoPage={setInfoPage} />
+        {infoPage && (
+          <InfoPagesModal
+            language={language}
+            initialPage={infoPage}
+            onClose={() => setInfoPage(null)}
+          />
+        )}
+      </>
+    );
   }
 
   return (

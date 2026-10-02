@@ -6,11 +6,27 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
 
-  "//rewrites": "Order matters: Vercel applies the first matching rule, and these run BEFORE the static file server. The SEO pages must therefore sit above the SPA fallback, or /pricing is answered with the login shell — which is exactly what kept the site out of Google. The /api rule is first so no page rule can swallow a backend call. The trailing-slash duplicates were removed: Vercel normalises a request path before matching, so /pricing and /pricing/ resolve to the same rule.",
+  "//rewrites": "Order matters: Vercel applies the first matching rule, and these run BEFORE the static file server. The SEO pages must therefore sit above the SPA fallback, or /pricing is answered with the login shell — which is exactly what kept the site out of Google. The /api rule is first so no page rule can swallow a backend call. The trailing-slash duplicates were removed: Vercel normalises a request path before matching, so /pricing and /pricing/ resolve to the same rule. The legal pages (/privacy, /terms, /contact, /about) are rewritten for the same reason as /pricing: the footer links to them by URL, so they must resolve to a real static document rather than the studio shell.",
   "rewrites": [
     {
       "source": "/api/:path*",
       "destination": "/api/index"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/terms.html"
+    },
+    {
+      "source": "/contact",
+      "destination": "/contact.html"
+    },
+    {
+      "source": "/about",
+      "destination": "/about.html"
     },
     {
       "source": "/pricing",

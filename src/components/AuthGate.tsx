@@ -2,11 +2,21 @@ import { useEffect, useState } from 'react';
 import { Loader2, ShieldCheck, AlertCircle, Sparkles } from 'lucide-react';
 import { GoogleIcon, GitHubIcon } from './AuthIcons';
 import { fetchAuthProviders, fetchAuthCallbacks, getAuthErrorMessage, startOAuth } from '../lib/auth';
+import { SiteFooter } from './SiteFooter';
 import type { AuthProviderId, AuthProviderInfo, Language } from '../types';
 
 interface AuthGateProps {
   language: Language;
   errorCode?: string | null;
+  /**
+   * Opens Privacy / Terms / Contact / About.
+   *
+   * WHY: this gate is the FIRST thing an unauthenticated visitor sees, and
+   * until now it offered no route at all to the platform's legal documents —
+   * they were reachable only from the studio rail, which a guest can never
+   * mount. The footer makes them visible from the very first screen.
+   */
+  onOpenInfoPage?: (page: 'about' | 'contact' | 'privacy' | 'terms') => void;
 }
 
 /**
@@ -17,7 +27,7 @@ interface AuthGateProps {
  * would still ship every data fetch and expose the workspace markup, so the
  * gate is a real branch in the render tree.
  */
-export const AuthGate = ({ language, errorCode }: AuthGateProps) => {
+export const AuthGate = ({ language, errorCode, onOpenInfoPage }: AuthGateProps) => {
   const [providers, setProviders] = useState<AuthProviderInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [callbacks, setCallbacks] = useState<{ google: string; github: string } | null>(null);
@@ -59,7 +69,7 @@ export const AuthGate = ({ language, errorCode }: AuthGateProps) => {
       : 'If you hit a redirect_uri error, make sure the callback URL is registered exactly as shown in Google or GitHub settings.',
   };
 
-  const COPY = { isAr, t, callbacks, errorCode };
+  const COPY = { isAr, t, callbacks, errorCode, onOpenInfoPage };
   return <AuthGateView {...COPY} providers={providers} isLoading={isLoading} />;
 };
 
@@ -68,6 +78,7 @@ type Copy = {
   t: Record<string, string>;
   callbacks: { google: string; github: string } | null;
   errorCode?: string | null;
+  onOpenInfoPage?: (page: 'about' | 'contact' | 'privacy' | 'terms') => void;
 };
 
 /** Pure markup for the gate — split out to keep each piece readable. */
@@ -76,6 +87,7 @@ const AuthGateView = ({
   t,
   callbacks,
   errorCode,
+  onOpenInfoPage,
   providers,
   isLoading,
 }: Copy & {
@@ -191,6 +203,13 @@ const AuthGateView = ({
         </div>
 
         <p className="mt-4 text-center text-[10px] leading-relaxed text-slate-600">{t.tip}</p>
+
+        {/* Legal footer — permanently visible on the gate. A privacy policy
+            that only exists inside a signed-in dropdown is not published, and
+            this gate is the one screen a first-time visitor is guaranteed to
+            see. The `InfoPagesModal` it opens is `z-[300]`, above this gate's
+            `z-[200]`, so it actually appears. */}
+        <SiteFooter language={isAr ? 'ar' : 'en'} onOpenInfoPage={onOpenInfoPage} className="mt-6 max-w-md" />
       </div>
     </div>
   </div>

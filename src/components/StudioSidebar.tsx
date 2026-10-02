@@ -243,8 +243,11 @@ export const StudioSidebar = ({
     // `relative` anchors the two panels. The rail itself must NOT be the scroll
     // container — overflow lives on an inner box, otherwise the panels clip.
     <aside className="relative shrink-0 w-64 bg-slate-900 text-slate-100 border-e border-slate-800 flex flex-col z-30">
-      {/* ── Brand + project name ───────────────────────────────────────── */}
-      <div className="shrink-0 border-b border-slate-800 p-3">
+      {/* ── Brand + project name ───────────────────────────────────────────
+          `relative` here — not on the rail — is what anchors the project
+          switcher. See the panel note further down for why the rail cannot
+          be the anchor. */}
+      <div ref={projectsMenuRef} className="relative shrink-0 border-b border-slate-800 p-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center shadow-md shadow-rose-500/20">
             <span className="text-white text-base font-bold">♥</span>
@@ -311,13 +314,124 @@ export const StudioSidebar = ({
                 onClick={() => setShowProjectsMenu((v) => !v)}
                 className="shrink-0 text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition cursor-pointer"
                 title={ar ? 'تبديل المشروع' : 'Switch project'}
+                aria-expanded={showProjectsMenu}
               >
                 ▾
               </button>
             )}
           </div>
         </div>
+
+        {/* Project switcher — anchored to THIS header, not to the rail.
+            `top-full` drops it directly under the button it belongs to. It used
+            to be a sibling of the scroll area using `bottom-full`, which
+            resolved against the full-height `<aside>` and pushed the whole
+            panel above the top of the viewport: the click registered, the
+            state flipped, and nothing was ever visible. */}
+        {showProjectsMenu && (
+          <div className="absolute top-full inset-x-2 mt-1 max-h-80 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5">
+            <div className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase flex items-center justify-between gap-2">
+              <span className="truncate">{ar ? 'مشاريعي' : 'My projects'}</span>
+              <span className="text-slate-600 normal-case font-medium truncate shrink-0">
+                {ar ? 'محفوظة على هذا الجهاز' : 'saved on this device'}
+              </span>
+            </div>
+
+            {projects.length === 0 ? (
+              <div className="px-3 py-6 text-center">
+                <div className="w-10 h-10 mx-auto rounded-xl bg-slate-800 flex items-center justify-center mb-2">
+                  <FolderTree className="w-5 h-5 text-slate-500" />
+                </div>
+                <p className="text-[11px] text-slate-400 leading-5">
+                  {ar
+                    ? 'لسه مفيش مشاريع محفوظة. أول ما تولّد موقع هيتحفظ هنا تلقائياً.'
+                    : 'No saved projects yet. Your first generated site is saved here automatically.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {projects.map((p) => {
+                  const isActive = p.id === activeProjectId;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`group flex items-center gap-1 rounded-lg px-1.5 py-1 transition min-w-0 ${
+                        isActive ? 'bg-rose-500/15 border border-rose-500/30' : 'hover:bg-slate-800'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onSelectProject) onSelectProject(p.id);
+                          setShowProjectsMenu(false);
+                        }}
+                        className="flex-1 text-start px-1 py-1 min-w-0"
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span className={`text-xs font-bold truncate min-w-0 ${isActive ? 'text-rose-300' : 'text-slate-200'}`}>
+                            {p.name}
+                          </span>
+                          {isActive && <span className="text-rose-400 text-[10px] shrink-0">{ar ? 'مفتوح' : 'open'}</span>}
+                        </span>
+                        <span className="block text-[10px] text-slate-500 truncate">
+                          {p.versionCount ?? 0} {ar ? 'إصدارات' : 'versions'} · {formatRelative(p.updatedAt, language)}
+                        </span>
+                      </button>
+
+                      {onRenameStoredProject && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = window.prompt(ar ? 'اسم المشروع الجديد' : 'New project name', p.name);
+                            if (next && next.trim()) onRenameStoredProject(p.id, next.trim());
+                          }}
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 transition shrink-0"
+                          title={ar ? 'إعادة تسمية' : 'Rename'}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      {onDeleteProject && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const ok = window.confirm(
+                              ar
+                                ? `حذف المشروع "${p.name}" نهائياً؟ لا يمكن التراجع.`
+                                : `Permanently delete "${p.name}"? This cannot be undone.`,
+                            );
+                            if (ok) onDeleteProject(p.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition shrink-0"
+                          title={ar ? 'حذف' : 'Delete'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="border-t border-slate-800 pt-1 mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onNewProject();
+                  setShowProjectsMenu(false);
+                }}
+                className="w-full text-start px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{ar ? 'مشروع جديد' : 'New project'}</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
 
       {/* ── The rail ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2 space-y-0.5">
@@ -360,10 +474,57 @@ export const StudioSidebar = ({
             iconClass="text-orange-400"
           />
         )}
+
+        {/* ── Legal & support ──────────────────────────────────────────────
+            These four documents used to exist ONLY inside the account
+            dropdown, behind a toggle. A privacy policy, terms of service and
+            contact page that a visitor has to find and open a menu to reach
+            are, in practice, not published at all — and this is exactly what
+            the owner asked to be fixed. They now have their own always-
+            visible section here, in the footer of the marketing hero, and at
+            the bottom of the sign-in gate. */}
+        {onOpenInfoPage && (
+          <>
+            <SectionLabel>{ar ? 'المنصة والقانون' : 'Platform & legal'}</SectionLabel>
+            {[
+              { key: 'about' as const, ar: 'من نحن', en: 'About', icon: Info },
+              { key: 'contact' as const, ar: 'اتصل بنا', en: 'Contact', icon: Phone },
+              { key: 'privacy' as const, ar: 'سياسة الخصوصية', en: 'Privacy', icon: ShieldCheck },
+              { key: 'terms' as const, ar: 'الشروط والأحكام', en: 'Terms', icon: Scale },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <Row
+                  key={item.key}
+                  icon={Icon}
+                  label={ar ? item.ar : item.en}
+                  onClick={() => onOpenInfoPage(item.key)}
+                  iconClass="text-slate-400"
+                />
+              );
+            })}
+
+            {/* The support number is also a tap target. A phone number printed
+                as plain digits is unusable on a phone, which is the one device
+                a support link is most likely to be read on. */}
+            <a
+              href="tel:+201207782741"
+              dir="ltr"
+              className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/10 transition min-w-0"
+              title={ar ? 'اتصل بالدعم الفني' : 'Call support'}
+            >
+              <Phone className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">01207782741</span>
+            </a>
+          </>
+        )}
       </div>
 
-      {/* ── Account block, pinned to the bottom ────────────────────────── */}
-      <div className="shrink-0 border-t border-slate-800 p-2 space-y-1">
+      {/* ── Account block, pinned to the bottom ──────────────────────────
+          `relative` here is load-bearing: it is the positioning context for
+          the account panel rendered at the end of this block. See the note on
+          that panel for the bug this fixes. */}
+      <div className="relative shrink-0 border-t border-slate-800 p-2 space-y-1">
         {authUser ? (
           <button
             type="button"
@@ -388,134 +549,56 @@ export const StudioSidebar = ({
             </span>
           </button>
         ) : (
-          /* A guest still needs this row to be a REAL button.
-             It used to be written as `onOpenAuth && <Row …/>`, which renders
-             nothing when the callback is absent — and it is absent for a guest,
-             because the caller only wires `onOpenAuth` when a session already
-             exists. The rail then showed an empty strip where the sign-in
-             control should be, so tapping that area did nothing on desktop and
-             on mobile alike. Render it unconditionally and let the prop decide
-             only whether the click does anything. */
-          onOpenAuth && (
-            <Row icon={LogIn} label={ar ? 'تسجيل الدخول' : 'Sign in'} onClick={onOpenAuth} iconClass="text-indigo-400" />
-          )
+          /* A guest still needs this row to be a REAL button, so it is rendered
+             unconditionally and the prop decides only whether the click does
+             something. It used to be `onOpenAuth && <Row …/>`, which rendered
+             NOTHING whenever the callback was absent — and that is exactly the
+             guest's case, so the rail showed an empty strip where the sign-in
+             control belonged and tapping it did nothing on any screen size. */
+          <Row
+            icon={LogIn}
+            label={ar ? 'تسجيل الدخول' : 'Sign in'}
+            onClick={() => onOpenAuth?.()}
+            iconClass="text-indigo-400"
+          />
         )}
 
         <Row icon={Globe} label={ar ? 'English' : 'العربية'} onClick={onToggleLanguage} />
-      </div>
 
-      {/* ── Panels — siblings of the scroll area, inside the `relative` rail ── */}
-      {showProjectsMenu && (
-        <div
-          ref={projectsMenuRef}
-          className="absolute bottom-full left-2 right-2 mb-1 max-h-80 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5"
-        >
-          <div className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase flex items-center justify-between gap-2">
-            <span className="truncate">{ar ? 'مشاريعي' : 'My projects'}</span>
-            <span className="text-slate-600 normal-case font-medium truncate shrink-0">
-              {ar ? 'محفوظة على هذا الجهاز' : 'saved on this device'}
-            </span>
-          </div>
+        {/* Switch account — the action that was impossible to reach.
+            Signing in with a second Google/GitHub identity means replacing the
+            session cookie, and the only path to that used to be: sign out
+            (losing the session), reload, and hunt for the sign-in button again.
+            Opening the auth dialog from inside the account panel does it in one
+            tap, and OAuth will hand back the *other* account the user picks. */}
+        {authUser && onOpenAuth && (
+          <button
+            type="button"
+            onClick={() => {
+              setShowUserMenu(false);
+              onOpenAuth();
+            }}
+            className="w-full text-start px-2.5 py-2 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2 transition cursor-pointer min-w-0"
+            title={ar ? 'استخدم حساب آخر' : 'Use a different account'}
+          >
+            <UserIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="truncate">{ar ? 'تغيير الحساب' : 'Switch account'}</span>
+          </button>
+        )}
 
-          {projects.length === 0 ? (
-            <div className="px-3 py-6 text-center">
-              <div className="w-10 h-10 mx-auto rounded-xl bg-slate-800 flex items-center justify-center mb-2">
-                <FolderTree className="w-5 h-5 text-slate-500" />
-              </div>
-              <p className="text-[11px] text-slate-400 leading-5">
-                {ar
-                  ? 'لسه مفيش مشاريع محفوظة. أول ما تولّد موقع هيتحفظ هنا تلقائياً.'
-                  : 'No saved projects yet. Your first generated site is saved here automatically.'}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-0.5">
-              {projects.map((p) => {
-                const isActive = p.id === activeProjectId;
-                return (
-                  <div
-                    key={p.id}
-                    className={`group flex items-center gap-1 rounded-lg px-1.5 py-1 transition min-w-0 ${
-                      isActive ? 'bg-rose-500/15 border border-rose-500/30' : 'hover:bg-slate-800'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onSelectProject) onSelectProject(p.id);
-                        setShowProjectsMenu(false);
-                      }}
-                      className="flex-1 text-start px-1 py-1 min-w-0"
-                    >
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        <span className={`text-xs font-bold truncate min-w-0 ${isActive ? 'text-rose-300' : 'text-slate-200'}`}>
-                          {p.name}
-                        </span>
-                        {isActive && <span className="text-rose-400 text-[10px] shrink-0">{ar ? 'مفتوح' : 'open'}</span>}
-                      </span>
-                      <span className="block text-[10px] text-slate-500 truncate">
-                        {p.versionCount ?? 0} {ar ? 'إصدارات' : 'versions'} · {formatRelative(p.updatedAt, language)}
-                      </span>
-                    </button>
-
-                    {onRenameStoredProject && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = window.prompt(ar ? 'اسم المشروع الجديد' : 'New project name', p.name);
-                          if (next && next.trim()) onRenameStoredProject(p.id, next.trim());
-                        }}
-                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 transition shrink-0"
-                        title={ar ? 'إعادة تسمية' : 'Rename'}
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-
-                    {onDeleteProject && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const ok = window.confirm(
-                            ar
-                              ? `حذف المشروع "${p.name}" نهائياً؟ لا يمكن التراجع.`
-                              : `Permanently delete "${p.name}"? This cannot be undone.`,
-                          );
-                          if (ok) onDeleteProject(p.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition shrink-0"
-                        title={ar ? 'حذف' : 'Delete'}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="border-t border-slate-800 pt-1 mt-1">
-            <button
-              type="button"
-              onClick={() => {
-                onNewProject();
-                setShowProjectsMenu(false);
-              }}
-              className="w-full text-start px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">{ar ? 'مشروع جديد' : 'New project'}</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showUserMenu && (
-        <div
-          ref={userMenuRef}
-          className="absolute bottom-full left-2 right-2 mb-1 max-h-[70vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5"
-        >
+        {/* Account panel — anchored to THIS account block, not to the rail.
+            This is the root cause of "the sign-in button opens no window": as a
+            sibling of the scroll area, `bottom-full` resolved against the
+            full-height `<aside>`, so the panel was laid out entirely ABOVE the
+            top of the viewport and clipped away. The click registered, the
+            state flipped, and the user saw nothing at all. `bottom-full` is
+            only correct when the containing block is the small box the panel
+            actually belongs to. */}
+        {showUserMenu && (
+          <div
+            ref={userMenuRef}
+            className="absolute bottom-full left-1 right-1 mb-1 max-h-[70vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5"
+          >
           <div className="px-2.5 py-2 border-b border-slate-800">
             <div className="flex items-center gap-2.5 min-w-0">
               {authUser?.picture ? (
@@ -627,7 +710,8 @@ export const StudioSidebar = ({
             <span className="truncate">{ar ? 'تسجيل الخروج' : 'Sign out'}</span>
           </button>
         </div>
-      )}
+        )}
+      </div>
     </aside>
   );
 };
