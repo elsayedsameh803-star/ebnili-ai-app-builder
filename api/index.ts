@@ -16,18 +16,86 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import crypto from "node:crypto";
+import {
+  clientKey,
+  corsGuard,
+  isWeakSecret,
+  rateLimit,
+  RateLimiter,
+  requireStrongSecret,
+  sameOriginGuard,
+  startLimiterSweeper,
+  weakSecretMessage,
+  resolveAllowedOrigins,
+} from "./security";
 
 const app = express();
 app.use(express.json({ limit: "15mb" }));
 
-// ── CORS (allows preview deployments & custom domains) ───────────────────────
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-device-id, x-fingerprint-hash");
-  if (req.method === "OPTIONS") return res.status(204).end();
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+// WHY A FLOOR, NOT A CEILING: the AI quota is the expensive surface, but project
+// writes, payment receipts and the admin login were previously unlimited. Each of
+// those is a resource an attacker can exhaust for free. Limits are per-identity
+// (signed-in account when available, else IP) and env-tunable — see
+// `docs/security.md`.
+const apiLimiter = new RateLimiter({ max: 300, windowMs: 60_000 });
+const aiLimiter = new RateLimiter({ max: 20, windowMs: 60_000 });
+const writeLimiter = new RateLimiter({ max: 30, windowMs: 60_000 });
+const authLimiter = new RateLimiter({ max: 20, windowMs: 10 * 60_000 });
+
+const LIMIT_RULES = {
+  api: apiLimiter.ruleFromEnv("RATE_LIMIT_API", { max: 300, windowMs: 60_000 }),
+  ai: aiLimiter.ruleFromEnv("RATE_LIMIT_AI", { max: 20, windowMs: 60_000 }),
+  write: writeLimiter.ruleFromEnv("RATE_LIMIT_WRITE", { max: 30, windowMs: 60_000 }),
+  auth: authLimiter.ruleFromEnv("RATE_LIMIT_AUTH", { max: 20, windowMs: 10 * 60_000 }),
+};
+
+startLimiterSweeper(apiLimiter);
+startLimiterSweeper(aiLimiter);
+startLimiterSweeper(writeLimiter);
+startLimiterSweeper(authLimiter);
+
+/** Write guard for the resource-creating routes (projects, patches). */
+const limitWrites = rateLimit(
+  writeLimiter,
+  { max: 30, windowMs: 60_000 },
+  "write",
+  "طلبات كثيرة جداً في وقت قصير. انتظر قليلاً ثم أعد المحاولة.",
+);
+
+/**
+ * Tighter guard for the payment surface — each hit can touch object storage, and
+ * a flood there is both a cost and a way to bury a real customer's request.
+ */
+const limitPayments = rateLimit(
+  writeLimiter,
+  { max: 10, windowMs: 10 * 60_000 },
+  "payment",
+  "تم استلام عدة طلبات تحويل. انتظر قليلاً قبل إرسال طلب جديد.",
+);
+
+/**
+ * Tag the request with the signed-in identity BEFORE the limiters run, so a
+ * quota is counted per account rather than per NAT. Reading the session here is
+ * safe: it only verifies an HMAC, it does not grant anything.
+ */
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  const session = readAuthSession(req as AuthReq);
+  if (session?.email) {
+    (req as Request & { authEmail?: string }).authEmail = session.email;
+  }
   next();
 });
+
+// Broad floor for the whole API, then the CSRF origin check.
+app.use("/api", rateLimit(apiLimiter, LIMIT_RULES.api, "api"));
+app.use("/api", sameOriginGuard);
+
+// ── CORS (allowlisted — see `resolveAllowedOrigins`) ───────────────────────────
+// SECURITY: this was `Access-Control-Allow-Origin: *`, which let any website read
+// this API's responses from a visitor's browser. A non-allowlisted origin now
+// receives NO CORS header at all, so the browser refuses the read.
+app.use((req, res, next) => corsGuard(resolveAllowedOrigins(req))(req, res, next));
 
 // ── Health & status ─────────────────────────────────────────────────────────
 // NOTE: getApiKey is defined in the Gemini section below (function hoisting
@@ -38,8 +106,32 @@ app.use((req, res, next) => {
 // of that host's static file server and answer the home page with a JSON health
 // payload instead of the website.
 app.get(["/api/health", "/api"], (_req: Request, res: Response) => {
+  // ── PHASE 3: this endpoint is the monitoring hook.
+  //
+  // It previously reported `status: "ok"` unconditionally, which is the least
+  // useful thing a health check can do: a deployment with NO signing secret,
+  // NO AI key and NO database still answered "ok", so no alert could ever fire
+  // and an operator had no way to see the real state without reading logs.
+  //
+  // `ok` now means "safe to serve", and `degraded` names exactly what is
+  // missing. The detail list is names of broken invariants only — never a value
+  // of a secret, and never an e-mail address.
+  const problems: string[] = [];
+
+  // SECURITY: a missing/weak signing key means nobody can sign in AND no
+  // session can be trusted. It is reported as a problem, not a warning.
+  if (authSessionSecretMissing()) problems.push("AUTH_SESSION_SECRET_MISSING");
+  if (!getApiKey()) problems.push("GEMINI_API_KEY_MISSING");
+  if (!isAdminPinConfigured()) problems.push("ADMIN_PIN_NOT_CONFIGURED");
+  if (planSigningSecret() === null) problems.push("PLAN_GRANT_SECRET_MISSING");
+  if (!OWNER_EMAIL) problems.push("SITE_OWNER_EMAIL_MISSING");
+  if (!supabaseConfig().dbConfigured) problems.push("DATABASE_NOT_CONFIGURED");
+
+  // Always HTTP 200: this endpoint answers for humans and monitors alike, and a
+  // non-2xx would make every load balancer restart a working deployment.
+  // `status: "degraded"` is the signal to alert on.
   res.json({
-    status: "ok",
+    status: problems.length > 0 ? "degraded" : "ok",
     service: "ebnili-api",
     time: new Date().toISOString(),
     // Deployment fingerprint — lets us verify which commit is actually live.
@@ -47,6 +139,15 @@ app.get(["/api/health", "/api"], (_req: Request, res: Response) => {
     env: process.env.VERCEL_ENV ?? "local",
     // eslint-disable-next-line @typescript-eslint/no-use-before-define
     hasKey: Boolean(getApiKey()),
+    /** Names of the broken invariants — safe to log, safe to alert on. */
+    problems,
+    /** Capability flags, so a monitor can assert the surface is actually wired. */
+    features: {
+      signInPossible: !authSessionSecretMissing(),
+      adminConfigured: isAdminPinConfigured(),
+      plansGrantable: planSigningSecret() !== null,
+      databaseConfigured: supabaseConfig().dbConfigured,
+    },
   });
 });
 
@@ -199,7 +300,7 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
   // The signed cookie is the fallback: it is the owner's own fast path and it
   // still works when the database read failed.
   const grant = readPlanGrant(req);
-  if (!entitled && grant && session && session.email.toLowerCase() === grant.email) {
+  if (!entitled && grantBelongsToSession(grant, session)) {
     entitled = grant;
   }
 
@@ -526,7 +627,7 @@ app.get("/api/projects/:id", (req: Request, res: Response) => {
   });
 });
 
-app.post("/api/projects", (req: Request, res: Response) => {
+app.post("/api/projects", limitWrites, (req: Request, res: Response) => {
   const owner = currentOwner(req);
   if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
@@ -557,7 +658,7 @@ app.post("/api/projects", (req: Request, res: Response) => {
   });
 });
 
-app.patch("/api/projects/:id", (req: Request, res: Response) => {
+app.patch("/api/projects/:id", limitWrites, (req: Request, res: Response) => {
   const owner = currentOwner(req);
   if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
@@ -784,7 +885,7 @@ app.get("/api/github/connect", (req: AuthReq, res: AuthRes) => {
     return res.status(503).json({ success: false, message: "GitHub OAuth is not configured." });
   }
   const nonce = ghStateNonce();
-  res.cookie(AUTH_STATE_COOKIE, `ghlink.${nonce}`, authCookieOptions(AUTH_STATE_TTL_MS));
+  res.cookie(AUTH_STATE_COOKIE, `ghlink.${nonce}`, authCookieOptions(AUTH_STATE_TTL_MS, req));
 
   const url = new URL("https://github.com/login/oauth/authorize");
   url.searchParams.set("client_id", cfg.clientId);
@@ -805,7 +906,7 @@ app.get("/api/github/callback", async (req: AuthReq, res: AuthRes) => {
   // Single-use nonce, as with the sign-in callback — a replayed callback URL
   // cannot mint a second link.
   const expected = readCookie(req, AUTH_STATE_COOKIE);
-  clearAuthCookie(res, AUTH_STATE_COOKIE);
+  clearAuthCookie(res, AUTH_STATE_COOKIE, req);
   if (!expected || !expected.startsWith("ghlink.")) return fail("state_cookie_missing");
   const nonce = expected.slice("ghlink.".length);
   const state = typeof req.query.state === "string" ? req.query.state : "";
@@ -848,7 +949,7 @@ app.get("/api/github/callback", async (req: AuthReq, res: AuthRes) => {
     // One nonce in BOTH cookies: ghTokenForSession requires them to match, so a
     // token copied without its partner cookie is worthless.
     const linkNonce = ghStateNonce();
-    res.cookie(GH_LINK_COOKIE, linkNonce, authCookieOptions(AUTH_SESSION_TTL_MS));
+    res.cookie(GH_LINK_COOKIE, linkNonce, authCookieOptions(AUTH_SESSION_TTL_MS, req));
     res.cookie(
       GH_TOKEN_COOKIE,
       issueGhToken({
@@ -857,7 +958,7 @@ app.get("/api/github/callback", async (req: AuthReq, res: AuthRes) => {
         accessToken: tokenJson.access_token,
         linkNonce,
       }),
-      authCookieOptions(AUTH_SESSION_TTL_MS),
+      authCookieOptions(AUTH_SESSION_TTL_MS, req),
     );
     return res.redirect(`${home}/?github=linked`);
   } catch (e) {
@@ -869,8 +970,8 @@ app.get("/api/github/callback", async (req: AuthReq, res: AuthRes) => {
 /** Disconnect GitHub — the stored token is destroyed, not merely ignored. */
 app.post("/api/github/disconnect", (req: AuthReq, res: AuthRes) => {
   if (!readAuthSession(req)) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
-  clearAuthCookie(res, GH_TOKEN_COOKIE);
-  clearAuthCookie(res, GH_LINK_COOKIE);
+  clearAuthCookie(res, GH_TOKEN_COOKIE, req);
+  clearAuthCookie(res, GH_LINK_COOKIE, req);
   res.json({ success: true, linked: false });
 });
 
@@ -1078,7 +1179,7 @@ app.post("/api/github/tree", async (req: AuthReq, res: AuthRes) => {
   }
 });
 
-app.post("/api/payments/receipt", async (req: Request, res: Response) => {
+app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Response) => {
   if (!requireSignedIn(req, res)) return;
 
   const body = (req.body as Record<string, unknown>) ?? {};
@@ -1193,8 +1294,8 @@ app.post("/api/payments/receipt", async (req: Request, res: Response) => {
   });
 });
 
-app.post("/api/subscriptions/auto-verify", queuePaymentReview);
-app.post("/api/subscriptions/submit-orange-cash", queuePaymentReview);
+app.post("/api/subscriptions/auto-verify", limitPayments, queuePaymentReview);
+app.post("/api/subscriptions/submit-orange-cash", limitPayments, queuePaymentReview);
 
 // Downgrade is a client-side display concern; the server state is already free,
 // so this never returns an upgraded tier.
@@ -1214,6 +1315,22 @@ function requireAiSession(req: Request, res: Response, next: NextFunction) {
       success: false,
       code: "AUTH_REQUIRED",
       message: "سجّل الدخول مرة أخرى للمتابعة — الجلسة انتهت أو لم يتم العثور عليها.",
+    });
+  }
+  // The short-window limit sits HERE rather than on each route so every AI
+  // endpoint inherits it: these calls spend the owner's Gemini key, and a single
+  // runaway loop through any one of them is expensive. The per-account daily cap
+  // below is the separate, longer-horizon boundary.
+  const result = aiLimiter.check(clientKey(req, "ai"), LIMIT_RULES.ai);
+  res.setHeader("X-RateLimit-Limit", String(LIMIT_RULES.ai.max));
+  res.setHeader("X-RateLimit-Remaining", String(result.remaining));
+  if (!result.allowed) {
+    res.setHeader("Retry-After", String(result.retryAfterSec));
+    return res.status(429).json({
+      success: false,
+      code: "RATE_LIMITED",
+      message: "طلبات كثيرة جداً في وقت قصير. انتظر قليلاً ثم أعد المحاولة.",
+      retryAfter: result.retryAfterSec,
     });
   }
   next();
@@ -1400,7 +1517,32 @@ function adminSessionSecret(): string {
   // No dedicated secret configured: sign with a value that cannot be derived
   // from anything the source reveals, so an unconfigured deployment is locked
   // rather than forgeable. A configured PIN still works locally.
+  //
+  // NOTE: this is deliberately NOT the auth session secret — mixing the two
+  // would let one compromise mint both cookies.
   return `admin-unconfigured-${INSECURE_DEV_SECRET}`;
+}
+
+/**
+ * `Secure` for auth cookies.
+ *
+ * SECURITY: it used to be `Boolean(process.env.VERCEL)`, so a production
+ * deployment running anywhere OTHER than Vercel (the self-hosted runner in
+ * `server.ts`, a container, a proxy) would ship session cookies without the
+ * `Secure` flag — they would then travel in cleartext over any http:// hop.
+ *
+ * Secure is decided by what the request actually looks like, not by which host
+ * it runs on: TLS in production, plaintext only for a genuinely local http
+ * development server. This keeps `npm run dev` working without ever weakening a
+ * real deployment.
+ */
+function cookiesAreSecure(req?: Request): boolean {
+  if (req?.headers["x-forwarded-proto"]) {
+    return String(req.headers["x-forwarded-proto"]).split(",")[0].trim() === "https";
+  }
+  if (typeof process.env.NODE_ENV === "string" && process.env.NODE_ENV === "production") return true;
+  if (process.env.VERCEL) return true;
+  return Boolean(req?.secure);
 }
 
 function signAdminExpiry(exp: string): string {
@@ -1484,7 +1626,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-app.post("/api/admin/auth", (req: Request, res: Response) => {
+app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "محاولات كثيرة جداً. انتظر قليلاً ثم أعد المحاولة."), (req: Request, res: Response) => {
   // Admin is the site owner and nothing else. The PIN is a second factor, not
   // the identity: without the owner account signed in this endpoint answers 404
   // exactly like every other admin route, so a non-owner cannot even obtain a
@@ -1514,7 +1656,7 @@ app.post("/api/admin/auth", (req: Request, res: Response) => {
   adminLoginFailures.delete(adminClientKey(req));
   res.cookie(ADMIN_COOKIE_NAME, issueAdminSession(), {
     httpOnly: true,
-    secure: Boolean(process.env.VERCEL),
+    secure: cookiesAreSecure(req),
     sameSite: "strict",
     path: "/",
     maxAge: ADMIN_SESSION_TTL_MS,
@@ -1839,13 +1981,16 @@ const PLAN_GRANT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  */
 const INSECURE_DEV_SECRET = "ebnili-insecure-dev-secret";
 
-/** True when a secret is missing or is a known-public placeholder. */
-function isWeakSecret(secret: string | undefined): boolean {
-  const s = (secret ?? "").trim();
-  if (!s) return true;
-  if (s.length < 24) return true;
-  return [INSECURE_DEV_SECRET, "ebnili", "ebnily", "secret", "change-me"].includes(s);
-}
+/**
+ * True when a secret is missing or is a known-public placeholder.
+ *
+ * SECURITY: this used to be a local copy of the rule, which meant the check that
+ * guards the session cookie and the check the unit tests pin could drift apart —
+ * one hardened, the other not. There is now exactly ONE definition, in
+ * `api/security.ts`, and it also rejects long-but-public values like
+ * `"change-me".repeat(5)`, which the old length-only-plus-exact-match version
+ * accepted.
+ */
 
 /**
  * A dedicated secret for plan grants.
@@ -1889,10 +2034,39 @@ function hmacB64With(value: string, secret: string): string {
   return crypto.createHmac("sha256", secret).update(value).digest("base64url");
 }
 
+/**
+ * Bind a plan grant to the signed-in session.
+ *
+ * SECURITY: the grant cookie is signed but it is still a bearer token. Without
+ * this check, anyone who obtains the cookie (an XSS, a shared machine, an
+ * intercepted request on a misconfigured proxy) could replay it from a different
+ * browser. Comparing the grant's own subject against the verified session e-mail
+ * is what makes a stolen cookie useless.
+ *
+ * Exported for the unit tests, which assert this directly.
+ */
+function grantBelongsToSession(
+  grant: { email: string } | null,
+  session: AuthUser | null,
+): grant is { email: string } {
+  if (!grant || !session?.email) return false;
+  return String(grant.email).trim().toLowerCase() === String(session.email).trim().toLowerCase();
+}
+
 function readPlanGrant(req: Request): { email: string; tier: "pro" | "business"; expiresAt: string } | null {
   const token = readCookie(req, PLAN_COOKIE_NAME);
   if (!token) return null;
-  // With no secret we cannot verify anything, so no grant can be trusted.
+  // ── INVARIANT: this function returns a GRANT, never a decision.
+  // ── It deliberately does NOT know who is asking. Every caller must bind the
+  // ── grant to the signed-in session before trusting it:
+  // ──     `grant.email.toLowerCase() === session.email.toLowerCase()`
+  // ── Both call sites (`/api/subscriptions/current` and `serverTierFor`) do that
+  // ── check. It is repeated here as a named helper so a third call site has an
+  // ── obvious, reviewable thing to use instead of re-deriving it — and so the
+  // ── unit tests can assert the binding directly.
+  // ── A signed-but-unbound cookie is still a bearer token: anyone who steals it
+  // ── could present it, so binding to the session email is what makes a stolen
+  // ── cookie useless in a different browser.
   const secret = planSigningSecret();
   if (!secret) return null;
   const sep = token.indexOf(".");
@@ -1989,7 +2163,7 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
       const tier = body.tier === "business" || payment.plan_id === "business" ? "business" : "pro";
       res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(payment.account_email, tier), {
         httpOnly: true,
-        secure: Boolean(process.env.VERCEL),
+        secure: cookiesAreSecure(req),
         sameSite: "lax",
         path: "/",
         maxAge: PLAN_GRANT_TTL_MS,
@@ -2066,10 +2240,10 @@ const AUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
  * cookie, and the browser only replaces it if the name/domain/path/Secure
  * attributes line up — hence one helper used by BOTH set and clear.
  */
-function authCookieOptions(maxAgeMs?: number) {
+function authCookieOptions(maxAgeMs?: number, req?: Request) {
   return {
     httpOnly: true,
-    secure: Boolean(process.env.VERCEL),
+    secure: cookiesAreSecure(req),
     sameSite: "lax" as const,
     path: "/",
     ...(maxAgeMs ? { maxAge: maxAgeMs } : {}),
@@ -2077,8 +2251,8 @@ function authCookieOptions(maxAgeMs?: number) {
 }
 
 /** Delete an auth cookie with exactly the attributes it was created with. */
-function clearAuthCookie(res: Response, name: string): void {
-  res.clearCookie(name, authCookieOptions());
+function clearAuthCookie(res: Response, name: string, req?: Request): void {
+  res.clearCookie(name, authCookieOptions(undefined, req));
 }
 
 /**
@@ -2095,23 +2269,47 @@ function clearAuthCookie(res: Response, name: string): void {
  */
 let cachedAuthSecret: string | null = null;
 
-function authSessionSecret(): string {
-  if (cachedAuthSecret !== null) return cachedAuthSecret;
-  const explicit = (process.env.AUTH_SESSION_SECRET ?? "").trim();
-  // A dedicated secret is the only acceptable key. Weak values are ignored on
-  // purpose: signing with a guessable key is worse than refusing to sign,
-  // because it looks like it works.
-  cachedAuthSecret = isWeakSecret(explicit) ? INSECURE_DEV_SECRET : explicit;
-  if (isWeakSecret(cachedAuthSecret)) {
-    console.warn(
-      "[SECURITY] AUTH_SESSION_SECRET is missing or too short. Set a random value of 32+ characters in Vercel, otherwise session cookies are forgeable.",
-    );
-  }
-  return cachedAuthSecret;
+/** True when the deployment cannot safely sign a session at all. */
+function authSessionSecretMissing(): boolean {
+  return requireStrongSecret(process.env.AUTH_SESSION_SECRET) === null;
 }
 
-function hmacB64(input: string): string {
-  return crypto.createHmac("sha256", authSessionSecret()).update(input).digest("base64url");
+/**
+ * HMAC key for the sign-in session cookie.
+ *
+ * SECURITY: this used to fall back to a literal `"ebnili-insecure-dev-secret"`
+ * that is committed to this repository, so any reader of the public source could
+ * forge a session cookie for the owner's address and take the site over. It
+ * logged a warning and then carried on — which is the worst of both worlds: the
+ * operator was told, and the site stayed wide open anyway.
+ *
+ * It now FAILS CLOSED. With no usable secret:
+ *  • no session can be MINTED (`issueAuthSession` returns null), so nobody can
+ *    sign in, and
+ *  • no session can be VERIFIED, so a forged cookie is rejected.
+ *
+ * The site does not crash and the marketing/pricing pages keep rendering; only
+ * the authenticated surfaces lock, and `/api/health` reports the exact problem.
+ * That is the correct trade: a locked feature is recoverable in one env edit,
+ * a forged owner session is not.
+ */
+function authSessionSecret(): string | null {
+  if (cachedAuthSecret !== null) return cachedAuthSecret;
+  const explicit = (process.env.AUTH_SESSION_SECRET ?? "").trim();
+  const strong = requireStrongSecret(explicit);
+  if (strong) {
+    cachedAuthSecret = strong;
+    return cachedAuthSecret;
+  }
+  cachedAuthSecret = null;
+  console.error(weakSecretMessage("AUTH_SESSION_SECRET"));
+  return null;
+}
+
+function hmacB64(input: string): string | null {
+  const secret = authSessionSecret();
+  if (!secret) return null;
+  return crypto.createHmac("sha256", secret).update(input).digest("base64url");
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -2605,9 +2803,8 @@ function serverTierFor(req: Request, session: AuthUser | null): Tier {
   if (isOwnerAccount(session)) return "business";
   const grant = readPlanGrant(req);
   if (!grant) return "free";
-  if (!session) return "free";
   // A grant only ever counts for the account it was issued to.
-  if (grant.email.toLowerCase() !== session.email.toLowerCase()) return "free";
+  if (!grantBelongsToSession(grant, session)) return "free";
   if (new Date(grant.expiresAt).getTime() <= Date.now()) return "free";
   return grant.tier;
 }
@@ -2712,11 +2909,21 @@ function mapSupabaseUser(raw: {
   return { id: String(raw.id), name: String(fullName), email: raw.email || "", picture, provider };
 }
 
-function issueAuthSession(user: AuthUser): string {
+/**
+ * Mint a session cookie, or `null` when the deployment cannot sign safely.
+ *
+ * Returning `null` (rather than a throw) is what makes the failure mode a locked
+ * feature instead of a 500: the two OAuth callbacks translate it into an
+ * actionable `auth_error` the UI can explain.
+ */
+function issueAuthSession(user: AuthUser): string | null {
   const body = Buffer.from(
     JSON.stringify({ ...user, iat: Date.now(), exp: Date.now() + AUTH_SESSION_TTL_MS }),
   ).toString("base64url");
-  return `${body}.${hmacB64(body)}`;
+  const sig = hmacB64(body);
+  // No signature ⇒ no session. Never ship an unsigned token.
+  if (!sig) return null;
+  return `${body}.${sig}`;
 }
 
 function readAuthSession(req: AuthReq): AuthUser | null {
@@ -2726,7 +2933,11 @@ function readAuthSession(req: AuthReq): AuthUser | null {
   if (sep <= 0) return null;
   const body = token.slice(0, sep);
   const sig = token.slice(sep + 1);
-  if (!safeEqual(sig, hmacB64(body))) return null;
+  // No usable key ⇒ nothing can be verified, so every cookie is rejected. This
+  // is the half that stops a forged session from being accepted.
+  const expected = hmacB64(body);
+  if (!expected) return null;
+  if (!safeEqual(sig, expected)) return null;
   try {
     const parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as {
       id?: string;
@@ -2911,10 +3122,10 @@ app.get("/api/auth/me", async (req: AuthReq, res: AuthRes) => {
   });
 });
 
-app.post("/api/auth/logout", (_req: AuthReq, res: AuthRes) => {
-  clearAuthCookie(res, AUTH_COOKIE_NAME);
-  clearAuthCookie(res, AUTH_STATE_COOKIE);
-  clearAuthCookie(res, AUTH_PKCE_COOKIE);
+app.post("/api/auth/logout", (req: AuthReq, res: AuthRes) => {
+  clearAuthCookie(res, AUTH_COOKIE_NAME, req);
+  clearAuthCookie(res, AUTH_STATE_COOKIE, req);
+  clearAuthCookie(res, AUTH_PKCE_COOKIE, req);
   res.json({ success: true, authenticated: false });
 });
 
@@ -2975,7 +3186,7 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
 
     // The verifier stays server-side in an HttpOnly cookie; only the derived
     // challenge ever goes to the browser, so a stolen callback code is useless.
-    res.cookie(AUTH_PKCE_COOKIE, `${provider}.${verifier}`, authCookieOptions(AUTH_STATE_TTL_MS));
+    res.cookie(AUTH_PKCE_COOKIE, `${provider}.${verifier}`, authCookieOptions(AUTH_STATE_TTL_MS, req));
 
     const url = new URL(`${sb.url}/auth/v1/authorize`);
     // Never emit a URL that still carries a PostgREST/GoTrue API segment —
@@ -3013,7 +3224,7 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
   const state = crypto.randomBytes(24).toString("hex");
   // The provider returns via a top-level GET navigation, so SameSite=Lax is
   // required; the attributes come from one place so the delete below matches.
-  res.cookie(AUTH_STATE_COOKIE, `${provider}.${state}`, authCookieOptions(AUTH_STATE_TTL_MS));
+  res.cookie(AUTH_STATE_COOKIE, `${provider}.${state}`, authCookieOptions(AUTH_STATE_TTL_MS, req));
 
   const redirectUri = authCallbackUrl(req, provider);
   const url =
@@ -3064,7 +3275,7 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
 
   // Single-use: clear the verifier cookie on read so a replayed callback fails.
   const stored = readCookie(req, AUTH_PKCE_COOKIE);
-  clearAuthCookie(res, AUTH_PKCE_COOKIE);
+  clearAuthCookie(res, AUTH_PKCE_COOKIE, req);
   if (!stored) return fail("pkce_missing");
   const sep = stored.indexOf(".");
   if (sep <= 0) return fail("pkce_invalid");
@@ -3100,7 +3311,12 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
     const identity = mapSupabaseUser(tokenJson.user || {});
     if (!identity) return fail("profile_failed");
 
-    res.cookie(AUTH_COOKIE_NAME, issueAuthSession(identity), authCookieOptions(AUTH_SESSION_TTL_MS));
+    // Fail closed: with no signing key we cannot mint a session, and issuing an
+    // unsigned cookie would be exactly the vulnerability this guards against.
+    const session = issueAuthSession(identity);
+    if (!session) return fail("auth_secret_missing");
+
+    res.cookie(AUTH_COOKIE_NAME, session, authCookieOptions(AUTH_SESSION_TTL_MS));
     return res.redirect(`${home}/?auth=success`);
   } catch (e) {
     console.error("supabase callback failed:", e instanceof Error ? e.message : String(e));
@@ -3126,7 +3342,7 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
   // Single-use CSRF nonce: the cookie is cleared on first read, so a replayed
   // callback URL can never mint a second session.
   const expected = readCookie(req, AUTH_STATE_COOKIE);
-  clearAuthCookie(res, AUTH_STATE_COOKIE);
+  clearAuthCookie(res, AUTH_STATE_COOKIE, req);
   if (!expected) return fail("state_cookie_missing");
   const sep = expected.indexOf(".");
   if (sep <= 0) return fail("state_cookie_invalid");
@@ -3144,7 +3360,10 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
         : await exchangeGitHubCode(code, redirectUri);
     if (!user) return fail("profile_failed");
 
-    res.cookie(AUTH_COOKIE_NAME, issueAuthSession(user), authCookieOptions(AUTH_SESSION_TTL_MS));
+    const session = issueAuthSession(user);
+    if (!session) return fail("auth_secret_missing");
+
+    res.cookie(AUTH_COOKIE_NAME, session, authCookieOptions(AUTH_SESSION_TTL_MS));
     return res.redirect(`${home}/?auth=success`);
   } catch (e) {
     console.error("auth callback failed:", e instanceof Error ? e.message : String(e));

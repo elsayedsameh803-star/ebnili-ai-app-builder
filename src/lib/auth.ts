@@ -225,6 +225,14 @@ export const AUTH_ERROR_MESSAGES: Record<string, { ar: string; en: string }> = {
     ar: 'طريقة الدخول غير مُهيأة على الخادم بعد. أضف مفاتيح OAuth من إعدادات Vercel.',
     en: 'This sign-in method is not configured on the server yet. Add the OAuth keys in Vercel settings.',
   },
+  // SECURITY: the server now fails CLOSED when AUTH_SESSION_SECRET is missing or
+  // weak, instead of signing sessions with a key published in the source. This
+  // code is what the visitor sees for that state — it has to name the fix,
+  // because the alternative (signing with a known key) is the vulnerability.
+  auth_secret_missing: {
+    ar: 'تسجيل الدخول معطّل مؤقتاً لأسباب أمنية: مفتاح توقيع الجلسات (AUTH_SESSION_SECRET) غير مُعد على الخادم. تواصل مع الدعم.',
+    en: 'Sign-in is temporarily disabled for security: the session signing key (AUTH_SESSION_SECRET) is not configured on the server. Please contact support.',
+  },
   state_cookie_missing: {
     ar: 'انتهت صلاحية محاولة الدخول. حاول مرة أخرى.',
     en: 'Your sign-in attempt expired. Please try again.',

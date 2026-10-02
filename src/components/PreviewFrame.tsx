@@ -38,9 +38,23 @@ export const PreviewFrame = ({
   const [refreshKey, setRefreshKey] = useState(0);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
-  // Listen for messages from inside the preview iframe
+  // Listen for messages from inside the preview iframe.
+  //
+  // SECURITY: this handler used to accept ANY message from ANY window. A
+  // `message` event with no origin or source check is a free channel into the
+  // app: any tab, opener or embedded frame the user has open can post
+  // `LOVABLE_ELEMENT_SELECTED` and drive the inspector, or flood the console
+  // drawer with fake output.
+  //
+  // `e.source` is the check that actually matters here. The frame is rendered
+  // with `sandbox` and no `allow-same-origin`, so its origin is the OPAQUE
+  // string "null" — comparing `e.origin` against our own origin would therefore
+  // reject every legitimate message. Comparing the window identity accepts only
+  // our own frame and nothing else.
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
+      // Only ever our own preview frame.
+      if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return;
       if (!e.data || typeof e.data !== 'object') return;
 
       if (e.data.type === 'LOVABLE_ELEMENT_SELECTED') {
@@ -51,7 +65,7 @@ export const PreviewFrame = ({
           {
             id: String(Date.now() + Math.random()),
             type: e.data.logType || 'log',
-            message: e.data.message || '',
+            message: typeof e.data.message === 'string' ? e.data.message.slice(0, 2000) : '',
             time: new Date().toLocaleTimeString(),
           },
         ]);
@@ -66,9 +80,26 @@ export const PreviewFrame = ({
   const buildInjectedCode = (rawHtml: string, inspectActive: boolean) => {
     if (!rawHtml) return '';
 
+    // SECURITY: the injected bridge used to post every message with targetOrigin
+    // `'*'`, which tells the browser "deliver this to whatever window is the
+    // parent" with no check on the receiving side. If this document is ever
+    // opened directly (the "open in new tab" button), or embedded somewhere
+    // unexpected, its logs and element data go anywhere.
+    //
+    // The parent origin is baked in at injection time and used as the explicit
+    // target, so the browser delivers only if the parent really is our app.
+    // JSON.stringify keeps it a safely-quoted string literal.
+    const parentOrigin = JSON.stringify(window.location.origin);
+
     const injection = `
       <script>
         (function() {
+          var PARENT_ORIGIN = ${parentOrigin};
+          function securePost(payload) {
+            try { window.parent.postMessage(payload, PARENT_ORIGIN); }
+            catch (e) { /* closed or opaque parent — never break the page */ }
+          }
+
           // Intercept Console
           const originalLog = console.log;
           const originalWarn = console.warn;
@@ -76,27 +107,46 @@ export const PreviewFrame = ({
 
           console.log = function(...args) {
             originalLog.apply(console, args);
-            window.parent.postMessage({
+            securePost({
               type: 'LOVABLE_CONSOLE_LOG',
               logType: 'log',
-              message: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')
-            }, '*');
+              message: args.map(a => {
+                try {
+                  return typeof a === 'object' ? JSON.stringify(a) : String(a);
+                } catch (e) {
+                  // A circular object must not throw inside the user's console.
+                  return '[unserialisable]';
+                }
+              }).join(' ').slice(0, 2000)
+            });
           };
           console.warn = function(...args) {
             originalWarn.apply(console, args);
-            window.parent.postMessage({
+            securePost({
               type: 'LOVABLE_CONSOLE_LOG',
               logType: 'warn',
-              message: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')
-            }, '*');
+              message: args.map(a => {
+                try {
+                  return typeof a === 'object' ? JSON.stringify(a) : String(a);
+                } catch (e) {
+                  return '[unserialisable]';
+                }
+              }).join(' ').slice(0, 2000)
+            });
           };
           console.error = function(...args) {
             originalError.apply(console, args);
-            window.parent.postMessage({
+            securePost({
               type: 'LOVABLE_CONSOLE_LOG',
               logType: 'error',
-              message: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')
-            }, '*');
+              message: args.map(a => {
+                try {
+                  return typeof a === 'object' ? JSON.stringify(a) : String(a);
+                } catch (e) {
+                  return '[unserialisable]';
+                }
+              }).join(' ').slice(0, 2000)
+            });
           };
 
           // Visual Edit Inspector
@@ -131,7 +181,7 @@ export const PreviewFrame = ({
               const id = el.id ? '#' + el.id : '';
               const selector = id || (tagName + (className ? '.' + className.split(' ')[0] : ''));
 
-              window.parent.postMessage({
+              securePost({
                 type: 'LOVABLE_ELEMENT_SELECTED',
                 elementInfo: {
                   tagName,
@@ -139,7 +189,7 @@ export const PreviewFrame = ({
                   className,
                   selector
                 }
-              }, '*');
+              });
             }, true);
           }
         })();

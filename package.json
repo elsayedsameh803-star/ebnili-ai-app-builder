@@ -16,6 +16,7 @@
     "start": "node dist-server/server.cjs",
     "preview": "vite preview",
     "clean": "rimraf dist dist-server",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
