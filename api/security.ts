@@ -258,6 +258,72 @@ export function sameOriginGuard(req: Request, res: Response, next: NextFunction)
   });
 }
 
+// ── Staff accounts (subscription tier only) ───────────────────────────────────
+
+/**
+ * Addresses that get the Business tier automatically, with no payment and no
+ * expiry.
+ *
+ * WHY THIS IS NOT AN OWNERSHIP LIST
+ * --------------------------------
+ * "Business tier" and "site owner" are DIFFERENT powers and must never be
+ * merged:
+ *   • A staff account gets the PAID FEATURES — no watermark on export, custom
+ *     domains, the raised generation ceiling.
+ *   • The owner ALSO gets the admin console: every account, device blocks,
+ *     payment approvals, platform settings.
+ * If these addresses were treated as owners, then anyone able to sign in as
+ * `maged6086@gmail.com` would reach the admin console knowing only the PIN. That
+ * is a privilege escalation nobody asked for, so this list is strictly a
+ * SUBSCRIPTION decision and must never gate an admin route.
+ *
+ * CONFIG: `STAFF_EMAILS` overrides the defaults (comma-separated), so adding or
+ * removing someone is a redeploy rather than a code change.
+ */
+export const DEFAULT_STAFF_EMAILS = ["elsayedsameh803@gmail.com", "maged6086@gmail.com"];
+
+/** Normalised e-mail comparison — the only safe way to match these lists. */
+export function normalizeEmail(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+/**
+ * The effective staff list.
+ *
+ * CONFIG SEMANTICS — the distinction matters, so it is spelled out:
+ *   • UNSET (the variable does not exist) → the built-in defaults, so the feature
+ *     works on a fresh deployment with no configuration at all.
+ *   • SET TO ANY STRING → exactly that list, parsed from commas. This includes
+ *     the empty string.
+ *
+ * Why empty means "nobody" rather than "fall back to the defaults": clearing the
+ * variable is the obvious way for an operator to remove every staff member. If
+ * that silently reinstated the built-in addresses, removing someone would appear
+ * to work and then quietly not work — the worst outcome for a privilege list.
+ */
+export function staffEmails(): Set<string> {
+  const raw = process.env.STAFF_EMAILS;
+  if (typeof raw !== "string") return new Set(DEFAULT_STAFF_EMAILS.map(normalizeEmail));
+  return new Set(
+    raw
+      .split(",")
+      .map((e) => normalizeEmail(e))
+      .filter(Boolean),
+  );
+}
+
+/**
+ * Is this e-mail on the staff list?
+ *
+ * Used for the subscription tier ONLY. It must never be used as an authorisation
+ * check for admin routes — see the note above.
+ */
+export function isStaffEmail(email: unknown): boolean {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+  return staffEmails().has(normalized);
+}
+
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 
 /**

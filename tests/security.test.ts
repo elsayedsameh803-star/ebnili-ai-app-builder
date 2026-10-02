@@ -16,7 +16,10 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 import {
+  DEFAULT_STAFF_EMAILS,
+  isStaffEmail,
   isWeakSecret,
+  normalizeEmail,
   requireStrongSecret,
   resolveAllowedOrigins,
   corsGuard,
@@ -24,6 +27,7 @@ import {
   RateLimiter,
   rateLimit,
   clientKey,
+  staffEmails,
   MIN_SECRET_LENGTH,
 } from "../api/security.ts";
 
@@ -392,6 +396,95 @@ describe("isWeakSecret — long-but-obvious values", () => {
     // check that rejected those would lock a working deployment on a technicality,
     // so the marker list is deliberately made of unambiguous phrases only.
     assert.equal(isWeakSecret("0aBcDeF0123456789abcdef01234567"), false);
+  });
+});
+
+// ── 6. Staff accounts (subscription tier, NOT admin) ─────────────────────────
+
+describe("isStaffEmail", () => {
+  const defaults = { STAFF_EMAILS: undefined };
+
+  test("grants Business to both configured staff addresses", () => {
+    withEnv(defaults, () => {
+      assert.equal(isStaffEmail("elsayedsameh803@gmail.com"), true);
+      assert.equal(isStaffEmail("maged6086@gmail.com"), true);
+    });
+  });
+
+  test("ignores case and surrounding whitespace", () => {
+    // OAuth providers are inconsistent about the casing they return; a staff
+    // member must not silently drop to Free because of a capital letter.
+    withEnv(defaults, () => {
+      assert.equal(isStaffEmail("  Maged6086@Gmail.COM  "), true);
+      assert.equal(isStaffEmail("ELSAYEDSAMEH803@GMAIL.COM"), true);
+    });
+  });
+
+  test("does NOT grant Business to anyone else", () => {
+    withEnv(defaults, () => {
+      assert.equal(isStaffEmail("someone@example.com"), false);
+      assert.equal(isStaffEmail("maged6086@gmail.com.evil.com"), false);
+      assert.equal(isStaffEmail("notmaged6086@gmail.com"), false);
+    });
+  });
+
+  test("treats a missing or empty e-mail as not staff", () => {
+    withEnv(defaults, () => {
+      assert.equal(isStaffEmail(""), false);
+      assert.equal(isStaffEmail("   "), false);
+      assert.equal(isStaffEmail(undefined), false);
+      assert.equal(isStaffEmail(null), false);
+    });
+  });
+
+  test("STAFF_EMAILS overrides the default list entirely", () => {
+    // An override REPLACES, not extends. That is what makes it possible to remove
+    // a former staff member without a code change.
+    withEnv({ STAFF_EMAILS: "new.person@example.com" }, () => {
+      assert.equal(isStaffEmail("new.person@example.com"), true);
+      assert.equal(isStaffEmail("maged6086@gmail.com"), false);
+      assert.equal(isStaffEmail("elsayedsameh803@gmail.com"), false);
+    });
+  });
+
+  test("an empty STAFF_EMAILS grants Business to nobody", () => {
+    // Clearing the variable is how an operator removes every staff member. It
+    // must NOT silently reinstate the built-in addresses.
+    withEnv({ STAFF_EMAILS: "" }, () => {
+      assert.equal(isStaffEmail("maged6086@gmail.com"), false);
+      assert.equal(isStaffEmail("elsayedsameh803@gmail.com"), false);
+    });
+  });
+
+  test("an unset STAFF_EMAILS falls back to the built-in defaults", () => {
+    // The other half of the same rule: no configuration at all must still work.
+    withEnv({ STAFF_EMAILS: undefined }, () => {
+      assert.equal(staffEmails().size, DEFAULT_STAFF_EMAILS.length);
+      assert.equal(isStaffEmail("maged6086@gmail.com"), true);
+    });
+  });
+
+  test("tolerates spaces and stray commas in the override", () => {
+    withEnv({ STAFF_EMAILS: " a@b.com , , c@d.com " }, () => {
+      assert.equal(isStaffEmail("a@b.com"), true);
+      assert.equal(isStaffEmail("c@d.com"), true);
+      assert.equal(isStaffEmail("maged6086@gmail.com"), false);
+    });
+  });
+
+  test("is case-insensitive about the override too", () => {
+    withEnv({ STAFF_EMAILS: "Mixed@Case.COM" }, () => {
+      assert.equal(isStaffEmail("mixed@case.com"), true);
+    });
+  });
+});
+
+describe("normalizeEmail", () => {
+  test("trims and lowercases, and never returns a non-string", () => {
+    assert.equal(normalizeEmail("  Foo@Bar.COM "), "foo@bar.com");
+    assert.equal(normalizeEmail(undefined), "");
+    assert.equal(normalizeEmail(null), "");
+    assert.equal(normalizeEmail(42), "42");
   });
 });
 

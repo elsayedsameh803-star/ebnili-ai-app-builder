@@ -19,7 +19,9 @@ import crypto from "node:crypto";
 import {
   clientKey,
   corsGuard,
+  isStaffEmail,
   isWeakSecret,
+  normalizeEmail,
   rateLimit,
   RateLimiter,
   requireStrongSecret,
@@ -78,11 +80,30 @@ const limitPayments = rateLimit(
  * Tag the request with the signed-in identity BEFORE the limiters run, so a
  * quota is counted per account rather than per NAT. Reading the session here is
  * safe: it only verifies an HMAC, it does not grant anything.
+ *
+ * SUBSCRIPTION CHECK (staff bypass)
+ * ---------------------------------
+ * This also resolves the account's entitlement once per request and stores it on
+ * the request. A staff account is short-circuited to Business HERE — before any
+ * handler looks at a grant cookie, a payment row, or a client-supplied field —
+ * which is what "bypass the subscription check" means in practice: there is no
+ * remaining check downstream that could downgrade them.
+ *
+ * `subscriptionBypassed` is deliberately NOT an authorisation flag. It records
+ * that this account skips the subscription gate, nothing more; admin access is
+ * decided separately by `requireAdmin`.
  */
 app.use((req: Request, _res: Response, next: NextFunction) => {
   const session = readAuthSession(req as AuthReq);
+  const tagged = req as Request & { authEmail?: string; accountTier?: Tier; subscriptionBypassed?: boolean };
+
   if (session?.email) {
-    (req as Request & { authEmail?: string }).authEmail = session.email;
+    tagged.authEmail = session.email;
+    const staff = isStaffEmail(session.email);
+    if (staff) {
+      tagged.accountTier = "business";
+      tagged.subscriptionBypassed = true;
+    }
   }
   next();
 });
@@ -190,8 +211,18 @@ const OWNER_EMAIL = (
 
 function isOwnerAccount(session: AuthUser | null): boolean {
   if (!session || !OWNER_EMAIL) return false;
-  return String(session?.email ?? "").trim().toLowerCase() === OWNER_EMAIL;
+  // Same normaliser the staff list uses, so an e-mail with stray whitespace or
+  // mixed case can never be "the owner" for one check and "not staff" for another.
+  return normalizeEmail(session.email) === OWNER_EMAIL;
 }
+
+// ── Staff accounts: automatic Business tier ───────────────────────────────────
+// The list, the matcher and the reasoning all live in `api/security.ts`:
+//   • `isStaffEmail()` decides the SUBSCRIPTION tier only.
+//   • It is deliberately NOT wired into `isOwnerAccount()`, so these addresses get
+//     the paid features but never the admin console. Admin remains
+//     `OWNER_EMAIL` + the PIN — two independent factors.
+// One definition, and the unit tests can pin it directly.
 
 /**
  * Contact details the checkout and subscription screens read.
@@ -260,6 +291,22 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
 
   // The owner account needs no grant record.
   if (isOwnerAccount(session)) {
+    res.json({
+      success: true,
+      subscription: ownerSubscription(),
+      ...contactDefaults(),
+    });
+    return;
+  }
+
+  // A staff account answers here too, before any payment lookup. This is what
+  // makes the app show Business immediately after sign-in rather than after a
+  // database round trip, and it keeps the two staff addresses from ever appearing
+  // as "free" in the UI.
+  //
+  // `status: "active"` comes from the shape itself: there is no expiry and no
+  // pending review, so the subscription is active from the moment they land.
+  if (isStaffEmail(session?.email)) {
     res.json({
       success: true,
       subscription: ownerSubscription(),
@@ -2706,6 +2753,15 @@ async function touchAccount(
   const ip = clientIp(req);
   const ua = String(req.headers["user-agent"] ?? "").slice(0, 250);
 
+  // A staff account is written as `business` on the very first login, so the row
+  // in `ebnily_accounts` agrees with what `serverTierFor` will decide later. Two
+  // separate truths — the table and the entitlement check — would eventually
+  // disagree, and the dashboard would show a staff member as "free" while the app
+  // treated them as Business.
+  const staff = isStaffEmail(session.email);
+  // The table's `tier` column is constrained to ('free','pro','business').
+  const tier: Tier = staff ? "business" : "free";
+
   const res = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
     method: "POST",
     query: { on_conflict: "merge-duplicates" },
@@ -2723,6 +2779,8 @@ async function touchAccount(
       first_seen_at: new Date().toISOString(),
       last_ip: ip || null,
       user_agent: ua || null,
+      // Staff keep Business on every later visit too — see the PATCH below.
+      tier,
     }),
   });
 
@@ -2746,6 +2804,14 @@ async function touchAccount(
       email: session.email ?? row.email,
       display_name: session.name ?? row.display_name,
       avatar_url: session.picture || row.avatar_url,
+      // Re-assert the staff tier on every visit. Without this the column would
+      // only ever be set by the INSERT, so an account that was later added to
+      // `STAFF_EMAILS` — or one an admin had reset to 'free' by hand — would keep
+      // the stale value forever while `serverTierFor` said otherwise.
+      //
+      // Only staff are re-asserted: a normal account's `tier` is left exactly as
+      // it is, so a payment the owner approved is never silently reverted here.
+      ...(staff ? { tier } : {}),
     }),
   });
 
@@ -2799,8 +2865,25 @@ function toPublicAccount(row: DbAccount) {
 // approved, or from the owner's account. The browser NEVER sends the tier — a
 // client-provided "I'm paid" is exactly what this guard exists to reject.
 
+/**
+ * The subscription tier the SERVER grants this session.
+ *
+ * This is the single place every paid feature asks, so a staff account is
+ * honoured once here rather than in each caller that might forget.
+ *
+ * Resolution order (first match wins):
+ *   1. the site owner      — unchanged behaviour
+ *   2. a STAFF account     — automatic Business, no payment, no expiry
+ *   3. a signed plan grant — bound to the session e-mail, unexpired
+ *   4. free
+ *
+ * The browser never sends a tier. That is still the rule: everything below is
+ * derived from the verified session cookie, never from a request field.
+ */
 function serverTierFor(req: Request, session: AuthUser | null): Tier {
   if (isOwnerAccount(session)) return "business";
+  // Staff bypass the subscription check entirely — see `isStaffEmail`.
+  if (isStaffEmail(session?.email)) return "business";
   const grant = readPlanGrant(req);
   if (!grant) return "free";
   // A grant only ever counts for the account it was issued to.
