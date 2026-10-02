@@ -69,11 +69,16 @@ function page({ path, title, description, inner, nav = '', jsonLdBlocks }) {
     <meta property="og:url" content="${ORIGIN}${path}" />
     <meta property="og:title" content="${esc(title)}" />
     <meta property="og:description" content="${esc(description)}" />
-    <meta property="og:image" content="${ORIGIN}/og-image.svg" />
+    <!-- PNG, not SVG: every social platform that matters here (WhatsApp above
+         all) refuses an SVG and silently renders a bare text row instead. -->
+    <meta property="og:image" content="${ORIGIN}/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${esc(title)}" />
     <meta name="twitter:description" content="${esc(description)}" />
-    <meta name="twitter:image" content="${ORIGIN}/og-image.svg" />
+    <meta name="twitter:image" content="${ORIGIN}/og-image.png" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

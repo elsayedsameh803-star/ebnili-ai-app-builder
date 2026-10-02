@@ -6,18 +6,27 @@
     <meta name="theme-color" content="#020617" />
     <style>@keyframes ebnily-spin { to { transform: rotate(360deg); } }</style>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="icon" href="/favicon.png" sizes="64x64" type="image/png" />
+    <!-- Both raster icons point at generated PNGs (see scripts/generate-brand-images.mjs).
+         An SVG apple-touch-icon is silently dropped by iOS, which then shows a
+         white square on the home screen. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Ebnili" />
     <title>Ebnili - AI App Builder | إبنيلي لبناء مواقع بالذكاء الاصطناعي</title>
     <meta name="description" content="منصة إبنيلي (Ebnili) الذكية لبناء وتطوير تطبيقات الويب بالذكاء الاصطناعي مع معاينة فورية ومحرر كود ونظام اشتراكات ومحفظة أورانج كاش." />
-    <meta name="keywords" content="بناء مواقع بالذكاء الاصطناعي, مولد مواقع, AI app builder, إبنيلي, برمجة, تطوير ويب" />
+    <!-- The <meta name="keywords"> tag that used to sit here was removed: Google
+         announced in 2009 that it is not used for ranking and ignores it
+         entirely. It only ever served to advertise a keyword list to competitors. -->
     <meta name="author" content="Ebnili" />
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
     <link rel="canonical" href="https://ebnily.vercel.app/" />
 
+    <!-- Open Graph. The image must be PNG or JPEG: WhatsApp, Facebook and LinkedIn
+         all reject SVG, and WhatsApp is where this audience actually shares
+         links — so an SVG here means every shared preview is a bare text row. -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Ebnili - AI App Builder" />
     <meta property="og:description" content="منصة إبنيلي (Ebnili) الذكية لبناء وتطوير تطبيقات الويب بالذكاء الاصطناعي مع معاينة فورية ومحرر كود ونظام اشتراكات ومحفظة أورانج كاش." />
@@ -25,16 +34,15 @@
     <meta property="og:site_name" content="Ebnili" />
     <meta property="og:locale" content="ar_EG" />
     <meta property="og:locale:alternate" content="en_US" />
-    <!-- Without this a shared link renders as a bare text row on WhatsApp,
-         Facebook and X, which is most of where this audience discovers links. -->
-    <meta property="og:image" content="https://ebnily.vercel.app/og-image.svg" />
+    <meta property="og:image" content="https://ebnily.vercel.app/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="إبنيلي — بناء المواقع والتطبيقات بالذكاء الاصطناعي" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Ebnili - AI App Builder" />
     <meta name="twitter:description" content="ابنِ أي فكرة تطبيق ويب خلال ثوانٍ معدودة بكلماتك، مع معاينة حية وتعديل فوري." />
-    <meta name="twitter:image" content="https://ebnily.vercel.app/og-image.svg" />
+    <meta name="twitter:image" content="https://ebnily.vercel.app/og-image.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

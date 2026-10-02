@@ -105,10 +105,18 @@ export interface StudioSidebarProps {
 /**
  * One full-width row. The icon and the label can never fight for pixels.
  *
- * `active` renders the selected state and is the ONLY thing that turns the row
- * into a toggle. `aria-pressed` is emitted only when `active` is defined — on a
- * plain action button (New project, Publish, Export) a pressed/unpressed state
- * has no meaning, and announcing one is worse than announcing nothing.
+ * `active` is what separates the two kinds of row in this rail:
+ *   • `true` / `false` → a toggle (Preview / Split / Code, Desktop / Tablet /
+ *     Mobile, Visual edit). `aria-pressed` is then meaningful and the state is
+ *     announced.
+ *   • omitted          → a plain action (New project, Publish, Export, Open
+ *     in tab). These have no on/off state, and announcing one is worse than
+ *     announcing nothing.
+ *
+ * The prop is therefore spread conditionally rather than passed straight
+ * through: React renders `aria-pressed="false"` for `aria-pressed={undefined}`
+ * only when it is written literally, which would tell a screen reader that
+ * "New project" is currently not pressed.
  */
 const Row = ({
   icon: Icon,
@@ -132,7 +140,7 @@ const Row = ({
     type="button"
     onClick={onClick}
     title={title ?? label}
-    aria-pressed={active}
+    {...(active === undefined ? {} : { 'aria-pressed': active })}
     className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition cursor-pointer text-start ${
       active ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
     }`}

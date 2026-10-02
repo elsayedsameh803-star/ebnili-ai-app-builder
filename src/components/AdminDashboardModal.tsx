@@ -260,6 +260,14 @@ export const AdminDashboardModal = ({
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState('');
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+  /**
+   * Failures are kept out of `actionSuccessMessage`.
+   *
+   * The single toast used to render everything on a green background, so a
+   * rejected write ("تعذّر تحديث الكريديت") looked exactly like a successful
+   * one. Two states, two colours.
+   */
+  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
 
   // Verify the HttpOnly session cookie whenever the modal opens. The legacy
   // sessionStorage flag is only a hint and can survive an expired cookie.
@@ -394,14 +402,18 @@ export const AdminDashboardModal = ({
         const data: unknown = await res.json().catch(() => null);
         if (cancelled || !isRecord(data) || data.success !== true) return;
         setAccounts(normalizeAccounts(data.accounts));
-        if (isRecord(data.stats)) {
+        // Bound to a local BEFORE the object literal: TypeScript cannot carry a
+        // narrowing made by `isRecord(x)` into a closure, so `data.stats.foo`
+        // inside the updater was still `unknown` and failed to type-check.
+        const stats = data.stats;
+        if (isRecord(stats)) {
           setAccountStats((prev) => ({
             ...prev,
-            total: toFiniteNumber(data.stats.totalAccountsCount, prev.total),
-            online: toFiniteNumber(data.stats.onlineAccountsCount, 0),
-            idle: toFiniteNumber(data.stats.idleAccountsCount, 0),
-            credits: toFiniteNumber(data.stats.totalCreditsOutstanding, 0),
-            welcomePerSignup: toFiniteNumber(data.stats.welcomeCreditsPerSignup, prev.welcomePerSignup),
+            total: toFiniteNumber(stats.totalAccountsCount, prev.total),
+            online: toFiniteNumber(stats.onlineAccountsCount, 0),
+            idle: toFiniteNumber(stats.idleAccountsCount, 0),
+            credits: toFiniteNumber(stats.totalCreditsOutstanding, 0),
+            welcomePerSignup: toFiniteNumber(stats.welcomeCreditsPerSignup, prev.welcomePerSignup),
           }));
         }
       } catch {
@@ -441,7 +453,9 @@ export const AdminDashboardModal = ({
         const data: unknown = await res.json().catch(() => ({}));
         if (!res.ok) {
           const message = isRecord(data) ? toText(data.message) : '';
-          setActionSuccessMessage(message || 'تعذّر تنفيذ العملية.');
+          // Failures go to the error channel, never the green one.
+          setActionErrorMessage(message || 'تعذّر تنفيذ العملية.');
+          setActionSuccessMessage(null);
           return;
         }
         const updated = isRecord(data) && isRecord(data.account) ? normalizeAccounts([data.account])[0] : null;
@@ -459,9 +473,14 @@ export const AdminDashboardModal = ({
             return next;
           });
         }
-        setActionSuccessMessage(null);
+        // Confirm the write actually landed rather than silently claiming it did.
+        setActionSuccessMessage(
+          path === '/api/admin/account/set-credits' ? 'تم تحديث الكريديت.' : 'تم تحديث حالة الحساب.',
+        );
+        setActionErrorMessage(null);
       } catch {
-        setActionSuccessMessage('تعذّر الاتصال بالخادم.');
+        setActionErrorMessage('تعذّر الاتصال بالخادم.');
+        setActionSuccessMessage(null);
       } finally {
         setBusyAccountId(null);
       }
@@ -479,7 +498,8 @@ export const AdminDashboardModal = ({
       if (raw === null) return;
       const value = Number(raw.trim());
       if (!Number.isInteger(value) || value < 0 || value > 100000) {
-        setActionSuccessMessage('أدخل عدداً صحيحاً بين 0 و 100000.');
+        setActionErrorMessage('أدخل عدداً صحيحاً بين 0 و 100000.');
+        setActionSuccessMessage(null);
         return;
       }
       void mutateAccount('/api/admin/account/set-credits', { accountId: account.accountId, credits: value });
@@ -832,11 +852,37 @@ export const AdminDashboardModal = ({
           </button>
         </div>
 
-        {/* Success Toast */}
-        {actionSuccessMessage && (
-          <div className="bg-emerald-500/20 border-b border-emerald-500/30 px-6 py-2 text-xs font-bold text-emerald-300 flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-emerald-400" />
-            <span>{actionSuccessMessage}</span>
+        {/* Toast. `actionSuccessMessage` carries BOTH outcomes — the admin actions below
+            reuse it for failures too — so it is coloured by whether the text
+            starts with the failure marker the writers use. Rendering every
+            message on green is how a rejected write ends up looking like a
+            successful one. */}
+        {(actionSuccessMessage || actionErrorMessage) && (
+          <div
+            role="status"
+            className={`px-6 py-2 text-xs font-bold flex items-center gap-2 border-b ${
+              actionErrorMessage
+                ? 'bg-rose-500/20 border-rose-500/30 text-rose-200'
+                : 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
+            }`}
+          >
+            {actionErrorMessage ? (
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+            ) : (
+              <CheckCircle className="w-4 h-4 shrink-0" />
+            )}
+            <span className="truncate">{actionErrorMessage ?? actionSuccessMessage}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setActionSuccessMessage(null);
+                setActionErrorMessage(null);
+              }}
+              className="ms-auto shrink-0 opacity-70 hover:opacity-100"
+              aria-label="إغلاق"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
 
@@ -1215,24 +1261,34 @@ export const AdminDashboardModal = ({
                               </span>
                             </div>
 
-                            {/* When they joined, and when they were last here. */}
+                            {/* When they joined, when they were last here, and the requests the server
+                                counted for them. `requestsCount` is rendered rather
+                                than carried unused, so the column is never a lie
+                                about how much the row actually knows. */}
                             <div className="text-[10px] text-slate-500 sm:flex-1 min-w-0">
                               <span className="block">
                                 سجّل: {relativeTime(account.firstSeenAt, language === 'ar')}
+                                {account.welcomeGiven
+                                  ? ` · ${language === 'ar' ? 'حصل على كريديت الترحيب' : 'got welcome credits'}`
+                                  : ` · ${language === 'ar' ? 'بدون كريديت ترحيب' : 'no welcome credits'}`}
                               </span>
                               <span className="block">
                                 آخر نشاط: {relativeTime(account.lastSeenAt, language === 'ar')}
+                                {account.requestsCount > 0 ? ` · ${account.requestsCount} طلب` : ''}
                                 {account.lastIp ? ` · ${account.lastIp}` : ''}
                               </span>
                             </div>
 
-                            {/* Actions */}
+                            {/* Actions. Each icon-only control carries its own
+                                accessible name — a title attribute alone is not
+                                reliably announced by a screen reader. */}
                             <div className="flex items-center gap-1.5 shrink-0">
                               <button
                                 type="button"
                                 onClick={() => handleSetCredits(account)}
                                 disabled={busy}
                                 title="منح أو تعديل الكريديت"
+                                aria-label={`تعديل كريديت ${account.email || account.name}`}
                                 className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-orange-400 transition disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 {busy ? (
@@ -1246,6 +1302,11 @@ export const AdminDashboardModal = ({
                                 onClick={() => handleToggleAccountBlock(account)}
                                 disabled={busy}
                                 title={account.isBlocked ? 'إلغاء الحظر' : 'حظر الحساب'}
+                                aria-label={
+                                  account.isBlocked
+                                    ? `إلغاء حظر ${account.email || account.name}`
+                                    : `حظر ${account.email || account.name}`
+                                }
                                 className={`p-2 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed ${
                                   account.isBlocked
                                     ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300'

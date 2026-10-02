@@ -32,6 +32,13 @@ pr.json
 
 # Scratch output from the local verification run (build logs, curl response
 # files, git probes). These are regenerated on every run and must not ship.
+# Generated brand images (scripts/generate-brand-images.mjs). They are rebuilt
+# on every `npm run build`, so committing them would only create conflicts the
+# next time a pixel changes.
+public/og-image.png
+public/apple-touch-icon.png
+public/favicon.png
+
 checks_out.txt
 server_out.txt
 tsc_out.txt
