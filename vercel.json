@@ -6,7 +6,6 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
 
-  "//rewrites": "Order matters: Vercel applies the first matching rule, and these run BEFORE the static file server. The SEO pages must therefore sit above the SPA fallback, or /pricing is answered with the login shell — which is exactly what kept the site out of Google. The /api rule is first so no page rule can swallow a backend call. The trailing-slash duplicates were removed: Vercel normalises a request path before matching, so /pricing and /pricing/ resolve to the same rule. The legal pages (/privacy, /terms, /contact, /about) are rewritten for the same reason as /pricing: the footer links to them by URL, so they must resolve to a real static document rather than the studio shell.",
   "rewrites": [
     {
       "source": "/api/:path*",
@@ -46,7 +45,6 @@
     }
   ],
 
-  "//headers": "The explicit /sitemap.xml and /robots.txt rules were removed: both files already ship from dist/ and are served as-is, so rewriting a path onto itself was a no-op. The Content-Type override for robots.txt went too — Vercel already sends text/plain for .txt. This catch-all deliberately EXCLUDES /api so the function's own headers survive. Cross-Origin-Opener-Policy was dropped: it only makes sense alongside Cross-Origin-Embedder-Policy, and a lone COOP can break the OAuth popup flow.",
   "headers": [
     {
       "source": "/((?!api/).*)",
@@ -66,7 +64,6 @@
     }
   ],
 
-  "//functions": "60s is the hard ceiling on the Hobby plan (Pro and Enterprise allow more), and declaring a value above the plan limit fails the deployment at build time rather than warning. The AI routes stream one Gemini response and finish well inside that window. Raise this only after upgrading the plan.",
   "functions": {
     "api/index.ts": {
       "maxDuration": 60
