@@ -1329,6 +1329,10 @@ export default function App() {
           subscription={subscription}
           onOpenSubscription={() => setShowSubscription(true)}
           onOpenGitHubImport={() => setShowGitHubImport(true)}
+          // The hero is the guest's landing page and the studio rail (which also
+          // offers sign-in) is not mounted until a session exists, so the button
+          // has to be wired here or a visitor has no visible way to sign in.
+          onOpenAuth={() => setShowAuthModal(true)}
         />
         {showGitHubImport && (
           <GitHubImportModal
@@ -1350,13 +1354,35 @@ export default function App() {
             language={language}
           />
         )}
+
+        {/* The sign-in dialog must be mounted HERE as well.
+            This branch returns before the studio tree, so the copy further down
+            the component (which is inside that tree) never rendered for a guest
+            — the header button set `showAuthModal` and nothing happened, on any
+            screen size. Both branches now mount it exactly once. */}
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={showAuthModal}
+            onClose={() => {
+              setShowAuthModal(false);
+              setAuthError(null);
+            }}
+            language={language}
+            errorCode={authError}
+          />
+        </Suspense>
       </>
     );
   }
 
   // ── Gate: nobody reaches the studio without a session ─────────────────────
-
-  // ── Gate: nobody reaches the studio without a session ─────────────────────
+  // WHY THIS BLOCK IS SKIPPED FOR GUESTS: the rail's "تسجيل الدخول" row lives in
+  // the sidebar, and the sidebar only renders inside the branch below, which is
+  // guarded by `authUser`. A signed-out visitor therefore never saw that row —
+  // the sign-in affordance existed only in the markup, which is why clicking it
+  // did nothing on any screen size. Guests get AuthGate below, which owns the
+  // same action, so this early return is correct; the sidebar copy is a
+  // convenience for a session that expired mid-session.
   // While /api/auth/me is in flight we show a neutral splash rather than the
   // gate, otherwise a signed-in user would see the login wall flash. It is
   // deadline-bounded (see AUTH_WATCHDOG_MS) and can never stay on screen.
@@ -1673,17 +1699,7 @@ export default function App() {
           />
         )}
 
-        {/* Google / GitHub sign-in modal */}
-        <AuthModal
-          isOpen={showAuthModal}
-          onClose={() => {
-            setShowAuthModal(false);
-            setAuthError(null);
-          }}
-          language={language}
-          errorCode={authError}
-        />
-      </Suspense>
+        </Suspense>
 
       {/* Site pages: About / Contact / Privacy / Terms.
           Replaces the old floating WhatsApp bubble — the support number now

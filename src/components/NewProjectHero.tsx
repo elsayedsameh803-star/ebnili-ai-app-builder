@@ -9,7 +9,8 @@ import {
   Globe,
   Play,
   Crown,
-  Github
+  Github,
+  LogIn
 } from 'lucide-react';
 import { StarterTemplate, Language, UserSubscription } from '../types';
 import { STARTER_TEMPLATES } from '../data/templates';
@@ -23,6 +24,15 @@ interface NewProjectHeroProps {
   onOpenSubscription?: () => void;
   /** Opens the repository importer — a separate action from generating. */
   onOpenGitHubImport?: () => void;
+  /**
+   * Opens the sign-in dialog.
+   *
+   * WHY: a guest reaches this page, but the studio sidebar — the other place
+   * sign-in is offered — is only mounted once a session exists. Without this
+   * prop the visitor has no visible way to sign in until they fill in a prompt
+   * and press a button that then refuses and shows the gate.
+   */
+  onOpenAuth?: () => void;
 }
 
 export const NewProjectHero = ({
@@ -33,6 +43,7 @@ export const NewProjectHero = ({
   subscription,
   onOpenSubscription,
   onOpenGitHubImport,
+  onOpenAuth,
 }: NewProjectHeroProps) => {
   const [promptText, setPromptText] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -153,6 +164,20 @@ export const NewProjectHero = ({
             <Globe className="w-3.5 h-3.5" />
             <span>{language === 'ar' ? 'English' : 'العربية (RTL)'}</span>
           </button>
+
+          {/* Sign in — the one action a guest must always be able to reach.
+              It sits in the hero header because the studio rail that also
+              offers it only exists once a session does. */}
+          {onOpenAuth && (
+            <button
+              type="button"
+              onClick={onOpenAuth}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-900 hover:bg-slate-100 text-xs font-bold transition cursor-pointer shadow-sm"
+            >
+              <LogIn className="w-3.5 h-3.5 text-indigo-600" />
+              <span>{language === 'ar' ? 'تسجيل الدخول' : 'Sign in'}</span>
+            </button>
+          )}
         </div>
       </header>
 

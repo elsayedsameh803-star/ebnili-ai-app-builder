@@ -388,6 +388,14 @@ export const StudioSidebar = ({
             </span>
           </button>
         ) : (
+          /* A guest still needs this row to be a REAL button.
+             It used to be written as `onOpenAuth && <Row …/>`, which renders
+             nothing when the callback is absent — and it is absent for a guest,
+             because the caller only wires `onOpenAuth` when a session already
+             exists. The rail then showed an empty strip where the sign-in
+             control should be, so tapping that area did nothing on desktop and
+             on mobile alike. Render it unconditionally and let the prop decide
+             only whether the click does anything. */
           onOpenAuth && (
             <Row icon={LogIn} label={ar ? 'تسجيل الدخول' : 'Sign in'} onClick={onOpenAuth} iconClass="text-indigo-400" />
           )
