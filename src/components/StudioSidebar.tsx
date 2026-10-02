@@ -102,7 +102,14 @@ export interface StudioSidebarProps {
   onRenameStoredProject?: (id: string, name: string) => void;
 }
 
-/** One full-width row. The icon and the label can never fight for pixels. */
+/**
+ * One full-width row. The icon and the label can never fight for pixels.
+ *
+ * `active` renders the selected state and is the ONLY thing that turns the row
+ * into a toggle. `aria-pressed` is emitted only when `active` is defined — on a
+ * plain action button (New project, Publish, Export) a pressed/unpressed state
+ * has no meaning, and announcing one is worse than announcing nothing.
+ */
 const Row = ({
   icon: Icon,
   label,
@@ -110,25 +117,23 @@ const Row = ({
   onClick,
   active,
   iconClass = 'text-slate-400',
-  disabled,
   title,
 }: {
   icon: typeof Eye;
   label: string;
   hint?: string;
   onClick: () => void;
+  /** `undefined` = plain action, `true`/`false` = toggle button. */
   active?: boolean;
   iconClass?: string;
-  disabled?: boolean;
   title?: string;
 }) => (
   <button
     type="button"
     onClick={onClick}
-    disabled={disabled}
     title={title ?? label}
     aria-pressed={active}
-    className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition cursor-pointer text-start disabled:opacity-40 disabled:cursor-not-allowed ${
+    className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition cursor-pointer text-start ${
       active ? 'bg-slate-800 text-white shadow-xs' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
     }`}
   >

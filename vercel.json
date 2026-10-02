@@ -9,15 +9,10 @@
       "source": "/api/:path*",
       "destination": "/api/index"
     },
-    // ── SEO pages ──────────────────────────────────────────────────────
-    // These MUST come before the SPA fallback below. A rewrite matches on the
-    // request path only, so the SPA rule would otherwise swallow /pricing and
-    // hand the crawler the login shell — which is what kept the site out of
-    // Google. Pointing them at the real .html files lets the platform serve
-    // them as static content with the correct Content-Type.
     {
       "source": "/pricing",
-      "destination": "/pricing.html"
+      "destination": "/pricing.html",
+      "_comment": "SEO pages must precede the SPA fallback below. A rewrite matches on the request path only, so the SPA rule would otherwise swallow /pricing and hand the crawler the login shell — which is what kept the site out of Google."
     },
     {
       "source": "/pricing/",
