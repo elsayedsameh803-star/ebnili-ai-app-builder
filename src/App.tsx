@@ -1262,45 +1262,14 @@ export default function App() {
     setChatMessages((prev) => [...prev, assistantMsg]);
   };
 
-  if (!hasStarted) {
-    return (
-      <>
-        <NewProjectHero
-          onStartProject={handleStartProject}
-          isGenerating={isGenerating}
-          language={language}
-          onToggleLanguage={() => setLanguage((l) => (l === 'ar' ? 'en' : 'ar'))}
-          subscription={subscription}
-          onOpenSubscription={() => setShowSubscription(true)}
-          onOpenGitHubImport={() => setShowGitHubImport(true)}
-        />
-        {showGitHubImport && (
-          <GitHubImportModal
-            onClose={() => {
-              setShowGitHubImport(false);
-              // Clear the failure so it does not reappear next time the dialog opens.
-              setGitHubLinkError(null);
-            }}
-            language={language}
-            onImported={handleGitHubImported}
-            initialError={gitHubLinkError}
-          />
-        )}
-        {showSubscription && (
-          <SubscriptionModal
-            currentSubscription={subscription}
-            onClose={() => setShowSubscription(false)}
-            onSubscriptionUpdated={(newSub) => setSubscription(newSub)}
-            language={language}
-          />
-        )}
-      </>
-    );
-  }
-
   // ── Public routes: /pricing, /pay and /404 ──────────────────────────────────
-  // Rendered above the auth gate so a visitor can read the prices and pay
-  // without an account; the studio itself still requires a session.
+  // Rendered ABOVE the auth gate and ABOVE the `!hasStarted` hero check, so a
+  // visitor can read the prices and pay without an account.
+  //
+  // ORDER MATTERS: this block used to sit below `if (!hasStarted)`, which meant
+  // a cold visit to /pricing rendered the marketing hero instead of the price
+  // list — Google fetched a page whose entire body was the hero. Both the route
+  // table and the `!hasStarted` early return are below it now.
   const { path, params } = currentRoute();
   const navigate = (to: string) => {
     window.history.pushState({}, '', to);
@@ -1346,6 +1315,46 @@ export default function App() {
       </Suspense>
     );
   }
+// ── Marketing hero — a guest's landing view, and the only crawlable page
+  //    carrying real marketing copy. It MUST stay below the public-route checks
+  //    above, or a cold visit to /pricing would render this instead of the prices.
+  if (!hasStarted) {
+    return (
+      <>
+        <NewProjectHero
+          onStartProject={handleStartProject}
+          isGenerating={isGenerating}
+          language={language}
+          onToggleLanguage={() => setLanguage((l) => (l === 'ar' ? 'en' : 'ar'))}
+          subscription={subscription}
+          onOpenSubscription={() => setShowSubscription(true)}
+          onOpenGitHubImport={() => setShowGitHubImport(true)}
+        />
+        {showGitHubImport && (
+          <GitHubImportModal
+            onClose={() => {
+              setShowGitHubImport(false);
+              // Clear the failure so it does not reappear next time the dialog opens.
+              setGitHubLinkError(null);
+            }}
+            language={language}
+            onImported={handleGitHubImported}
+            initialError={gitHubLinkError}
+          />
+        )}
+        {showSubscription && (
+          <SubscriptionModal
+            currentSubscription={subscription}
+            onClose={() => setShowSubscription(false)}
+            onSubscriptionUpdated={(newSub) => setSubscription(newSub)}
+            language={language}
+          />
+        )}
+      </>
+    );
+  }
+
+  // ── Gate: nobody reaches the studio without a session ─────────────────────
 
   // ── Gate: nobody reaches the studio without a session ─────────────────────
   // While /api/auth/me is in flight we show a neutral splash rather than the
