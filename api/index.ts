@@ -3028,6 +3028,13 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
 
   // Force the provider's consent screen into English so it matches the app,
   // instead of inheriting the browser's locale.
+  //
+  // `prompt=select_account` is what makes "تغيير الحساب" actually work: without
+  // it Google silently re-authorises the account that is already signed in, so
+  // the user picks the same identity and appears to be back where they started.
+  // GitHub has no equivalent parameter — it reuses its own session cookie — so
+  // `allow_signup` is the most we can ask for, and the account menu also offers
+  // an explicit sign-out for the GitHub case.
   if (provider === "google") {
     url.searchParams.set("prompt", "select_account");
     url.searchParams.set("hl", "en");

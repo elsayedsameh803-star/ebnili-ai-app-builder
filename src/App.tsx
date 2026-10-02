@@ -1754,6 +1754,25 @@ export default function App() {
           }}
         />
       )}
+
+      {/* The sign-in dialog, mounted in the STUDIO tree as well.
+          It was mounted only in the guest branch above, so every signed-in
+          control that sets `showAuthModal` — the rail's "تسجيل الدخول" row and
+          the account panel's "تغيير الحساب" — flipped the flag and rendered
+          nothing, on any screen size. This is the same unreachable-modal class
+          of bug fixed for guests in 72eedbe; the signed-in side was missed.
+          Both branches mount it exactly once. */}
+      <Suspense fallback={null}>
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => {
+            setShowAuthModal(false);
+            setAuthError(null);
+          }}
+          language={language}
+          errorCode={authError}
+        />
+      </Suspense>
     </div>
   );
 }
