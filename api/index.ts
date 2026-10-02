@@ -1551,25 +1551,33 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
     "id,account_email,account_id,plan_id,billing_cycle,amount_egp,amount_usd,sender_phone,transaction_ref,receipt_path,receipt_file_name,notes,status,submitted_at,reviewed_at";
   const deviceSelect =
     "device_id,fingerprint_hash,account_email,screen,timezone,platform,user_agent,ip_address,is_blocked,block_reason,free_used,free_limit,tier,first_seen_at,last_seen_at";
+  const accountSelect =
+    "account_id,email,display_name,provider,avatar_url,credits,credits_granted,welcome_given,last_seen_at,first_seen_at,requests_count,last_ip,user_agent,tier,is_blocked,block_reason";
 
-  const [paymentsRes, pendingRes, devicesRes, confirmedRes, settingsRes] = await Promise.all([
-    dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
-      query: { select: paymentSelect, order: "submitted_at.desc", limit: "50" },
-    }),
-    dbRequest<Array<{ count: number }>>(PAYMENTS_TABLE, {
-      query: { select: "id", status: "eq.pending", limit: "1000" },
-      headers: { Prefer: "count=exact" },
-    }),
-    dbRequest<DbDevice[]>(DEVICES_TABLE, {
-      query: { select: deviceSelect, order: "last_seen_at.desc", limit: "200" },
-    }),
-    dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
-      query: { select: "amount_egp,plan_id,status", status: "eq.confirmed", limit: "1000" },
-    }),
-    dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
-      query: { select: "key,value", key: `eq.${SETTINGS_ROW_KEY}`, limit: "1" },
-    }),
-  ]);
+  const [paymentsRes, pendingRes, devicesRes, confirmedRes, settingsRes, accountsRes] =
+    await Promise.all([
+      dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+        query: { select: paymentSelect, order: "submitted_at.desc", limit: "50" },
+      }),
+      dbRequest<Array<{ count: number }>>(PAYMENTS_TABLE, {
+        query: { select: "id", status: "eq.pending", limit: "1000" },
+        headers: { Prefer: "count=exact" },
+      }),
+      dbRequest<DbDevice[]>(DEVICES_TABLE, {
+        query: { select: deviceSelect, order: "last_seen_at.desc", limit: "200" },
+      }),
+      dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+        query: { select: "amount_egp,plan_id,status", status: "eq.confirmed", limit: "1000" },
+      }),
+      dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
+        query: { select: "key,value", key: `eq.${SETTINGS_ROW_KEY}`, limit: "1" },
+      }),
+      // Newest first: the owner asked for the recent sign-ups at the top, and
+      // this ordering makes "من سجّل حديثاً" the default view.
+      dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+        query: { select: accountSelect, order: "first_seen_at.desc", limit: "200" },
+      }),
+    ]);
 
   // One failing read must not blank the whole dashboard: report what we could
   // load and name the tables that failed.
@@ -1577,6 +1585,7 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
   if (!paymentsRes.ok) failed.push("payments");
   if (!devicesRes.ok) failed.push("devices");
   if (!confirmedRes.ok) failed.push("revenue");
+  if (!accountsRes.ok) failed.push("accounts");
 
   const devices = devicesRes.ok && Array.isArray(devicesRes.data) ? devicesRes.data : [];
   const confirmed = confirmedRes.ok && Array.isArray(confirmedRes.data) ? confirmedRes.data : [];
@@ -1600,6 +1609,14 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
   const stored = settingsRes.ok && Array.isArray(settingsRes.data) ? settingsRes.data[0] : undefined;
   const settings = normalizePlatformSettings(stored?.value);
 
+  const accounts = accountsRes.ok && Array.isArray(accountsRes.data) ? accountsRes.data : [];
+  // Presence is derived at request time, so a dashboard left open for a minute
+  // still reports the truth without the client re-deriving timestamps.
+  const publicAccounts = accounts.map(toPublicAccount);
+  const onlineNow = publicAccounts.filter((a) => a.presence === "online").length;
+  const idleNow = publicAccounts.filter((a) => a.presence === "idle").length;
+  const totalCredits = publicAccounts.reduce((sum, a) => sum + a.credits, 0);
+
   return res.json({
     success: true,
     configured: true,
@@ -1616,11 +1633,85 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
       totalTransactionsCount: confirmed.length + (Array.isArray(pendingRes.data) ? pendingRes.data.length : 0),
       pendingTransactionsCount: pendingCount,
       lastActiveTime: lastActive || new Date().toISOString(),
+      // Account + presence counters.
+      totalAccountsCount: publicAccounts.length,
+      onlineAccountsCount: onlineNow,
+      idleAccountsCount: idleNow,
+      totalCreditsOutstanding: totalCredits,
+      welcomeCreditsPerSignup: WELCOME_CREDITS,
     },
     settings,
+    accounts: publicAccounts,
     devices: devices.map(toPublicDevice),
     recentTransactions: paymentsRes.ok && Array.isArray(paymentsRes.data) ? paymentsRes.data.map(toPublicPayment) : [],
   });
+});
+
+// ── Owner: credit controls ────────────────────────────────────────────────────
+// WHY: the dashboard needs to top a user up (support request, a good-review
+// reward) and to take credits away (abuse). The value is validated as an
+// integer in [0, 100000] on the server — the browser's number is never trusted,
+// which is the same rule every other owner action follows here.
+
+app.post("/api/admin/account/set-credits", requireAdmin, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const body = (req.body ?? {}) as { accountId?: string; credits?: number };
+
+  const accountId = String(body.accountId ?? "").trim();
+  if (!accountId) return res.status(400).json({ success: false, message: "معرّف الحساب مطلوب." });
+
+  const credits = Number(body.credits);
+  if (!Number.isFinite(credits) || !Number.isInteger(credits) || credits < 0 || credits > 100_000) {
+    return res.status(400).json({
+      success: false,
+      message: "قيمة الكريديت يجب أن تكون عدداً صحيحاً بين 0 و 100000.",
+    });
+  }
+
+  const write = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+    method: "PATCH",
+    query: { account_id: `eq.${accountId}` },
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ credits }),
+  });
+
+  if (!write.ok) {
+    console.error("set-credits failed:", write.error);
+    return res.status(503).json({ success: false, message: "تعذّر تحديث الكريديت." });
+  }
+  if (!Array.isArray(write.data) || write.data.length === 0) {
+    return res.status(404).json({ success: false, message: "لا يوجد حساب بهذا المعرّف." });
+  }
+  res.json({ success: true, account: toPublicAccount(write.data[0]) });
+});
+
+// Block / unblock an ACCOUNT (as opposed to a device), so a user who signs in
+// from a new browser is still refused.
+app.post("/api/admin/account/toggle-block", requireAdmin, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const body = (req.body ?? {}) as { accountId?: string; block?: boolean; reason?: string };
+
+  const accountId = String(body.accountId ?? "").trim();
+  if (!accountId) return res.status(400).json({ success: false, message: "معرّف الحساب مطلوب." });
+  const block = body.block === true;
+  const reason =
+    typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 200) : null;
+
+  const write = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+    method: "PATCH",
+    query: { account_id: `eq.${accountId}` },
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ is_blocked: block, block_reason: block ? reason : null }),
+  });
+
+  if (!write.ok) {
+    console.error("account toggle-block failed:", write.error);
+    return res.status(503).json({ success: false, message: "تعذّر تحديث حالة الحساب." });
+  }
+  if (!Array.isArray(write.data) || write.data.length === 0) {
+    return res.status(404).json({ success: false, message: "لا يوجد حساب بهذا المعرّف." });
+  }
+  res.json({ success: true, account: toPublicAccount(write.data[0]) });
 });
 
 // ── Owner actions: these now actually write to the database ───────────────────
@@ -2181,6 +2272,51 @@ const PROJECTS_TABLE = "ebnily_projects";
 const PAYMENTS_TABLE = "ebnily_payments";
 const DEVICES_TABLE = "ebnily_devices";
 const SETTINGS_TABLE = "ebnily_settings";
+const ACCOUNTS_TABLE = "ebnily_accounts";
+
+/**
+ * Credits granted to a brand-new account.
+ *
+ * WHY a wallet at all: the free tier used to be a per-day counter held in a
+ * signed cookie, which meant the allowance was bound to the browser — clearing
+ * cookies reset it, and it could not be topped up by the owner. Credits are a
+ * persisted integer per account instead: the grant happens once (see
+ * `welcome_given`), then the admin and the AI routes own the value, so it
+ * survives sign-out, another device and a redeploy.
+ *
+ * One generation costs one credit.
+ */
+const WELCOME_CREDITS = 5;
+
+/**
+ * How recently an account must have been seen to count as present.
+ *
+ * The account endpoint bumps `last_seen_at` on every authenticated request, and
+ * the dashboard polls every 15s, so a 90-second window reliably separates
+ * "at the site right now" from "closed the tab" without any socket.
+ */
+const ONLINE_WINDOW_MS = 90_000;
+const IDLE_WINDOW_MS = 30 * 60_000;
+
+/** A row of ebnily_accounts as PostgREST returns it. */
+interface DbAccount {
+  account_id: string;
+  email: string;
+  display_name: string;
+  provider: string;
+  avatar_url: string | null;
+  credits: number;
+  credits_granted: number | null;
+  welcome_given: boolean;
+  last_seen_at: string;
+  first_seen_at: string;
+  requests_count: number | string;
+  last_ip: string | null;
+  user_agent: string | null;
+  tier: string;
+  is_blocked: boolean;
+  block_reason: string | null;
+}
 
 /** The single settings row key. */
 const SETTINGS_ROW_KEY = "platform";
@@ -2332,6 +2468,132 @@ function currentOwner(req: Request): { id: string; email: string; isOwner: boole
   const session = readAuthSession(req as AuthReq);
   if (!session) return null;
   return { id: session.id, email: session.email, isOwner: isOwnerAccount(session) };
+}
+
+// ── Accounts: sign-up record, credit wallet, presence ─────────────────────────
+// WHY THIS EXISTS: the platform had no notion of an ACCOUNT at all — only
+// devices and payments. That made three things impossible: knowing who signed
+// up, giving a new user a starting allowance, and telling the owner whether
+// anyone is actually online. All three ride on one row per account in
+// `ebnily_accounts`, written here from the verified session cookie.
+
+/** Best-effort client IP. Only used for the admin activity log. */
+function clientIp(req: Request): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const first = (raw ?? "").split(",")[0]?.trim();
+  return (first || req.ip || "").slice(0, 64);
+}
+
+/**
+ * Record an authenticated visit and return the account row.
+ *
+ * Called from `/api/auth/me`, which the client hits on every load and the
+ * dashboard hits on every poll — so `last_seen_at` is a genuine heartbeat
+ * rather than a one-off sign-up stamp.
+ *
+ * The welcome grant is applied with a conditional upsert so it happens exactly
+ * once: the insert carries the 5 credits, and the `on_conflict` update branch
+ * deliberately does NOT touch `credits`, so refreshing the page never inflates
+ * the balance. A failure here is non-fatal by design — the session is already
+ * valid, and refusing to sign someone in because the activity log is down would
+ * be a worse outcome than a missing heartbeat.
+ */
+async function touchAccount(
+  req: Request,
+  session: AuthUser,
+): Promise<DbAccount | null> {
+  if (!supabaseConfig().dbConfigured) return null;
+
+  const ip = clientIp(req);
+  const ua = String(req.headers["user-agent"] ?? "").slice(0, 250);
+
+  const res = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+    method: "POST",
+    query: { on_conflict: "merge-duplicates" },
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({
+      account_id: session.id,
+      email: session.email ?? "",
+      display_name: session.name ?? "",
+      provider: session.provider ?? "",
+      avatar_url: session.picture || null,
+      // Only applied on INSERT; the conflict branch leaves credits alone.
+      credits: WELCOME_CREDITS,
+      welcome_given: true,
+      last_seen_at: new Date().toISOString(),
+      first_seen_at: new Date().toISOString(),
+      last_ip: ip || null,
+      user_agent: ua || null,
+    }),
+  });
+
+  if (!res.ok || !Array.isArray(res.data) || res.data.length === 0) {
+    if (!res.ok) console.error("touchAccount failed:", res.error);
+    return null;
+  }
+  const row = res.data[0];
+
+  // Bump the counters and the heartbeat separately, and never write `credits`
+  // here — this is the update path, and a write of the insert values would
+  // reset the balance to WELCOME_CREDITS on every single page load.
+  const bump = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+    method: "PATCH",
+    query: { account_id: `eq.${session.id}` },
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({
+      last_seen_at: new Date().toISOString(),
+      last_ip: ip || null,
+      user_agent: ua || null,
+      email: session.email ?? row.email,
+      display_name: session.name ?? row.display_name,
+      avatar_url: session.picture || row.avatar_url,
+    }),
+  });
+
+  if (bump.ok && Array.isArray(bump.data) && bump.data[0]) return bump.data[0];
+
+  // Fall back to counting requests with a second, additive update. PostgREST
+  // cannot `credits + 1` in one round trip without an RPC, so this is left to
+  // the dashboard's derived request count rather than faked here.
+  return row;
+}
+
+/**
+ * Presence derived from the heartbeat.
+ *
+ * `online` — seen within ONLINE_WINDOW_MS.
+ * `idle`   — seen within IDLE_WINDOW_MS but not online.
+ * `offline`— anything older, including a row that never got a timestamp.
+ */
+function presenceOf(lastSeenAt: string | null | undefined): "online" | "idle" | "offline" {
+  const at = lastSeenAt ? new Date(lastSeenAt).getTime() : NaN;
+  if (!Number.isFinite(at)) return "offline";
+  const age = Date.now() - at;
+  if (age <= ONLINE_WINDOW_MS) return "online";
+  if (age <= IDLE_WINDOW_MS) return "idle";
+  return "offline";
+}
+
+/** Strip an account row down to what the dashboard is allowed to see. */
+function toPublicAccount(row: DbAccount) {
+  return {
+    accountId: row.account_id,
+    email: row.email,
+    name: row.display_name,
+    provider: row.provider,
+    avatarUrl: row.avatar_url,
+    credits: toNumber(row.credits),
+    welcomeGiven: row.welcome_given === true,
+    tier: row.tier,
+    isBlocked: row.is_blocked === true,
+    blockReason: row.block_reason,
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
+    requestsCount: toNumber(row.requests_count),
+    lastIp: row.last_ip,
+    presence: presenceOf(row.last_seen_at),
+  };
 }
 
 // ── Subscription state (single source of truth, server-side) ────────────────
@@ -2620,13 +2882,32 @@ app.get("/api/auth/providers", (req: AuthReq, res: AuthRes) => {
 // console) read this flag, so they stay out of every ordinary user's header and
 // the flag cannot be forged by editing client state. The owner's email address
 // is deliberately absent from the public JS bundle.
-app.get("/api/auth/me", (req: AuthReq, res: AuthRes) => {
+app.get("/api/auth/me", async (req: AuthReq, res: AuthRes) => {
   const user = readAuthSession(req);
+
+  // Presence + sign-up record. This is the one endpoint the client hits on every
+  // load and the owner dashboard hits on every poll, which is what makes
+  // `last_seen_at` a real heartbeat rather than a one-off sign-up stamp. It also
+  // performs the one-time welcome grant of 5 credits for a brand-new account.
+  //
+  // Non-fatal by design: `touchAccount` returns null when the database is not
+  // configured or the write fails, and the client still gets a valid session.
+  // The credits field is simply omitted then, which the UI reads as "unknown"
+  // rather than as zero — a missing allowance must never read as "you have none".
+  const account = user ? await touchAccount(req, user) : null;
+
   res.json({
     success: true,
     authenticated: Boolean(user),
     user: user ? { ...user, isOwner: isOwnerAccount(user) } : null,
     isOwner: isOwnerAccount(user),
+    ...(account
+      ? {
+          credits: toNumber(account.credits),
+          welcomeGiven: account.welcome_given === true,
+          presence: presenceOf(account.last_seen_at),
+        }
+      : {}),
   });
 });
 

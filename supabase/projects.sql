@@ -134,3 +134,59 @@ values (
 )
 on conflict (key) do nothing;
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ACCOUNTS  (who signed up, what they were given, and whether they are here)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- WHY THIS EXISTS: the dashboard could only ever show devices and payments.
+-- There was no record of a signed-in ACCOUNT, so "who is using my site, which
+-- email registered, do they still have credits" had no answer at all. The
+-- session endpoint now upserts a row here on every authenticated request,
+-- which is what makes the users list, the credit balance and the online /
+-- last-active column possible.
+--
+-- ONE ROW PER ACCOUNT, keyed by the provider's user id. `credits` is the
+-- wallet: every new account is granted WELCOME_CREDITS on first sight and the
+-- value is then owned by the admin (set-credits) and by the AI routes, so a
+-- grant survives a redeploy instead of living in a cookie.
+
+create table if not exists public.ebnily_accounts (
+  account_id       text primary key,
+  email            text        not null default '',
+  display_name     text        not null default '',
+  provider         text        not null default '',
+  avatar_url       text,
+
+  -- Credit wallet. `null` in credits_granted means "never topped up", which
+  -- keeps the first-grant logic idempotent without a second column.
+  credits          integer     not null default 0,
+  credits_granted  integer,
+  welcome_given    boolean     not null default false,
+
+  -- Activity. `last_seen_at` is bumped on every authenticated request, so the
+  -- dashboard can derive online / idle / offline from it alone.
+  last_seen_at     timestamptz not null default now(),
+  first_seen_at    timestamptz not null default now(),
+  requests_count   bigint      not null default 0,
+  last_ip          text,
+  user_agent       text,
+
+  tier             text        not null default 'free'
+                     check (tier in ('free','pro','business')),
+  is_blocked       boolean     not null default false,
+  block_reason     text
+);
+
+-- The dashboard sorts by newest and by last activity.
+create index if not exists ebnily_accounts_first_seen_idx
+  on public.ebnily_accounts (first_seen_at desc);
+
+create index if not exists ebnily_accounts_last_seen_idx
+  on public.ebnily_accounts (last_seen_at desc);
+
+create index if not exists ebnily_accounts_email_idx
+  on public.ebnily_accounts (email);
+
+alter table public.ebnily_accounts enable row level security;
+
+revoke all on public.ebnily_accounts from anon, authenticated;
+

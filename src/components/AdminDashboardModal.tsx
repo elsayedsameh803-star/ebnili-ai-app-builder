@@ -14,7 +14,12 @@ import {
   Smartphone,
   DollarSign,
   TrendingUp,
-  Ban
+  Ban,
+  // Users tab: accounts, their credit wallet, and the live presence dot.
+  Users,
+  User,
+  Coins,
+  Loader2
 } from 'lucide-react';
 import { Language, PlatformRealStats, AdminSettings, DeviceProtectionInfo, OrangeCashTransaction } from '../types';
 import { useModalAccessibility } from './useModalAccessibility';
@@ -137,6 +142,67 @@ const normalizeStats = (value: unknown): PlatformRealStats => {
   };
 };
 
+/**
+ * A signed-in account as the server reports it.
+ *
+ * `presence` is computed server-side from the heartbeat rather than in the
+ * browser, so the value is the same for every reader and does not drift between
+ * the owner's screen and the database.
+ */
+interface AdminAccount {
+  accountId: string;
+  email: string;
+  name: string;
+  provider: string;
+  avatarUrl: string | null;
+  credits: number;
+  welcomeGiven: boolean;
+  tier: string;
+  isBlocked: boolean;
+  blockReason: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  requestsCount: number;
+  lastIp: string | null;
+  presence: 'online' | 'idle' | 'offline';
+}
+
+const normalizeAccounts = (value: unknown): AdminAccount[] => {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((row, index) => ({
+    accountId: toText(row.accountId, `account-${index}`),
+    email: toText(row.email),
+    name: toText(row.name),
+    provider: toText(row.provider),
+    avatarUrl: toText(row.avatarUrl) || null,
+    credits: toFiniteNumber(row.credits, 0),
+    welcomeGiven: row.welcomeGiven === true,
+    tier: toText(row.tier, 'free'),
+    isBlocked: row.isBlocked === true,
+    blockReason: toText(row.blockReason) || null,
+    firstSeenAt: toText(row.firstSeenAt),
+    lastSeenAt: toText(row.lastSeenAt),
+    requestsCount: toFiniteNumber(row.requestsCount, 0),
+    lastIp: toText(row.lastIp) || null,
+    presence:
+      row.presence === 'online' || row.presence === 'idle' ? row.presence : 'offline',
+  }));
+};
+
+/** "منذ 3 دقائق" — the accounts list is a recency list. */
+function relativeTime(iso: string, ar: boolean): string {
+  const at = new Date(iso).getTime();
+  if (!Number.isFinite(at)) return '—';
+  const mins = Math.max(0, Math.round((Date.now() - at) / 60000));
+  if (mins < 1) return ar ? 'الآن' : 'now';
+  if (mins < 60) return ar ? `منذ ${mins} د` : `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return ar ? `منذ ${hours} س` : `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return ar ? `منذ ${days} يوم` : `${days}d ago`;
+  return new Date(iso).toLocaleDateString(ar ? 'ar-EG' : 'en-GB');
+}
+
 
 export const AdminDashboardModal = ({
   isOpen,
@@ -154,7 +220,7 @@ export const AdminDashboardModal = ({
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // Admin Data State
-  const [activeTab, setActiveTab] = useState<'overview' | 'devices' | 'transactions' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'devices' | 'transactions' | 'settings'>('overview');
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isDataReady, setIsDataReady] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -165,6 +231,25 @@ export const AdminDashboardModal = ({
   // Always render from a fully-populated object. Never access an optional or
   // stale settings value directly from JSX.
   const settings = normalizeAdminSettings(settingsState, DEFAULT_ADMIN_SETTINGS);
+
+  /**
+   * Accounts + their presence.
+   *
+   * WHY a separate poll: presence is only true while someone is actually
+   * generating a heartbeat, so a single load would show every account as frozen
+   * at the moment the modal opened. Refreshing the overview on a timer keeps the
+   * online/offline column honest while the owner is watching it.
+   */
+  const [accounts, setAccounts] = useState<AdminAccount[]>([]);
+  const [accountStats, setAccountStats] = useState({
+    total: 0,
+    online: 0,
+    idle: 0,
+    credits: 0,
+    welcomePerSignup: 5,
+  });
+  /** Accounts currently being written to, so one row cannot be double-clicked. */
+  const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
 
 
   const [devices, setDevices] = useState<DeviceProtectionInfo[]>([]);
@@ -235,6 +320,27 @@ export const AdminDashboardModal = ({
         setSettings((prev) => normalizeAdminSettings(data.settings, prev));
         setDevices(normalizeDevices(data.devices));
         setTransactions(normalizeTransactions(data.recentTransactions));
+        // Accounts + presence. `accounts` is absent on a deployment that has not
+        // run the accounts half of the SQL yet, so this normalizes to [] rather
+        // than throwing — the Users tab then says "run the SQL" instead of the
+        // whole dashboard failing.
+        setAccounts(normalizeAccounts(data.accounts));
+        setAccountStats({
+          total: toFiniteNumber(
+            isRecord(data.stats) ? data.stats.totalAccountsCount : 0,
+            normalizeAccounts(data.accounts).length,
+          ),
+          online: toFiniteNumber(isRecord(data.stats) ? data.stats.onlineAccountsCount : 0, 0),
+          idle: toFiniteNumber(isRecord(data.stats) ? data.stats.idleAccountsCount : 0, 0),
+          credits: toFiniteNumber(
+            isRecord(data.stats) ? data.stats.totalCreditsOutstanding : 0,
+            0,
+          ),
+          welcomePerSignup: toFiniteNumber(
+            isRecord(data.stats) ? data.stats.welcomeCreditsPerSignup : 0,
+            5,
+          ),
+        });
         setIsDataReady(true);
         setIsAuthenticated(true);
       } catch (err: unknown) {
@@ -264,6 +370,143 @@ export const AdminDashboardModal = ({
       if (timer !== undefined) clearTimeout(timer);
     };
   }, [isOpen]);
+
+  /**
+   * Keep presence live while the dashboard is open.
+   *
+   * 15s is deliberately shorter than the server's 90s online window: an account
+   * that closes its tab must visibly drop to "offline" within a minute or two,
+   * and a stale green dot is worse than no dot at all. This is the ONLY place
+   * the overview is re-fetched — nothing else in the modal depends on it, and a
+   * failed tick is ignored so a transient network blip never blanks the table.
+   */
+  useEffect(() => {
+    if (!isOpen || !isAuthenticated) return;
+    let cancelled = false;
+
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/admin/overview', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const data: unknown = await res.json().catch(() => null);
+        if (cancelled || !isRecord(data) || data.success !== true) return;
+        setAccounts(normalizeAccounts(data.accounts));
+        if (isRecord(data.stats)) {
+          setAccountStats((prev) => ({
+            ...prev,
+            total: toFiniteNumber(data.stats.totalAccountsCount, prev.total),
+            online: toFiniteNumber(data.stats.onlineAccountsCount, 0),
+            idle: toFiniteNumber(data.stats.idleAccountsCount, 0),
+            credits: toFiniteNumber(data.stats.totalCreditsOutstanding, 0),
+            welcomePerSignup: toFiniteNumber(data.stats.welcomeCreditsPerSignup, prev.welcomePerSignup),
+          }));
+        }
+      } catch {
+        /* a dropped poll must never interrupt the owner's session */
+      }
+    };
+
+    const id = setInterval(() => void tick(), 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [isOpen, isAuthenticated]);
+
+  /**
+   * Write to one account and fold the server's answer back into the list.
+   *
+   * WHY the response is trusted over the local value: the server clamps and
+   * validates the number, so echoing what it returns is what keeps the table
+   * honest after a rejected write. `busyAccountId` disables the row for the
+   * duration so a double-click cannot fire two conflicting writes.
+   */
+  const mutateAccount = useCallback(
+    async (
+      path: '/api/admin/account/set-credits' | '/api/admin/account/toggle-block',
+      body: Record<string, unknown>,
+    ) => {
+      const accountId = String(body.accountId ?? '');
+      setBusyAccountId(accountId);
+      try {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data: unknown = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const message = isRecord(data) ? toText(data.message) : '';
+          setActionSuccessMessage(message || 'تعذّر تنفيذ العملية.');
+          return;
+        }
+        const updated = isRecord(data) && isRecord(data.account) ? normalizeAccounts([data.account])[0] : null;
+        if (updated) {
+          // Recompute the outstanding total from the list itself rather than
+          // trying to apply a delta: `accounts` already holds every row, so the
+          // sum is exact and cannot drift from what the table shows.
+          setAccounts((prev) => {
+            const next = prev.map((a) => (a.accountId === updated.accountId ? updated : a));
+            setAccountStats((p) => ({
+              ...p,
+              total: next.length,
+              credits: next.reduce((sum, a) => sum + a.credits, 0),
+            }));
+            return next;
+          });
+        }
+        setActionSuccessMessage(null);
+      } catch {
+        setActionSuccessMessage('تعذّر الاتصال بالخادم.');
+      } finally {
+        setBusyAccountId(null);
+      }
+    },
+    [],
+  );
+
+  /** Grant or remove credits through a validated prompt. */
+  const handleSetCredits = useCallback(
+    (account: AdminAccount) => {
+      const raw = window.prompt(
+        `عدد الكريديت للحساب ${account.email || account.name || account.accountId}`,
+        String(account.credits),
+      );
+      if (raw === null) return;
+      const value = Number(raw.trim());
+      if (!Number.isInteger(value) || value < 0 || value > 100000) {
+        setActionSuccessMessage('أدخل عدداً صحيحاً بين 0 و 100000.');
+        return;
+      }
+      void mutateAccount('/api/admin/account/set-credits', { accountId: account.accountId, credits: value });
+    },
+    [mutateAccount],
+  );
+
+  const handleToggleAccountBlock = useCallback(
+    (account: AdminAccount) => {
+      const next = !account.isBlocked;
+      if (next) {
+        const reason = window.prompt(`سبب حظر ${account.email || account.name}`, 'مخالفة الشروط');
+        if (reason === null) return;
+        void mutateAccount('/api/admin/account/toggle-block', {
+          accountId: account.accountId,
+          block: true,
+          reason,
+        });
+        return;
+      }
+      void mutateAccount('/api/admin/account/toggle-block', {
+        accountId: account.accountId,
+        block: false,
+      });
+    },
+    [mutateAccount],
+  );
 
   const handleLogin = async (e: import('react').FormEvent) => {
     e.preventDefault();
@@ -677,6 +920,24 @@ export const AdminDashboardModal = ({
               </button>
 
               <button
+                onClick={() => setActiveTab('users')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  activeTab === 'users'
+                    ? 'bg-rose-500 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>المستخدمون</span>
+                {accountStats.online > 0 && (
+                  <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    {accountStats.online}
+                  </span>
+                )}
+              </button>
+
+              <button
                 onClick={() => setActiveTab('devices')}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
                   activeTab === 'devices'
@@ -842,7 +1103,171 @@ export const AdminDashboardModal = ({
                 </div>
               )}
 
-              {/* TAB 2: DEVICES */}
+              {/* TAB: USERS — sign-ups, credits, and live presence.
+
+              The owner's three questions in one place: who registered (most
+              recent first), how many credits each one holds, and who is on the
+              site right now. Presence is a server-derived field, so the dot
+              cannot be stale relative to the database. */}
+              {activeTab === 'users' && (
+                <div className="space-y-4 animate-fadeIn">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {(
+                      [
+                        { label: 'إجمالي الحسابات', value: accountStats.total, tone: 'text-white' },
+                        { label: 'متصل الآن', value: accountStats.online, tone: 'text-emerald-400' },
+                        { label: 'غير نشط', value: accountStats.idle, tone: 'text-amber-400' },
+                        { label: 'إجمالي الكريديت', value: accountStats.credits, tone: 'text-orange-400' },
+                      ] as const
+                    ).map((card) => (
+                      <div key={card.label} className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3">
+                        <div className="text-[10px] font-bold text-slate-500 mb-1">{card.label}</div>
+                        <div className={`text-xl font-black font-mono ${card.tone}`}>{card.value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    كل حساب جديد يُمنح {accountStats.welcomePerSignup} كريديت تلقائياً عند أول تسجيل
+                    دخول. الكريديت محفوظ في قاعدة البيانات ولا يُفقد بتغيير الجهاز أو تسجيل الخروج.
+                    حالة الاتصال تُحدَّث كل 15 ثانية.
+                  </p>
+
+                  {accounts.length === 0 ? (
+                    <div className="py-16 text-center border border-dashed border-slate-800 rounded-xl">
+                      <Users className="w-10 h-10 mx-auto text-slate-700 mb-3" />
+                      <p className="text-sm font-bold text-slate-300 mb-1">لا توجد حسابات مسجّلة بعد</p>
+                      <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+                        سيظهر كل مستخدم يسجّل الدخول هنا تلقائياً مع بريده ووقت تسجيله وعدد كريديته.
+                        إن استمر الفراغ بعد وجود مستخدمين، نفّذ الجزء الجديد من
+                        supabase/projects.sql في محرر Supabase.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {accounts.map((account) => {
+                        const busy = busyAccountId === account.accountId;
+                        const isOnline = account.presence === 'online';
+                        const isIdle = account.presence === 'idle';
+                        return (
+                          <div
+                            key={account.accountId}
+                            className={`flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-xl border transition ${
+                              account.isBlocked
+                                ? 'bg-rose-950/20 border-rose-500/30'
+                                : isOnline
+                                  ? 'bg-emerald-950/10 border-emerald-500/25'
+                                  : 'bg-slate-950/50 border-slate-800'
+                            }`}
+                          >
+                            {/* Presence dot + avatar */}
+                            <div className="flex items-center gap-3 min-w-0 sm:w-52 shrink-0">
+                              <span className="relative shrink-0">
+                                {account.avatarUrl ? (
+                                  <img
+                                    src={account.avatarUrl}
+                                    alt=""
+                                    referrerPolicy="no-referrer"
+                                    className="w-9 h-9 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center">
+                                    <User className="w-4 h-4 text-slate-500" />
+                                  </span>
+                                )}
+                                <span
+                                  title={isOnline ? 'متصل الآن' : isIdle ? 'غير نشط' : 'غير متصل'}
+                                  className={`absolute -bottom-0.5 -end-0.5 w-3 h-3 rounded-full border-2 border-slate-900 ${
+                                    isOnline ? 'bg-emerald-400' : isIdle ? 'bg-amber-400' : 'bg-slate-600'
+                                  }`}
+                                />
+                              </span>
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-100 truncate">
+                                  {account.name || 'مستخدم'}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate" dir="ltr" title={account.email}>
+                                  {account.email || '—'}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Credits — the wallet this row is about. */}
+                            <div className="flex items-center gap-2 sm:w-32 shrink-0">
+                              <span className="text-[10px] text-slate-500">كريديت</span>
+                              <span className="text-sm font-black font-mono text-orange-400">
+                                {account.credits}
+                              </span>
+                            </div>
+
+                            {/* Tier */}
+                            <div className="sm:w-24 shrink-0">
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                                  account.tier === 'free'
+                                    ? 'bg-slate-800 text-slate-400'
+                                    : account.tier === 'pro'
+                                      ? 'bg-orange-500/20 text-orange-300'
+                                      : 'bg-emerald-500/20 text-emerald-300'
+                                }`}
+                              >
+                                {account.tier}
+                              </span>
+                            </div>
+
+                            {/* When they joined, and when they were last here. */}
+                            <div className="text-[10px] text-slate-500 sm:flex-1 min-w-0">
+                              <span className="block">
+                                سجّل: {relativeTime(account.firstSeenAt, language === 'ar')}
+                              </span>
+                              <span className="block">
+                                آخر نشاط: {relativeTime(account.lastSeenAt, language === 'ar')}
+                                {account.lastIp ? ` · ${account.lastIp}` : ''}
+                              </span>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleSetCredits(account)}
+                                disabled={busy}
+                                title="منح أو تعديل الكريديت"
+                                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-orange-400 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {busy ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Coins className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAccountBlock(account)}
+                                disabled={busy}
+                                title={account.isBlocked ? 'إلغاء الحظر' : 'حظر الحساب'}
+                                className={`p-2 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                                  account.isBlocked
+                                    ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300'
+                                    : 'bg-slate-800 hover:bg-rose-500/20 text-rose-400'
+                                }`}
+                              >
+                                {account.isBlocked ? (
+                                  <ShieldCheck className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Ban className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB: DEVICES */}
               {activeTab === 'devices' && (
                 <div className="space-y-4 animate-fadeIn">
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
