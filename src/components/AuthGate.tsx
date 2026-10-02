@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Loader2, ShieldCheck, AlertCircle, Sparkles } from 'lucide-react';
+import { Loader2, ShieldCheck, AlertCircle, Sparkles, ServerCrash, RotateCw } from 'lucide-react';
 import { GoogleIcon, GitHubIcon } from './AuthIcons';
-import { fetchAuthProviders, fetchAuthCallbacks, getAuthErrorMessage, startOAuth } from '../lib/auth';
+import { fetchAuthCallbacks, getAuthErrorMessage, probeAuthRuntime, startOAuth } from '../lib/auth';
 import { SiteFooter } from './SiteFooter';
 import type { AuthProviderId, AuthProviderInfo, Language } from '../types';
 
@@ -31,21 +31,65 @@ export const AuthGate = ({ language, errorCode, onOpenInfoPage }: AuthGateProps)
   const [providers, setProviders] = useState<AuthProviderInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [callbacks, setCallbacks] = useState<{ google: string; github: string } | null>(null);
+  /**
+   * WHY THIS IS NOT JUST "no providers"
+   * -----------------------------------
+   * The screen used to decide "your OAuth keys are missing" purely from an empty
+   * provider list — and an empty list is ALSO what a failing server produces,
+   * because the fetch swallowed every error. That is how the owner was told to go
+   * and check GOOGLE_CLIENT_ID / GITHUB_CLIENT_SECRET when the secrets were
+   * already correct and the function was returning 500.
+   *
+   * These three states are now distinct and each one says something true:
+   *   • `null`                       — still asking
+   *   • 'unreachable'                — no response at all
+   *   • 'server'                     — the server answered with an error
+   *   • 'notConfigured'              — the server answered, and the keys are absent
+   */
+  const [probeError, setProbeError] = useState<'unreachable' | 'server' | 'notConfigured' | null>(null);
+  const [attempt, setAttempt] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
-    fetchAuthProviders().then((list) => {
-      if (cancelled) return;
-      setProviders(list.filter((p) => p.configured));
-      setIsLoading(false);
-    });
-    fetchAuthCallbacks().then((c) => {
-      if (!cancelled) setCallbacks(c);
-    });
+    setIsLoading(true);
+
+    probeAuthRuntime()
+      .then((result) => {
+        if (cancelled) return;
+        // Failures return first, so the success path below has no narrowing
+        // ambiguity about which half of the union it is holding.
+        if (result.status === 'failed') {
+          setProviders([]);
+          setCallbacks(null);
+          setProbeError(result.reason);
+          return;
+        }
+        setProviders(result.runtime.providers.filter((p) => p.configured));
+        // The callback URLs come from the SAME response, so they cannot
+        // describe a different server than the buttons above them.
+        setCallbacks(
+          result.runtime.callbackBase
+            ? {
+                google: `${result.runtime.callbackBase}/google`,
+                github: `${result.runtime.callbackBase}/github`,
+              }
+            : null,
+        );
+        setProbeError(result.runtime.providers.some((p) => p.configured) ? null : 'notConfigured');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProviders([]);
+        setProbeError('unreachable');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
   const isAr = language === 'ar';
   const t = {
@@ -57,10 +101,28 @@ export const AuthGate = ({ language, errorCode, onOpenInfoPage }: AuthGateProps)
     google: isAr ? 'المتابعة باستخدام Google' : 'Continue with Google',
     github: isAr ? 'المتابعة باستخدام GitHub' : 'Continue with GitHub',
     checking: isAr ? 'جارٍ التحقق من طرق الدخول…' : 'Checking sign-in options…',
-    notReady: isAr ? 'طرق الدخول غير مفعّلة بعد.' : 'Sign-in is not enabled yet.',
+
+    // ── Honest copy for each distinct failure ─────────────────────────────
+    // Each of these used to be the SAME panel telling the owner to go and check
+    // their client ids, even when the ids were fine and the server was down.
+    notReady: isAr ? 'طرق الدخول غير مفعّلة على الخادم.' : 'Sign-in is not enabled on the server.',
     notReadyHint: isAr
       ? 'أضف هذه المتغيّرات في Vercel ثم أعد النشر:'
       : 'Add these variables in Vercel, then redeploy:',
+    serverDown: isAr
+      ? 'تعذّر الوصول إلى خادم تسجيل الدخول. المفاتيح سليمة غالباً — المشكلة في الخادم.'
+      : 'Could not reach the sign-in server. Your keys are most likely fine — the server is not responding.',
+    serverDownHint: isAr
+      ? 'هذه رسالة من الخادم وليست مشكلة في مفاتيح Google أو GitHub. أعد المحاولة بعد قليل.'
+      : 'This is a server fault, not a Google or GitHub key problem. Try again shortly.',
+    offline: isAr
+      ? 'لا يوجد اتصال بالإنترنت.'
+      : 'You appear to be offline.',
+    offlineHint: isAr
+      ? 'اتصل بالإنترنت ثم أعد المحاولة.'
+      : 'Reconnect to the internet and try again.',
+    retry: isAr ? 'إعادة المحاولة' : 'Try again',
+    checking2: isAr ? 'جارٍ إعادة المحاولة…' : 'Retrying…',
     privacy: isAr
       ? 'لا نحفظ كلمة مرورك ولا نشارك بياناتك مع أي جهة.'
       : 'Your password is never stored, and your data is never shared.',
@@ -69,7 +131,7 @@ export const AuthGate = ({ language, errorCode, onOpenInfoPage }: AuthGateProps)
       : 'If you hit a redirect_uri error, make sure the callback URL is registered exactly as shown in Google or GitHub settings.',
   };
 
-  const COPY = { isAr, t, callbacks, errorCode, onOpenInfoPage };
+  const COPY = { isAr, t, callbacks, errorCode, onOpenInfoPage, probeError, retry: () => setAttempt((n) => n + 1) };
   return <AuthGateView {...COPY} providers={providers} isLoading={isLoading} />;
 };
 
@@ -79,6 +141,24 @@ type Copy = {
   callbacks: { google: string; github: string } | null;
   errorCode?: string | null;
   onOpenInfoPage?: (page: 'about' | 'contact' | 'privacy' | 'terms') => void;
+  /**
+   * WHY THIS IS NOT JUST "no providers"
+   * -----------------------------------
+   * The screen used to decide "your OAuth keys are missing" purely from an empty
+   * provider list — and an empty list is ALSO what a failing server produces,
+   * because the fetch swallowed every error. That is how the owner was sent off
+   * to regenerate GOOGLE_CLIENT_ID / GITHUB_CLIENT_SECRET secrets that were
+   * already correct, while the real fault was a function returning 500.
+   *
+   * These states are distinct, and each one says something true:
+   *   null           — still asking
+   *   'unreachable'  — no response at all
+   *   'server'       — the server answered with an error
+   *   'notConfigured'— the server answered, and the keys really are absent
+   */
+  probeError: 'unreachable' | 'server' | 'notConfigured' | null;
+  /** Re-runs the provider probe. */
+  retry: () => void;
 };
 
 /** Pure markup for the gate — split out to keep each piece readable. */
@@ -90,6 +170,8 @@ const AuthGateView = ({
   onOpenInfoPage,
   providers,
   isLoading,
+  probeError,
+  retry,
 }: Copy & {
   providers: AuthProviderInfo[];
   isLoading: boolean;
@@ -181,7 +263,36 @@ const AuthGateView = ({
                   </button>
                 ))}
               </div>
+            ) : probeError === 'unreachable' || probeError === 'server' ? (
+              /* ── The server could not answer ──────────────────────────────────
+                 This branch used to be unreachable: an empty provider list always
+                 fell through to the "check your client ids" panel below. That is
+                 why a broken API was reported as a credential problem, and why
+                 regenerating the GitHub secret changed nothing. A server fault is
+                 a red error with a retry — not an amber list of env var names. */
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-4 text-center">
+                <div className="flex items-start gap-2.5">
+                  <ServerCrash className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-rose-200 leading-relaxed">
+                      {probeError === 'unreachable' ? t.offline : t.serverDown}
+                    </p>
+                    <p className="mt-1.5 text-[11px] text-rose-200/80 leading-relaxed">
+                      {probeError === 'unreachable' ? t.offlineHint : t.serverDownHint}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={retry}
+                  disabled={isLoading}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-rose-400/30 bg-rose-500/15 px-3 py-1.5 text-[11px] font-bold text-rose-100 transition hover:bg-rose-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />}
+                  {isLoading ? t.checking2 : t.retry}
+                </button>
+              </div>
             ) : (
+              /* ── The server answered, and the keys genuinely are absent ─────── */
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-center">
                 <p className="text-[11px] text-amber-200 leading-relaxed">{t.notReady}</p>
                 <p className="mt-1.5 text-[11px] text-amber-200/80 leading-relaxed">{t.notReadyHint}</p>

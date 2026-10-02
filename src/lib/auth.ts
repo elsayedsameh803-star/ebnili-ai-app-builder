@@ -314,28 +314,76 @@ export interface AuthRuntime {
 }
 
 export async function fetchAuthRuntime(): Promise<AuthRuntime | null> {
+  const result = await probeAuthRuntime();
+  return result.status === 'ok' ? result.runtime : null;
+}
+
+/**
+ * The outcome of asking the server which sign-in providers exist.
+ *
+ * WHY THIS EXISTS — the UI was lying about the cause
+ * --------------------------------------------------
+ * `fetchAuthRuntime()` used to collapse every failure into `null`, and
+ * `fetchAuthProviders()` turned that into `[]`. The sign-in screen renders its
+ * "add GOOGLE_CLIENT_ID / GITHUB_CLIENT_SECRET in Vercel" panel whenever the
+ * provider list is EMPTY — so a dead server, a 500, a reverse-proxy timeout and
+ * a genuinely unconfigured deployment were all reported to the visitor as one
+ * and the same thing: "your keys are missing".
+ *
+ * That is how an owner ends up regenerating OAuth secrets that were correct all
+ * along, because the real fault was a failing function. The three outcomes are
+ * now distinct, and the UI can say which one happened.
+ */
+/**
+ * `reason` explains the two ways a probe can fail:
+ *   • `unreachable` — no usable HTTP response (offline, DNS, connection reset).
+ *   • `server`      — the server answered, and not with success.
+ *
+ * WHY A STRING AND NOT A BOOLEAN: this project compiles without
+ * `strictNullChecks`, and boolean-literal discriminants do not reliably narrow
+ * under that setting — `if (!result.ok)` kept BOTH union members alive and
+ * `result.reason` failed to typecheck. A string literal narrows unambiguously
+ * regardless of strictness.
+ */
+export type AuthProbe =
+  | { status: 'ok'; runtime: AuthRuntime }
+  | { status: 'failed'; reason: 'unreachable' | 'server'; httpStatus?: number };
+
+export async function probeAuthRuntime(): Promise<AuthProbe> {
   try {
-    const res = await fetch('/api/auth/providers');
-    if (!res.ok) return null;
+    const res = await fetch('/api/auth/providers', {
+      credentials: 'same-origin',
+      signal: AbortSignal.timeout ? AbortSignal.timeout(AUTH_INIT_TIMEOUT_MS) : undefined,
+    });
+    if (!res.ok) return { status: 'failed', reason: 'server', httpStatus: res.status };
     const data = (await res.json()) as {
       providers?: AuthProviderInfo[];
       baseUrl?: string;
       route?: 'supabase' | 'direct';
       callbackBase?: string;
     };
-    if (!Array.isArray(data.providers)) return null;
+    if (!Array.isArray(data.providers)) return { status: 'failed', reason: 'server' };
     return {
-      providers: data.providers,
-      baseUrl: data.baseUrl ?? '',
-      route: data.route ?? 'direct',
-      callbackBase: data.callbackBase ?? '',
+      status: 'ok',
+      runtime: {
+        providers: data.providers,
+        baseUrl: data.baseUrl ?? '',
+        route: data.route ?? 'direct',
+        callbackBase: data.callbackBase ?? '',
+      },
     };
   } catch {
-    return null;
+    return { status: 'failed', reason: 'unreachable' };
   }
 }
 
-/** Which providers the server has credentials for (hides the rest of the UI). */
+/**
+ * Which providers the server has credentials for (hides the rest of the UI).
+ *
+ * Prefer {@link probeAuthRuntime} wherever the difference between "no providers"
+ * and "could not ask" matters — collapsing the two is what produced the
+ * misleading "check your client id" screen.
+ */
 export async function fetchAuthProviders(): Promise<AuthProviderInfo[]> {
   const runtime = await fetchAuthRuntime();
   return runtime?.providers ?? [];
