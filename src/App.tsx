@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { Sparkles } from 'lucide-react';
-import { Header } from './components/Header';
+import { Sparkles, Menu, Eye, Code2 } from 'lucide-react';
+import { StudioSidebar } from './components/StudioSidebar';
 import { ChatSidebar } from './components/ChatSidebar';
 import { PreviewFrame } from './components/PreviewFrame';
 import { CodeEditor } from './components/CodeEditor';
@@ -200,6 +200,31 @@ export default function App() {
   // `null` until /api/auth/me answers, so the gate doesn't flash for a
   // returning user who already has a valid session cookie.
   const [authChecked, setAuthChecked] = useState<boolean>(false);
+
+  /**
+   * Mobile drawer state for the control rail.
+   *
+   * WHY it exists: the rail is a permanent 256px column on desktop, but on a
+   * phone that would leave almost nothing for the preview, so below `md` it
+   * slides over the workspace instead and this flag drives it.
+   */
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // While the drawer is open the page behind it must not scroll, otherwise a
+  // swipe scrolls the workspace and the rail appears frozen.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSidebarOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [sidebarOpen]);
   // Set when the session check could not complete. The studio still opens — a
   // failed identity lookup is not a reason to block the user; the error is
   // surfaced only when they actually try to use the engine.
@@ -1350,9 +1375,81 @@ export default function App() {
       }`}
       dir={language === 'ar' ? 'rtl' : 'ltr'}
     >
-      {/* Session probe notice — NON-BLOCKING. The studio is fully usable; we
-          only tell the user that identity could not be confirmed, so the first
-          AI request does not surprise them. */}
+      {/* ── Studio layout ────────────────────────────────────────────────
+          A horizontal flex row: the rail on one side, the workspace on the
+          other. The old shape was a full-width bar stacked above a row, which
+          is what forced thirteen controls into 56px of height.
+
+          On a phone the rail becomes an overlay drawer (`sidebarOpen`),
+          because a permanent 256px column would leave no room for a preview. */}
+      <div className="flex-1 min-h-0 flex overflow-hidden relative">
+        {/* The rail: static on desktop, slide-over on small screens. */}
+        <div
+          className={`${
+            sidebarOpen ? 'flex' : 'hidden'
+          } md:flex absolute md:static inset-y-0 start-0 z-40 shrink-0`}
+        >
+          <StudioSidebar
+            projectName={project.name}
+            // Renaming from the studio writes through to the database (or the
+            // on-device store for a guest), so the new name is still there after
+            // a sign-out, another device, or a reload.
+            onRenameProject={(newName) => {
+              setProject((p) => ({ ...p, name: newName }));
+              if (projectId) handleRenameStoredProject(projectId, newName);
+            }}
+            isGenerating={isGenerating}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            deviceMode={deviceMode}
+            onDeviceModeChange={setDeviceMode}
+            isInspectMode={isInspectMode}
+            onToggleInspectMode={() => setIsInspectMode((m) => !m)}
+            language={language}
+            onToggleLanguage={() => setLanguage((l) => (l === 'ar' ? 'en' : 'ar'))}
+            onNewProject={handleStartNewProject}
+            onOpenExport={() => setShowExport(true)}
+            onOpenDeploy={() => setShowDeploy(true)}
+            onOpenIntegrations={() => setShowIntegrations(true)}
+            subscription={subscription}
+            onOpenSubscription={() => setShowSubscription(true)}
+            onOpenGeminiStudio={() => setShowGeminiStudio(true)}
+            onOpenAdmin={() => setShowAdminDashboard(true)}
+            authUser={authUser}
+            onOpenAuth={() => setShowAuthModal(true)}
+            onLogout={handleLogout}
+            onOpenInfoPage={setInfoPage}
+            onOpenInNewTab={() => {
+              // The preview is a full HTML document; open it as a real page in a
+              // new tab. A blob URL carries the whole document without the
+              // browser truncating a large srcdoc.
+              const blob = new Blob([project.code], { type: 'text/html;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              window.open(url, '_blank', 'noopener');
+              setTimeout(() => URL.revokeObjectURL(url), 60_000);
+            }}
+            projects={projectList}
+            activeProjectId={projectId ?? undefined}
+            onSelectProject={handleSelectProject}
+            onDeleteProject={handleDeleteProject}
+            onRenameStoredProject={handleRenameStoredProject}
+          />
+        </div>
+
+        {/* Scrim: phones only, and only while the drawer is open. It closes the
+            drawer without covering it, so the rail stays usable. */}
+        {sidebarOpen && (
+          <button
+            type="button"
+            aria-label={language === 'ar' ? 'إغلاق القائمة' : 'Close sidebar'}
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden absolute inset-0 bg-slate-950/70 backdrop-blur-sm z-30 cursor-pointer"
+          />
+        )}
+
+        {/* Workspace column: notices, mobile toggle, then the body. */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden relative">
+      {/* __NOTICES__ */}
       {authProbeFailed && !isGenerating && (
         <div className="shrink-0 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-[11px] text-amber-200 flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
@@ -1375,7 +1472,7 @@ export default function App() {
       {projectsSyncError && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-200 text-xs shrink-0">
           <span className="shrink-0">⚠</span>
-          <span className="truncate">{projectsSyncError}</span>
+          <span className="truncate min-w-0">{projectsSyncError}</span>
           <button
             onClick={() => {
               setProjectsSyncError(null);
@@ -1387,54 +1484,39 @@ export default function App() {
           </button>
         </div>
       )}
-      {/* Top Application Header */}
-      <Header
-        projectName={project.name}
-        // Renaming from the studio writes through to the database (or the
-        // on-device store for a guest), so the new name is still there after a
-        // sign-out, another device, or a reload.
-        onRenameProject={(newName) => {
-          setProject((p) => ({ ...p, name: newName }));
-          if (projectId) handleRenameStoredProject(projectId, newName);
-        }}
-        isGenerating={isGenerating}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-        deviceMode={deviceMode}
-        onDeviceModeChange={setDeviceMode}
-        isInspectMode={isInspectMode}
-        onToggleInspectMode={() => setIsInspectMode((m) => !m)}
-        language={language}
-        onToggleLanguage={() => setLanguage((l) => (l === 'ar' ? 'en' : 'ar'))}
-        onNewProject={handleStartNewProject}
-        onOpenExport={() => setShowExport(true)}
-        onOpenDeploy={() => setShowDeploy(true)}
-        onOpenIntegrations={() => setShowIntegrations(true)}
-        subscription={subscription}
-        onOpenSubscription={() => setShowSubscription(true)}
-        onOpenGeminiStudio={() => setShowGeminiStudio(true)}
-        onOpenAdmin={() => setShowAdminDashboard(true)}
-        authUser={authUser}
-        onOpenAuth={() => setShowAuthModal(true)}
-        onLogout={handleLogout}
-        onOpenInfoPage={setInfoPage}
-        onOpenInNewTab={() => {
-          // The preview is a full HTML document; open it as a real page in a new
-          // tab. A blob URL carries the whole document without the browser
-          // truncating a large srcdoc.
-          const blob = new Blob([project.code], { type: 'text/html;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          window.open(url, '_blank', 'noopener');
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
-        }}
-        projects={projectList}
-        activeProjectId={projectId ?? undefined}
-        onSelectProject={handleSelectProject}
-        onDeleteProject={handleDeleteProject}
-        onRenameStoredProject={handleRenameStoredProject}
-      />
 
-      {/* Main Studio Body: Left Sidebar + Right Workspace */}
+      {/* The mobile drawer toggle. On desktop the rail is always visible, so the
+          button is `md:hidden` — there is nothing to open. */}
+      <div className="md:hidden shrink-0 flex items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900">
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(true)}
+          aria-label={language === 'ar' ? 'فتح القائمة' : 'Open sidebar'}
+          aria-expanded={sidebarOpen}
+          className="shrink-0 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition cursor-pointer"
+        >
+          <Menu className="w-4 h-4" />
+          <span className="text-xs font-bold">{language === 'ar' ? 'القائمة' : 'Menu'}</span>
+        </button>
+        <span className="text-xs font-bold text-slate-300 truncate min-w-0 flex-1">
+          {project.name || (language === 'ar' ? 'مشروع بدون اسم' : 'Untitled project')}
+        </span>
+        {/* The one control worth keeping on the bar itself: switching between the
+            preview and the code is the most repeated action in the studio. */}
+        <button
+          type="button"
+          onClick={() => setViewMode(viewMode === 'code' ? 'preview' : 'code')}
+          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition cursor-pointer"
+        >
+          {viewMode === 'code' ? <Eye className="w-4 h-4" /> : <Code2 className="w-4 h-4" />}
+          <span className="text-xs font-bold">
+            {viewMode === 'code'
+              ? language === 'ar' ? 'معاينة' : 'Preview'
+              : language === 'ar' ? 'الكود' : 'Code'}
+          </span>
+        </button>
+      </div>
+
       {/* `min-h-0` on both wrappers is what lets the flex children actually
           shrink: without it a column flex container refuses to shrink below
           its content and the preview gets clipped off-screen on a phone. */}
@@ -1518,6 +1600,8 @@ export default function App() {
           )}
         </main>
       </div>
+        </div>{/* /workspace column */}
+      </div>{/* /studio row: rail + workspace */}
 
       {/* Visual Inspector Popup Modal */}
       {/* ── Lazily loaded modals ───────────────────────────────────────────
