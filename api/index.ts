@@ -29,7 +29,7 @@ import {
   startLimiterSweeper,
   weakSecretMessage,
   resolveAllowedOrigins,
-} from "./security";
+} from "./security.js";
 
 const app = express();
 app.use(express.json({ limit: "15mb" }));
