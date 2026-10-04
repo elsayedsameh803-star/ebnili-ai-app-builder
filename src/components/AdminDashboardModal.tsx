@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   ShieldAlert, 
   ShieldCheck, 
@@ -21,7 +21,7 @@ import {
   Coins,
   Loader2
 } from 'lucide-react';
-import { Language, PlatformRealStats, AdminSettings, DeviceProtectionInfo, OrangeCashTransaction } from '../types';
+import { Language, PlatformRealStats, AdminSettings, DeviceProtectionInfo, OrangeCashTransaction, AdminDelegate } from '../types';
 import { useModalAccessibility } from './useModalAccessibility';
 
 interface AdminDashboardModalProps {
@@ -85,7 +85,10 @@ const normalizeAdminSettings = (value: unknown, previous?: AdminSettings | null)
     adminEmail: toText(source.adminEmail, base.adminEmail),
     // Never let a partial/absent payload hand JSX a nullable list.
     admins: Array.isArray(base.admins)
-      ? base.admins.filter((entry): entry is string => typeof entry === 'string')
+      ? base.admins.filter(isRecord).map((entry) => ({
+          email: toText(entry.email),
+          active: entry.active !== false,
+        })).filter((entry) => entry.email !== '')
       : [],
   };
 };
@@ -248,7 +251,7 @@ export const AdminDashboardModal = ({
    * just to grant one person access — and reporting a failure that could have been
    * about something else entirely.
    */
-  const [adminEmails, setAdminEmails] = useState<string[]>([]);
+  const [adminEmails, setAdminEmails] = useState<AdminDelegate[]>([]);
   const [newAdminEmail, setNewAdminEmail] = useState<string>('');
   /** The e-mail being added or removed, so that row alone shows a spinner. */
   const [busyAdminEmail, setBusyAdminEmail] = useState<string | null>(null);
@@ -274,6 +277,28 @@ export const AdminDashboardModal = ({
 
 
   const [devices, setDevices] = useState<DeviceProtectionInfo[]>([]);
+
+  /**
+   * Devices matching the search box.
+   *
+   * Hoisted out of JSX so the empty-state branch can ask "did the FILTER hide
+   * everything, or are there genuinely no devices?" — two very different
+   * problems that otherwise render identically (an empty table).
+   *
+   * The needle is lower-cased once: the search compares against an e-mail, and
+   * `toLowerCase()` on every device on every keystroke is both slower and a
+   * bug source when it is forgotten on one side only.
+   */
+  const visibleDevices = useMemo(() => {
+    const needle = searchQuery.trim().toLowerCase();
+    if (!needle) return devices;
+    return devices.filter((device) => {
+      if (device.ipAddress?.toLowerCase().includes(needle)) return true;
+      if (device.deviceId?.toLowerCase().includes(needle)) return true;
+      if (device.fingerprintHash?.toLowerCase().includes(needle)) return true;
+      return device.registeredEmails?.some((email) => email.toLowerCase().includes(needle)) ?? false;
+    });
+  }, [devices, searchQuery]);
   const [transactions, setTransactions] = useState<OrangeCashTransaction[]>([]);
   const [isCheckingSession, setIsCheckingSession] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -864,7 +889,7 @@ export const AdminDashboardModal = ({
         body: JSON.stringify({ email }),
       });
       if (res.status === 401 || res.status === 404) { handleSessionExpired(); return; }
-      const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: string[]; message?: string };
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: AdminDelegate[]; message?: string };
       if (res.ok && data.success) {
         setAdminEmails(Array.isArray(data.admins) ? data.admins : []);
         setNewAdminEmail('');
@@ -893,12 +918,46 @@ export const AdminDashboardModal = ({
         body: JSON.stringify({ email }),
       });
       if (res.status === 401 || res.status === 404) { handleSessionExpired(); return; }
-      const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: string[]; message?: string };
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: AdminDelegate[]; message?: string };
       if (res.ok && data.success) {
         setAdminEmails(Array.isArray(data.admins) ? data.admins : []);
         showToast(`تمت إزالة ${email}.`);
       } else {
         setActionErrorMessage(data.message || 'تعذّر إزالة المسؤول.');
+      }
+    } catch {
+      setActionErrorMessage('تعذّر الاتصال بالخادم.');
+    } finally {
+      setBusyAdminEmail(null);
+    }
+  };
+
+  /**
+   * The owner's on/off switch.
+   *
+   * Suspending revokes console access on the delegate's very next request,
+   * because `requireAdmin` re-reads the stored list on every call — no restart,
+   * no cache to wait for. The row keeps its place in the list so it can be
+   * re-activated later without re-typing the address.
+   */
+  const handleToggleAdmin = async (admin: AdminDelegate) => {
+    setBusyAdminEmail(admin.email);
+    setActionErrorMessage(null);
+    setActionSuccessMessage(null);
+    try {
+      const res = await fetch('/api/admin/admins/set-active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: admin.email, active: !admin.active }),
+      });
+      if (res.status === 401 || res.status === 404) { handleSessionExpired(); return; }
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: AdminDelegate[]; message?: string };
+      if (res.ok && data.success) {
+        setAdminEmails(Array.isArray(data.admins) ? data.admins : []);
+        showToast(!admin.active ? `تم تفعيل ${admin.email}.` : `تم إيقاف ${admin.email}.`);
+      } else {
+        setActionErrorMessage(data.message || 'تعذّر تغيير حالة المسؤول.');
       }
     } catch {
       setActionErrorMessage('تعذّر الاتصال بالخادم.');
@@ -1459,14 +1518,7 @@ export const AdminDashboardModal = ({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/60">
-                          {devices
-                            .filter(d => 
-                              !searchQuery || 
-                              d.ipAddress?.includes(searchQuery) || 
-                              d.deviceId?.includes(searchQuery) ||
-                              d.registeredEmails?.some(e => e.toLowerCase().includes(searchQuery.toLowerCase()))
-                            )
-                            .map(dev => (
+                          {visibleDevices.map(dev => (
                               <tr key={dev.deviceId} className="hover:bg-slate-900/40">
                                 <td className="p-3">
                                   <div className="font-mono text-white text-[11px] truncate max-w-[140px]" title={dev.deviceId}>
@@ -1559,6 +1611,42 @@ export const AdminDashboardModal = ({
                             ))}
                         </tbody>
                       </table>
+
+                      {/* WHY THIS MATTERS: with no rows the table renders as a bare
+                          grid with a heading and nothing under it, which reads as
+                          "loading" forever. These three states are genuinely
+                          different and the owner needs to tell them apart:
+                            • no devices at all   → the table is missing / nothing
+                                                    registered yet (run the SQL, or
+                                                    sign in once)
+                            • devices but filtered→ the search matched nothing
+                            • filtered to zero    → devices exist, search too narrow */}
+                      {devices.length === 0 ? (
+                        <div className="p-8 text-center">
+                          <Smartphone className="w-8 h-8 text-slate-600 mx-auto mb-3" />
+                          <p className="text-xs font-bold text-slate-300">لا توجد أجهزة مسجلة بعد</p>
+                          <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed max-w-sm mx-auto">
+                            سجّل دخولك من المتصفح مرة واحدة ليُسجَّل الجهاز تلقائياً.
+                            {' '}لو مستمر الرقم على صفر، نفّذ
+                            {' '}<code className="text-slate-400">supabase/projects.sql</code>
+                            {' '}في Supabase لإنشاء جدول <code className="text-slate-400">ebnily_devices</code>.
+                          </p>
+                        </div>
+                      ) : visibleDevices.length === 0 ? (
+                        <div className="p-8 text-center">
+                          <Search className="w-7 h-7 text-slate-600 mx-auto mb-2" />
+                          <p className="text-xs text-slate-400">
+                            لا نتائج للبحث «{searchQuery}»
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setSearchQuery('')}
+                            className="mt-2 text-[11px] font-bold text-rose-300 hover:text-rose-100"
+                          >
+                            مسح البحث
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -1755,22 +1843,56 @@ export const AdminDashboardModal = ({
 
                     {adminEmails.length > 0 ? (
                       <ul className="mt-4 space-y-2">
-                        {adminEmails.map((email) => (
+                        {adminEmails.map((admin) => (
                           <li
-                            key={email}
-                            className="flex items-center gap-2 rounded-xl border border-slate-700/70 bg-slate-950/60 px-3 py-2"
+                            key={admin.email}
+                            className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 ${
+                              admin.active
+                                ? 'border-emerald-500/25 bg-emerald-500/5'
+                                : 'border-slate-700/70 bg-slate-950/60 opacity-70'
+                            }`}
                           >
-                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                admin.active ? 'bg-emerald-400' : 'bg-slate-600'
+                              }`}
+                            />
                             <span dir="ltr" className="flex-1 min-w-0 truncate text-xs text-slate-200 font-mono">
-                              {email}
+                              {admin.email}
                             </span>
+
+                            {/* The owner's on/off switch. Suspending keeps the row so
+                                the same person can be re-activated later without
+                                re-typing the address. */}
                             <button
                               type="button"
-                              onClick={() => handleRemoveAdmin(email)}
+                              onClick={() => handleToggleAdmin(admin)}
+                              disabled={busyAdminEmail !== null}
+                              className={`shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                                admin.active
+                                  ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25'
+                                  : 'bg-slate-700/60 text-slate-300 hover:bg-slate-600/60'
+                              }`}
+                              title={
+                                admin.active
+                                  ? 'إيقاف صلاحية هذا المسؤول'
+                                  : 'إعطاء هذا المسؤول صلاحية الدخول للوحة'
+                              }
+                            >
+                              {busyAdminEmail === admin.email
+                                ? '...'
+                                : admin.active
+                                  ? 'نشط'
+                                  : 'غير نشط'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAdmin(admin.email)}
                               disabled={busyAdminEmail !== null}
                               className="shrink-0 text-[10px] font-bold text-rose-300 hover:text-rose-100 hover:bg-rose-500/10 px-2 py-1 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
                             >
-                              {busyAdminEmail === email ? 'جارٍ الحذف…' : 'إزالة'}
+                              {busyAdminEmail === admin.email ? '...' : 'إزالة'}
                             </button>
                           </li>
                         ))}

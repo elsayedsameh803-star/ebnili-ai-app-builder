@@ -3407,11 +3407,22 @@ app.get("/api/auth/me", async (req: AuthReq, res: AuthRes) => {
   // rather than as zero — a missing allowance must never read as "you have none".
   const account = user ? await touchAccount(req, user) : null;
 
+  // Two separate flags, on purpose:
+  //   isOwner — the site owner. Can manage the admin LIST itself.
+  //   isAdmin — owner OR an active delegate. Can open the console, manage
+  //             subscriptions and activate plans, but NOT the admin list.
+  // The client only uses these to decide what to RENDER; every `/api/admin/*`
+  // route re-checks server-side (`requireAdmin` / `requireOwner`), so a tampered
+  // flag in the browser buys nothing.
+  const isOwner = isOwnerAccount(user);
+  const isAdmin = Boolean(user) && (isOwner || isActiveAdmin(await readStoredAdmins(), user?.email));
+
   res.json({
     success: true,
     authenticated: Boolean(user),
-    user: user ? { ...user, isOwner: isOwnerAccount(user) } : null,
-    isOwner: isOwnerAccount(user),
+    user: user ? { ...user, isOwner, isAdmin } : null,
+    isOwner,
+    isAdmin,
     ...(account
       ? {
           credits: toNumber(account.credits),

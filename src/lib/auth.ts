@@ -18,6 +18,22 @@ export function isOwnerAccount(user: AuthUser | null | undefined): boolean {
 }
 
 /**
+ * May this account open the admin console at all?
+ *
+ * TRUE for the site owner AND for an active delegated administrator. The server
+ * decides: `/api/auth/me` stamps `isAdmin` from the stored delegate list, and
+ * every `/api/admin/*` route re-checks server-side (`requireAdmin`), so this is
+ * only ever a rendering hint — never the boundary.
+ *
+ * Deliberately separate from {@link isOwnerAccount}: owning the site (and
+ * therefore managing the admin list itself) is a different, narrower privilege
+ * than running the console.
+ */
+export function isAdminAccount(user: AuthUser | null | undefined): boolean {
+  return user?.isOwner === true || user?.isAdmin === true;
+}
+
+/**
  * Thin client for the server-side OAuth flow implemented in `api/index.ts`.
  *
  * The client secret and the code→token exchange never reach the browser: we only

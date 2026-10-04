@@ -160,11 +160,26 @@ export interface AuthUser {
    * itself, and the owner's address is not part of the public bundle.
    */
   isOwner?: boolean;
+  /**
+   * An ACTIVE delegated administrator — may open the console and manage
+   * subscriptions, but may NOT touch the admin list itself.
+   *
+   * Stamped by the server on `/api/auth/me`. Never derive this in the browser:
+   * the admin routes re-check server-side regardless of what a client believes.
+   */
+  isAdmin?: boolean;
 }
 
 export interface AuthProviderInfo {
   id: AuthProviderId;
   configured: boolean;
+}
+
+export interface AdminDelegate {
+  /** Normalised, lower-cased address. */
+  email: string;
+  /** `false` suspends console access without removing the entry. */
+  active: boolean;
 }
 
 export interface AdminSettings {
@@ -175,13 +190,13 @@ export interface AdminSettings {
   siteName: string;
   adminEmail: string;
   /**
-   * Owner-delegated administrators.
+   * Owner-delegated administrators, with their on/off switch.
    *
    * NEVER nullable: `/api/admin/overview` is owner-session only, so this array is
    * populated exclusively from the server. Defaults to empty so a partial payload
    * renders an honest "no admins yet" instead of throwing on `.map`.
    */
-  admins: string[];
+  admins: AdminDelegate[];
 }
 
 export interface PlatformRealStats {

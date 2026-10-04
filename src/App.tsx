@@ -8,7 +8,8 @@ import { NewProjectHero } from './components/NewProjectHero';
 import { AuthGate } from './components/AuthGate';
 import { InfoPagesModal, type PageKey } from './components/InfoPagesModal';
 import { getDeviceFingerprint } from './utils/fingerprint';
-import { fetchCurrentUser, logout as authLogout, isOwnerAccount, fetchWithTimeout } from './lib/auth';
+import { fetchCurrentUser, logout as authLogout, isOwnerAccount, isAdminAccount, fetchWithTimeout } from './lib/auth';
+import { registerDevice } from './lib/protection';
 import {
   cacheProjectBody,
   createRemoteProject,
@@ -242,6 +243,10 @@ export default function App() {
       .then((user) => {
         settled = true;
         if (user) setAuthUser(user);
+        // A returning visitor already has a valid cookie but has NOT gone through
+        // the sign-in success path, so without this their device would never be
+        // recorded on a plain page reload. Also refreshes `last_seen_at`.
+        if (user) void registerDevice();
       })
       .catch(() => {
         settled = true;
@@ -270,6 +275,14 @@ export default function App() {
     if (error) setAuthError(error);
     if (success) {
       setAuthError(null);
+      // Record this device against the account the moment sign-in succeeds.
+      // This is the ONLY caller of /api/protection/status, and without it the
+      // owner dashboard shows a permanent 0 devices and the block / quota / tier
+      // buttons have no row to act on.
+      //
+      // Fire-and-forget: it must never delay or block the session, and a failure
+      // here only costs the abuse-protection signal, not the user's access.
+      void registerDevice();
       fetchCurrentUser()
         .then((user) => {
           if (user) setAuthUser(user);
@@ -360,6 +373,11 @@ export default function App() {
   // the server's — see `isOwnerAccount` — and it gates both the header buttons
   // and the modals themselves, so an ordinary user never mounts them at all.
   const isOwner = isOwnerAccount(authUser);
+
+  // Console access: owner OR an active delegate. The admin MODAL mounts for
+  // either, but the owner-only sub-tools inside it stay gated on `isOwner` and
+  // every route re-checks server-side, so this is a rendering hint only.
+  const canOpenAdmin = isAdminAccount(authUser);
 
   // Subscription State with Orange Cash support
   const [subscription, setSubscription] = useState<UserSubscription>({
@@ -1717,8 +1735,8 @@ export default function App() {
           />
         )}
 
-        {/* Owner Admin Dashboard Modal — owner only */}
-        {isOwner && (
+        {/* Admin Dashboard Modal — owner or active delegate */}
+        {canOpenAdmin && (
           <AdminDashboardModal
             isOpen={showAdminDashboard}
             onClose={() => setShowAdminDashboard(false)}

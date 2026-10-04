@@ -29,7 +29,8 @@ import {
   clientKey,
   staffEmails,
   MIN_SECRET_LENGTH,
-  normalizeAdminEmails,
+  normalizeAdmins,
+  isActiveAdmin,
   MAX_ADMIN_EMAILS,
 } from "../api/security.ts";
 
@@ -495,62 +496,117 @@ describe("normalizeEmail", () => {
 // visible to the site owner and NOT to any other admin. These tests pin the
 // properties that make that second half true.
 
-describe("normalizeAdminEmails", () => {
+describe("normalizeAdmins", () => {
   const OWNER = "owner@example.com";
 
-  test("keeps a normal delegate", () => {
-    assert.deepEqual(normalizeAdminEmails(["helper@example.com"], OWNER), ["helper@example.com"]);
+  test("keeps a normal delegate, active by default", () => {
+    assert.deepEqual(normalizeAdmins([{ email: "helper@example.com", active: true }], OWNER), [
+      { email: "helper@example.com", active: true },
+    ]);
+  });
+
+  test("reads a bare string as an ACTIVE admin (pre-flag rows keep working)", () => {
+    // A list written before the `active` flag existed must not silently lock
+    // everyone out of the console after the upgrade.
+    assert.deepEqual(normalizeAdmins(["helper@example.com"], OWNER), [
+      { email: "helper@example.com", active: true },
+    ]);
+  });
+
+  test("treats a missing `active` as active", () => {
+    assert.deepEqual(normalizeAdmins([{ email: "helper@example.com" }], OWNER), [
+      { email: "helper@example.com", active: true },
+    ]);
+  });
+
+  test("preserves an explicit `active: false`", () => {
+    // The owner's suspend switch must survive a round trip through the row.
+    assert.deepEqual(normalizeAdmins([{ email: "helper@example.com", active: false }], OWNER), [
+      { email: "helper@example.com", active: false },
+    ]);
   });
 
   test("returns [] when the stored value is missing or not a list", () => {
-    // A partial or hand-edited settings row must not become a privilege list.
-    assert.deepEqual(normalizeAdminEmails(undefined, OWNER), []);
-    assert.deepEqual(normalizeAdminEmails(null, OWNER), []);
-    assert.deepEqual(normalizeAdminEmails("helper@example.com", OWNER), []);
-    assert.deepEqual(normalizeAdminEmails({ email: "helper@example.com" }, OWNER), []);
+    assert.deepEqual(normalizeAdmins(undefined, OWNER), []);
+    assert.deepEqual(normalizeAdmins(null, OWNER), []);
+    assert.deepEqual(normalizeAdmins("helper@example.com", OWNER), []);
+    assert.deepEqual(normalizeAdmins({ email: "helper@example.com" }, OWNER), []);
   });
 
   test("normalises case and surrounding whitespace", () => {
-    assert.deepEqual(normalizeAdminEmails(["  Helper@Example.COM  "], OWNER), ["helper@example.com"]);
+    assert.deepEqual(normalizeAdmins(["  Helper@Example.COM  "], OWNER), [
+      { email: "helper@example.com", active: true },
+    ]);
   });
 
   test("de-duplicates rather than storing the same person twice", () => {
-    assert.deepEqual(
-      normalizeAdminEmails(["a@b.com", "A@B.COM", " a@b.com "], OWNER),
-      ["a@b.com"],
-    );
+    assert.deepEqual(normalizeAdmins(["a@b.com", "A@B.COM", { email: "a@b.com", active: false }], OWNER), [
+      { email: "a@b.com", active: true },
+    ]);
   });
 
   test("never lists the owner as their own delegate", () => {
     // Regression guard: if the owner appeared here, "remove" would report success
-    // while changing nothing, and the list would imply a privilege they do not
-    // need. Ownership is resolved from the environment, never from this list.
-    assert.deepEqual(normalizeAdminEmails([OWNER, "helper@example.com"], OWNER), ["helper@example.com"]);
-    assert.deepEqual(normalizeAdminEmails(["  OWNER@EXAMPLE.COM  "], OWNER), []);
-  });
-
-  test("drops entries that are not usable addresses", () => {
-    assert.deepEqual(normalizeAdminEmails(["", "   ", null, 42, "helper@example.com"], OWNER), [
-      "helper@example.com",
+    // while changing nothing. Ownership comes from the environment only.
+    assert.deepEqual(normalizeAdmins([OWNER, "helper@example.com"], OWNER), [
+      { email: "helper@example.com", active: true },
     ]);
+    assert.deepEqual(normalizeAdmins(["  OWNER@EXAMPLE.COM  "], OWNER), []);
   });
 
   test("never coerces a non-string into a stored administrator", () => {
     // Regression guard: `normalizeEmail(42)` returns "42" by design, so without an
     // explicit type check a hand-edited row containing a number would be stored as
-    // a bogus admin entry. A privilege list must only ever hold real addresses.
-    assert.deepEqual(normalizeAdminEmails([42, true, {}, ["x"]], OWNER), []);
-    assert.deepEqual(normalizeAdminEmails([42, "helper@example.com"], OWNER), ["helper@example.com"]);
+    // a bogus admin entry.
+    assert.deepEqual(normalizeAdmins([42, true, {}, ["x"]], OWNER), []);
+    assert.deepEqual(normalizeAdmins([{ email: 42 }], OWNER), []);
+    assert.deepEqual(normalizeAdmins([42, { email: "helper@example.com" }], OWNER), [
+      { email: "helper@example.com", active: true },
+    ]);
   });
 
   test("caps the list so a hand-edited row cannot grow without bound", () => {
     const many = Array.from({ length: MAX_ADMIN_EMAILS + 25 }, (_, i) => `user${i}@example.com`);
-    const result = normalizeAdminEmails(many, OWNER);
-    assert.equal(result.length, MAX_ADMIN_EMAILS);
+    assert.equal(normalizeAdmins(many, OWNER).length, MAX_ADMIN_EMAILS);
   });
 
   test("is case-insensitive about the owner address it is given", () => {
-    assert.deepEqual(normalizeAdminEmails(["Owner@Example.com"], "OWNER@example.COM"), []);
+    assert.deepEqual(normalizeAdmins(["Owner@Example.com"], "OWNER@example.COM"), []);
+  });
+});
+
+describe("isActiveAdmin", () => {
+  const list = [
+    { email: "live@example.com", active: true },
+    { email: "suspended@example.com", active: false },
+  ];
+
+  test("an active delegate passes", () => {
+    assert.equal(isActiveAdmin(list, "live@example.com"), true);
+  });
+
+  test("a SUSPENDED delegate does not pass", () => {
+    // The whole point of the flag: suspension must revoke console access
+    // immediately, without deleting the entry.
+    assert.equal(isActiveAdmin(list, "suspended@example.com"), false);
+  });
+
+  test("someone who is not on the list does not pass", () => {
+    assert.equal(isActiveAdmin(list, "stranger@example.com"), false);
+  });
+
+  test("ignores case and surrounding whitespace", () => {
+    assert.equal(isActiveAdmin(list, "  Live@Example.COM  "), true);
+  });
+
+  test("never passes for a missing or non-string address", () => {
+    assert.equal(isActiveAdmin(list, undefined), false);
+    assert.equal(isActiveAdmin(list, null), false);
+    assert.equal(isActiveAdmin(list, ""), false);
+  });
+
+  test("an empty list grants nothing", () => {
+    assert.equal(isActiveAdmin([], "live@example.com"), false);
   });
 });
 

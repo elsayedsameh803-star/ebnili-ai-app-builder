@@ -53,7 +53,7 @@ import {
   Phone,
 } from 'lucide-react';
 import { DeviceMode, ViewMode, Language, UserSubscription, AuthUser } from '../types';
-import { isOwnerAccount } from '../lib/auth';
+import { isOwnerAccount, isAdminAccount } from '../lib/auth';
 import type { ProjectSummary } from '../lib/projects';
 
 /** "منذ 5 دقائق" / "2 hours ago" — the project list is a recency list. */
@@ -201,6 +201,11 @@ export const StudioSidebar = ({
   // stamped by the server on `/api/auth/me`, so the browser cannot talk its way
   // into these buttons — and server-side `requireAdmin` remains the real boundary.
   const isOwner = isOwnerAccount(authUser);
+
+  // Console access: the owner OR an active delegate. This only decides what to
+  // RENDER — `requireAdmin` on the server is the real boundary, and the
+  // owner-only tools below stay gated on `isOwner`.
+  const canOpenAdmin = isAdminAccount(authUser);
 
   const ar = language === 'ar';
 
@@ -660,26 +665,30 @@ export const StudioSidebar = ({
               Owner surfaces live HERE, inside the account panel, and only for
               the site owner. `isOwner` is the server-issued flag — see
               `isOwnerAccount`; server-side `requireAdmin` is the real boundary. */}
-          {isOwner && (onOpenAdmin || onOpenIntegrations) && (
+          {canOpenAdmin && onOpenAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        onOpenAdmin();
+                      }}
+                      className="w-full text-start px-2.5 py-2 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/10 flex items-center gap-2 transition cursor-pointer min-w-0"
+                      title={ar ? 'لوحة تحكم الموقع' : 'Admin dashboard'}
+                    >
+                      <Shield className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      <span className="truncate">{ar ? 'لوحة التحكم' : 'Admin dashboard'}</span>
+                    </button>
+                  )}
+
+                  {/* ── Owner-only tools ──────────────────────────────────────────
+              Owner surfaces live HERE, inside the account panel, and only for
+              the site owner. `isOwner` is the server-issued flag — see
+              `isOwnerAccount`; server-side `requireOwner` is the real boundary. */}
+          {isOwner && onOpenIntegrations && (
             <div className="mt-1 pt-1 border-t border-slate-800">
               <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
                 {ar ? 'أدوات المالك فقط' : 'Owner tools only'}
               </div>
-
-              {onOpenAdmin && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowUserMenu(false);
-                    onOpenAdmin();
-                  }}
-                  className="w-full text-start px-2.5 py-2 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/10 flex items-center gap-2 transition cursor-pointer min-w-0"
-                  title={ar ? 'لوحة تحكم صاحب الموقع' : 'Owner admin dashboard'}
-                >
-                  <Shield className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  <span className="truncate">{ar ? 'لوحة المالك' : 'Owner admin panel'}</span>
-                </button>
-              )}
 
               {onOpenIntegrations && (
                 <button
