@@ -83,12 +83,14 @@ const normalizeAdminSettings = (value: unknown, previous?: AdminSettings | null)
     supportWhatsappNumber: toText(source.supportWhatsappNumber, base.supportWhatsappNumber),
     siteName: toText(source.siteName, base.siteName),
     adminEmail: toText(source.adminEmail, base.adminEmail),
-    // Never let a partial/absent payload hand JSX a nullable list.
+    // Never let a partial/absent payload hand JSX a nullable list. The server sends
+    // `{ email, active }` records, so anything without a usable address is dropped
+    // here rather than reaching the list renderer as an empty row.
     admins: Array.isArray(base.admins)
-      ? base.admins.filter(isRecord).map((entry) => ({
-          email: toText(entry.email),
-          active: entry.active !== false,
-        })).filter((entry) => entry.email !== '')
+      ? base.admins
+          .filter((entry): entry is AdminDelegate => Boolean(entry) && typeof entry === 'object')
+          .map((entry) => ({ email: toText(entry.email), active: entry.active !== false }))
+          .filter((entry) => entry.email !== '')
       : [],
   };
 };
