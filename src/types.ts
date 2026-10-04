@@ -174,6 +174,14 @@ export interface AdminSettings {
   supportWhatsappNumber: string;
   siteName: string;
   adminEmail: string;
+  /**
+   * Owner-delegated administrators.
+   *
+   * NEVER nullable: `/api/admin/overview` is owner-session only, so this array is
+   * populated exclusively from the server. Defaults to empty so a partial payload
+   * renders an honest "no admins yet" instead of throwing on `.map`.
+   */
+  admins: string[];
 }
 
 export interface PlatformRealStats {

@@ -324,6 +324,123 @@ export function isStaffEmail(email: unknown): boolean {
   return staffEmails().has(normalized);
 }
 
+// ── Delegated administrators ───────────────────────────────────────────────────
+
+/** Upper bound on the list, so a hand-edited settings row cannot grow forever. */
+export const MAX_ADMIN_EMAILS = 50;
+
+/**
+ * One delegated administrator, with the owner's on/off switch.
+ *
+ * WHY A FLAG AND NOT JUST A LIST: the owner asked to be able to suspend someone
+ * without deleting them — an admin who is merely idle should not lose the ability
+ * to come back, and deleting loses the record of who was ever granted access.
+ * `active: false` revokes console access immediately.
+ */
+export interface AdminDelegate {
+  email: string;
+  /** `false` suspends console access without removing the entry. */
+  active: boolean;
+}
+
+/** Is this address an ACTIVE delegate? A suspended admin does not pass. */
+export function isActiveAdmin(list: AdminDelegate[], email: unknown): boolean {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+  return list.some((admin) => admin.email === normalized && admin.active);
+}
+
+/**
+ * Normalise the owner's delegated-admin list into `{ email, active }` records.
+ *
+ * WHAT THIS LIST IS — AND WHAT IT DELIBERATELY IS NOT
+ * ----------------------------------------------------
+ * The owner asked for an administrator who works alongside them: able to run the
+ * dashboard, manage subscriptions and activate plans — but NOT able to touch the
+ * admin list itself. That split is enforced by the route guards, not by
+ * convention:
+ *
+ *   • It grants the CONSOLE, never ownership. `isOwnerAccount()` in
+ *     `api/index.ts` reads `OWNER_EMAIL` from the environment and nothing else,
+ *     so no entry here can ever satisfy the ownership check in `requireOwner`.
+ *   • Only `requireOwner` routes may write this list, so a delegate cannot add,
+ *     remove, activate or deactivate another delegate — including themselves.
+ *
+ * SHAPES ACCEPTED: a bare string (a row written before the flag existed) is read
+ * as an ACTIVE admin, so an existing list keeps working instead of silently
+ * locking everyone out of the console.
+ *
+ * @param ownerEmail the resolved owner address, excluded from the result
+ */
+export function normalizeAdmins(value: unknown, ownerEmail = ""): AdminDelegate[] {
+  if (!Array.isArray(value)) return [];
+  const owner = normalizeEmail(ownerEmail);
+  const seen = new Set<string>();
+  const result: AdminDelegate[] = [];
+
+  for (const entry of value) {
+    let emailInput: unknown;
+    let active = true;
+
+    if (typeof entry === "string") {
+      // A bare string means "an admin added before the active flag existed".
+      emailInput = entry;
+    } else if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      const record = entry as Record<string, unknown>;
+      emailInput = record.email;
+      // An absent `active` means an older row → treat as active rather than
+      // locking someone out because of a schema detail.
+      active = record.active === false ? false : true;
+    } else {
+      // `normalizeEmail` deliberately coerces anything to a string (`42` -> "42"),
+      // which is right for the staff matcher but wrong here: a hand-edited row
+      // containing a number would otherwise become a bogus administrator. This is
+      // a privilege list, so it only ever holds real address strings.
+      continue;
+    }
+
+    const normalized = normalizeEmail(emailInput);
+    if (!normalized || !normalized.includes("@")) continue;
+    // The owner is not a delegate — listing them would be misleading, and their
+    // removal through this path would look successful while changing nothing.
+    if (owner && normalized === owner) continue;
+    if (seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    result.push({ email: normalized, active });
+    if (seen.size >= MAX_ADMIN_EMAILS) break;
+  }
+  return result;
+}
+
+/**
+ * Normalise the owner's delegated-admin list.
+ *
+ * WHAT THIS LIST IS — AND WHAT IT DELIBERATELY IS NOT
+ * ----------------------------------------------------
+ * The owner asked for a button that adds an administrator who works alongside
+ * them, visible to the site owner and NOT to any other admin. This list is
+ * therefore deliberately not a promotion path to ownership:
+ *
+ *   • It grants the DASHBOARD, never ownership. `isOwnerAccount()` in
+ *     `api/index.ts` reads `OWNER_EMAIL` from the environment and nothing else,
+ *     so no entry here can ever satisfy the ownership half of `requireAdmin`.
+ *   • It cannot be edited by anyone but the owner: the only routes that write it
+ *     sit behind `requireAdmin`, which needs the owner account session AND the
+ *     PIN.
+ *
+ * So a delegated admin can see the console; they cannot see this list, cannot add
+ * another admin, and cannot become the owner. That is the "not for any admin"
+ * half of the request, enforced here rather than by convention.
+ *
+ * @param ownerEmail the resolved owner address, excluded from the result
+ */
+export function normalizeAdminEmails(value: unknown, ownerEmail = ""): string[] {
+  return normalizeAdmins(value, ownerEmail)
+    .filter((admin) => admin.active)
+    .map((admin) => admin.email);
+}
+
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 
 /**

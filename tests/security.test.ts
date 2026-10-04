@@ -29,6 +29,8 @@ import {
   clientKey,
   staffEmails,
   MIN_SECRET_LENGTH,
+  normalizeAdminEmails,
+  MAX_ADMIN_EMAILS,
 } from "../api/security.ts";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -485,6 +487,70 @@ describe("normalizeEmail", () => {
     assert.equal(normalizeEmail(undefined), "");
     assert.equal(normalizeEmail(null), "");
     assert.equal(normalizeEmail(42), "42");
+  });
+});
+
+// ── Delegated administrators ───────────────────────────────────────────────────
+// The owner asked for a control that adds an admin who works alongside them,
+// visible to the site owner and NOT to any other admin. These tests pin the
+// properties that make that second half true.
+
+describe("normalizeAdminEmails", () => {
+  const OWNER = "owner@example.com";
+
+  test("keeps a normal delegate", () => {
+    assert.deepEqual(normalizeAdminEmails(["helper@example.com"], OWNER), ["helper@example.com"]);
+  });
+
+  test("returns [] when the stored value is missing or not a list", () => {
+    // A partial or hand-edited settings row must not become a privilege list.
+    assert.deepEqual(normalizeAdminEmails(undefined, OWNER), []);
+    assert.deepEqual(normalizeAdminEmails(null, OWNER), []);
+    assert.deepEqual(normalizeAdminEmails("helper@example.com", OWNER), []);
+    assert.deepEqual(normalizeAdminEmails({ email: "helper@example.com" }, OWNER), []);
+  });
+
+  test("normalises case and surrounding whitespace", () => {
+    assert.deepEqual(normalizeAdminEmails(["  Helper@Example.COM  "], OWNER), ["helper@example.com"]);
+  });
+
+  test("de-duplicates rather than storing the same person twice", () => {
+    assert.deepEqual(
+      normalizeAdminEmails(["a@b.com", "A@B.COM", " a@b.com "], OWNER),
+      ["a@b.com"],
+    );
+  });
+
+  test("never lists the owner as their own delegate", () => {
+    // Regression guard: if the owner appeared here, "remove" would report success
+    // while changing nothing, and the list would imply a privilege they do not
+    // need. Ownership is resolved from the environment, never from this list.
+    assert.deepEqual(normalizeAdminEmails([OWNER, "helper@example.com"], OWNER), ["helper@example.com"]);
+    assert.deepEqual(normalizeAdminEmails(["  OWNER@EXAMPLE.COM  "], OWNER), []);
+  });
+
+  test("drops entries that are not usable addresses", () => {
+    assert.deepEqual(normalizeAdminEmails(["", "   ", null, 42, "helper@example.com"], OWNER), [
+      "helper@example.com",
+    ]);
+  });
+
+  test("never coerces a non-string into a stored administrator", () => {
+    // Regression guard: `normalizeEmail(42)` returns "42" by design, so without an
+    // explicit type check a hand-edited row containing a number would be stored as
+    // a bogus admin entry. A privilege list must only ever hold real addresses.
+    assert.deepEqual(normalizeAdminEmails([42, true, {}, ["x"]], OWNER), []);
+    assert.deepEqual(normalizeAdminEmails([42, "helper@example.com"], OWNER), ["helper@example.com"]);
+  });
+
+  test("caps the list so a hand-edited row cannot grow without bound", () => {
+    const many = Array.from({ length: MAX_ADMIN_EMAILS + 25 }, (_, i) => `user${i}@example.com`);
+    const result = normalizeAdminEmails(many, OWNER);
+    assert.equal(result.length, MAX_ADMIN_EMAILS);
+  });
+
+  test("is case-insensitive about the owner address it is given", () => {
+    assert.deepEqual(normalizeAdminEmails(["Owner@Example.com"], "OWNER@example.COM"), []);
   });
 });
 

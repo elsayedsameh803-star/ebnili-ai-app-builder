@@ -59,6 +59,9 @@ const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   // bundle, so the owner's address must never be hard-coded here — the real
   // value arrives from `/api/admin/overview`, which is owner-session only.
   adminEmail: '',
+  // Owner-delegated administrators. Always a fully-populated array so the form
+  // can map over it without a guard; empty means "the owner hasn't added anyone".
+  admins: [],
 };
 
 const normalizeAdminSettings = (value: unknown, previous?: AdminSettings | null): AdminSettings => {
@@ -80,6 +83,10 @@ const normalizeAdminSettings = (value: unknown, previous?: AdminSettings | null)
     supportWhatsappNumber: toText(source.supportWhatsappNumber, base.supportWhatsappNumber),
     siteName: toText(source.siteName, base.siteName),
     adminEmail: toText(source.adminEmail, base.adminEmail),
+    // Never let a partial/absent payload hand JSX a nullable list.
+    admins: Array.isArray(base.admins)
+      ? base.admins.filter((entry): entry is string => typeof entry === 'string')
+      : [],
   };
 };
 
@@ -233,6 +240,20 @@ export const AdminDashboardModal = ({
   const settings = normalizeAdminSettings(settingsState, DEFAULT_ADMIN_SETTINGS);
 
   /**
+   * The delegated-admin control.
+   *
+   * WHY the list lives in its own state rather than in `settingsState`: adding an
+   * admin is a discrete owner action with its own success/failure path, and
+   * routing it through the settings form would mean saving every unrelated field
+   * just to grant one person access — and reporting a failure that could have been
+   * about something else entirely.
+   */
+  const [adminEmails, setAdminEmails] = useState<string[]>([]);
+  const [newAdminEmail, setNewAdminEmail] = useState<string>('');
+  /** The e-mail being added or removed, so that row alone shows a spinner. */
+  const [busyAdminEmail, setBusyAdminEmail] = useState<string | null>(null);
+
+  /**
    * Accounts + their presence.
    *
    * WHY a separate poll: presence is only true while someone is actually
@@ -326,6 +347,10 @@ export const AdminDashboardModal = ({
 
         setStats(normalizeStats(data.stats));
         setSettings((prev) => normalizeAdminSettings(data.settings, prev));
+        // The delegated-admin list arrives on the owner-only overview response.
+        // Re-normalised through the same helper so a partial payload can never
+        // hand the list renderer a non-array.
+        setAdminEmails(normalizeAdminSettings(data.settings, null).admins);
         setDevices(normalizeDevices(data.devices));
         setTransactions(normalizeTransactions(data.recentTransactions));
         // Accounts + presence. `accounts` is absent on a deployment that has not
@@ -589,6 +614,7 @@ export const AdminDashboardModal = ({
 
       setStats(normalizeStats(data.stats));
       setSettings((prev) => normalizeAdminSettings(data.settings, prev));
+      setAdminEmails(normalizeAdminSettings(data.settings, null).admins);
       setDevices(normalizeDevices(data.devices));
       setTransactions(normalizeTransactions(data.recentTransactions));
       setIsDataReady(true);
@@ -809,6 +835,76 @@ export const AdminDashboardModal = ({
   const showToast = (msg: string) => {
     setActionSuccessMessage(msg);
     setTimeout(() => setActionSuccessMessage(null), 3000);
+  };
+
+  /**
+   * Add a delegated administrator.
+   *
+   * The server is the only authority on the list — it re-normalises, rejects the
+   * owner's own address, and refuses duplicates. This function therefore adopts
+   * `data.admins` rather than optimistically appending, so what the owner sees is
+   * always what is actually stored.
+   */
+  const handleAddAdmin = async (e: import('react').FormEvent) => {
+    e.preventDefault();
+    const email = newAdminEmail.trim();
+    if (!email) {
+      setActionErrorMessage('اكتب البريد الإلكتروني أولاً.');
+      setActionSuccessMessage(null);
+      return;
+    }
+    setBusyAdminEmail(email);
+    setActionErrorMessage(null);
+    setActionSuccessMessage(null);
+    try {
+      const res = await fetch('/api/admin/admins/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email }),
+      });
+      if (res.status === 401 || res.status === 404) { handleSessionExpired(); return; }
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: string[]; message?: string };
+      if (res.ok && data.success) {
+        setAdminEmails(Array.isArray(data.admins) ? data.admins : []);
+        setNewAdminEmail('');
+        showToast(`تمت إضافة ${email} كمسؤول.`);
+      } else {
+        // Never claim success on a 200 that did not persist — that is exactly the
+        // bug that made the old dashboard lie to the owner.
+        setActionErrorMessage(data.message || 'تعذّر إضافة المسؤول.');
+      }
+    } catch {
+      setActionErrorMessage('تعذّر الاتصال بالخادم.');
+    } finally {
+      setBusyAdminEmail(null);
+    }
+  };
+
+  const handleRemoveAdmin = async (email: string) => {
+    setBusyAdminEmail(email);
+    setActionErrorMessage(null);
+    setActionSuccessMessage(null);
+    try {
+      const res = await fetch('/api/admin/admins/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email }),
+      });
+      if (res.status === 401 || res.status === 404) { handleSessionExpired(); return; }
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: string[]; message?: string };
+      if (res.ok && data.success) {
+        setAdminEmails(Array.isArray(data.admins) ? data.admins : []);
+        showToast(`تمت إزالة ${email}.`);
+      } else {
+        setActionErrorMessage(data.message || 'تعذّر إزالة المسؤول.');
+      }
+    } catch {
+      setActionErrorMessage('تعذّر الاتصال بالخادم.');
+    } finally {
+      setBusyAdminEmail(null);
+    }
   };
 
   if (!isOpen) return null;
@@ -1609,6 +1705,82 @@ export const AdminDashboardModal = ({
                         className="w-5 h-5 accent-rose-500 rounded cursor-pointer"
                       />
                     </div>
+                  </div>
+
+                  {/* ── Delegated administrators ──────────────────────────────
+                      Deliberately OUTSIDE the settings <form>: granting or
+                      revoking access is a discrete owner action with its own
+                      result, and nesting it would let the Enter key in the e-mail
+                      field submit the unrelated wallet-number form instead. */}
+                  <div className="mt-6 rounded-2xl border border-rose-500/25 bg-rose-500/5 p-5">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-rose-500/15 flex items-center justify-center shrink-0">
+                        <Users className="w-4.5 h-4.5 text-rose-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-bold text-white">إضافة مسؤول معك</h3>
+                        <p className="text-[11px] text-slate-400 leading-relaxed mt-1">
+                          أضف أي شخص ليدير معك لوحة التحكم. سيظهر له الزر في الشريط الجانبي،
+                          لكنه <span className="text-rose-300 font-semibold">لن</span> يرى هذه القائمة
+                          ولن يستطيع إضافة أو حذف مسؤول آخر — هذه الصفحة أنت فقط.
+                        </p>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleAddAdmin} className="mt-4">
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="email"
+                          dir="ltr"
+                          value={newAdminEmail}
+                          onChange={(e) => setNewAdminEmail(e.target.value)}
+                          placeholder="name@example.com"
+                          disabled={busyAdminEmail !== null}
+                          className="flex-1 px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-white text-xs font-mono focus:border-rose-500 focus:outline-none disabled:opacity-50"
+                        />
+                        <button
+                          type="submit"
+                          disabled={busyAdminEmail !== null || newAdminEmail.trim() === ''}
+                          className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs transition shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 shrink-0"
+                        >
+                          {busyAdminEmail !== null && busyAdminEmail === newAdminEmail.trim() ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <User className="w-3.5 h-3.5" />
+                          )}
+                          إضافة مسؤول
+                        </button>
+                      </div>
+                    </form>
+
+                    {adminEmails.length > 0 ? (
+                      <ul className="mt-4 space-y-2">
+                        {adminEmails.map((email) => (
+                          <li
+                            key={email}
+                            className="flex items-center gap-2 rounded-xl border border-slate-700/70 bg-slate-950/60 px-3 py-2"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span dir="ltr" className="flex-1 min-w-0 truncate text-xs text-slate-200 font-mono">
+                              {email}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAdmin(email)}
+                              disabled={busyAdminEmail !== null}
+                              className="shrink-0 text-[10px] font-bold text-rose-300 hover:text-rose-100 hover:bg-rose-500/10 px-2 py-1 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {busyAdminEmail === email ? 'جارٍ الحذف…' : 'إزالة'}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-4 text-[11px] text-slate-500 flex items-center gap-1.5">
+                        <User className="w-3 h-3" />
+                        لا يوجد مسؤولون مضافون بعد.
+                      </p>
+                    )}
                   </div>
 
                   <button

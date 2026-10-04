@@ -29,6 +29,10 @@ import {
   startLimiterSweeper,
   weakSecretMessage,
   resolveAllowedOrigins,
+  normalizeAdmins,
+  isActiveAdmin,
+  MAX_ADMIN_EMAILS,
+  type AdminDelegate,
 } from "./security.js";
 
 const app = express();
@@ -611,6 +615,7 @@ function normalizePlatformSettings(value: unknown): typeof DEFAULT_ADMIN_SETTING
     // The owner's address is resolved from the environment, never from the
     // stored row, so editing settings cannot redirect owner privileges.
     adminEmail: DEFAULT_ADMIN_SETTINGS.adminEmail,
+    admins: normalizeAdmins(source.admins, OWNER_EMAIL),
   };
 }
 
@@ -1523,6 +1528,11 @@ const DEFAULT_ADMIN_SETTINGS = {
   supportWhatsappNumber: "01207782741",
   siteName: "إبنيلي | Ebnili AI Studio",
   adminEmail: OWNER_EMAIL,
+  /**
+   * Owner-delegated administrators. Empty by default — nobody is an admin until
+   * the owner adds them from the dashboard. See `normalizeAdminEmails`.
+   */
+  admins: [] as string[],
 };
 
 /**
@@ -1653,22 +1663,63 @@ function pinMatches(pin: unknown): boolean {
   return match;
 }
 
-// Every admin read/write route must present a valid session cookie AND belong to
-// the site owner account.
+// ── The two admin guards: WHO may use the console, and WHO may manage admins ──
+// The owner asked for an administrator who works alongside them — able to run
+// the dashboard, manage subscriptions and activate plans — but NOT able to add,
+// remove, suspend or re-activate anyone. Those are two different trust levels,
+// so they are two different guards rather than one flag on the client.
 //
-// OWNERSHIP: the PIN alone is not enough any more. The owner's address is
-// published in the public bundle and on the contact page, so admin access is
-// bound to the signed account session as well — knowing the e-mail is not
-// enough either, you need the account AND the PIN.
+//  ┌────────────────────┬──────────────────┬──────────────────────────┐
+//  │                    │ requireAdmin     │ requireOwner             │
+//  ├────────────────────┼──────────────────┼──────────────────────────┤
+//  │ owner account      │ ✅               │ ✅                       │
+//  │ active delegate    │ ✅               │ ❌ (404)                 │
+//  │ suspended delegate │ ❌ (404)         │ ❌ (404)                 │
+//  │ anyone else        │ ❌ (404)         │ ❌ (404)                 │
+//  └────────────────────┴──────────────────┴──────────────────────────┘
 //
-// 404 (not 401) for anyone else: the admin surface should simply not exist from
-// the outside rather than advertise itself with a "forbidden" answer.
+// OWNERSHIP: the PIN alone is not enough. The owner's address is published in
+// the public bundle and on the contact page, so admin access is bound to the
+// signed account session as well — knowing the e-mail is not enough either, you
+// need the account AND the PIN.
+//
+// 404 (not 401/403) for everyone else: the admin surface should simply not exist
+// from the outside rather than advertise itself with a "forbidden" answer.
+
+/** Cached delegate list, refreshed per request from the stored settings row. */
+async function loadDelegateAdmins(): Promise<AdminDelegate[]> {
+  return readStoredAdmins();
+}
+
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const session = readAuthSession(req as AuthReq);
+  if (!isValidAdminSession(readAdminCookie(req)) || !session) {
+    return res.status(404).json({ success: false, message: "Not found" });
+  }
+  if (isOwnerAccount(session)) return next();
+
+  // A delegate needs an async lookup, so the guard cannot be a plain middleware.
+  // The route list is short and this only runs for non-owners, who are rare.
+  void loadDelegateAdmins()
+    .then((list) => {
+      if (isActiveAdmin(list, session.email)) return next();
+      return res.status(404).json({ success: false, message: "Not found" });
+    })
+    .catch(() => res.status(404).json({ success: false, message: "Not found" }));
+}
+
+/**
+ * OWNER-ONLY guard: managing the admin list itself.
+ *
+ * A delegate passes `requireAdmin` and can run the console, but must never reach
+ * these routes — otherwise one co-admin could promote a friend, suspend the real
+ * owner, or lock themselves back out. `isOwnerAccount()` reads `OWNER_EMAIL`
+ * from the environment and nothing else, so no stored row can satisfy it.
+ */
+function requireOwner(req: Request, res: Response, next: NextFunction) {
+  const session = readAuthSession(req as AuthReq);
   if (!isOwnerAccount(session) || !isValidAdminSession(readAdminCookie(req))) {
-    return res
-      .status(404)
-      .json({ success: false, message: "Not found" });
+    return res.status(404).json({ success: false, message: "Not found" });
   }
   next();
 }
@@ -1829,12 +1880,178 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
       totalCreditsOutstanding: totalCredits,
       welcomeCreditsPerSignup: WELCOME_CREDITS,
     },
+    // The delegated-admin list ships inside `settings`, which is only ever built
+    // from the stored row and returned from this owner-only route. A delegated
+    // admin cannot reach it, which is what keeps "owner only" true.
     settings,
     accounts: publicAccounts,
     devices: devices.map(toPublicDevice),
     recentTransactions: paymentsRes.ok && Array.isArray(paymentsRes.data) ? paymentsRes.data.map(toPublicPayment) : [],
   });
 });
+
+// ── Owner: the delegated-admin list ───────────────────────────────────────────
+// WHY these two routes exist as their own endpoints instead of a form field:
+// the owner asked for a one-click control, and a separate route lets the button
+// report a precise failure ("that address is already an admin", "that is the
+// owner") instead of failing silently inside a large settings blob.
+//
+// SECURITY: all three sit behind `requireOwner`, NOT `requireAdmin`. A delegate
+// passes `requireAdmin` and can run the console, but must never reach these —
+// otherwise one co-admin could promote a friend, suspend the real owner, or lock
+// everyone out. This is the "not for any admin" half of the request.
+app.post("/api/admin/admins/add", requireOwner, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const email = normalizeEmail((req.body as { email?: string } | undefined)?.email);
+  if (!email || !email.includes("@")) {
+    return res.status(400).json({ success: false, message: "أدخل بريداً إلكترونياً صحيحاً." });
+  }
+  if (email === OWNER_EMAIL) {
+    return res.status(400).json({
+      success: false,
+      message: "هذا بريد صاحب الموقع — هو مالك اللوحة بالفعل ولا يحتاج إضافته.",
+    });
+  }
+
+  const current = await readStoredAdmins();
+  if (current.some((admin) => admin.email === email)) {
+    // A suspended entry still counts as present: re-adding must not silently
+    // hand the access back. The owner toggles it explicitly instead.
+    return res.status(409).json({
+      success: false,
+      message: "هذا البريد مُضاف بالفعل. فعّله من زر 'نشط' إن أردت إعطاءه صلاحية.",
+    });
+  }
+  if (current.length >= MAX_ADMIN_EMAILS) {
+    return res.status(400).json({ success: false, message: `وصلت للحد الأقصى (${MAX_ADMIN_EMAILS} مشرفاً).` });
+  }
+
+  const next = normalizeAdmins([...current, { email, active: true }], OWNER_EMAIL);
+  const saved = await writeStoredSettings({ admins: next });
+  if (!saved) {
+    return res.status(503).json({ success: false, message: "تعذّر حفظ المشرف. تأكد من تنفيذ supabase/projects.sql." });
+  }
+
+  res.json({ success: true, admins: next, added: email });
+});
+
+/**
+ * Suspend or re-activate a delegate WITHOUT removing them.
+ *
+ * This is the owner's on/off switch. Suspension takes effect on the delegate's
+ * very next request, because `requireAdmin` re-reads the list every time.
+ */
+app.post("/api/admin/admins/set-active", requireOwner, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const body = (req.body ?? {}) as { email?: string; active?: boolean };
+  const email = normalizeEmail(body.email);
+  if (!email) return res.status(400).json({ success: false, message: "أدخل بريداً إلكترونياً صحيحاً." });
+  // A missing `active` would be read as "false" by a naive check and silently
+  // suspend somebody, so require it explicitly.
+  if (typeof body.active !== "boolean") {
+    return res.status(400).json({ success: false, message: "قيمة التفعيل مطلوبة." });
+  }
+
+  const current = await readStoredAdmins();
+  if (!current.some((admin) => admin.email === email)) {
+    return res.status(404).json({ success: false, message: "هذا البريد ليس في قائمة المشرفين." });
+  }
+
+  const next = normalizeAdmins(
+    current.map((admin) => (admin.email === email ? { ...admin, active: body.active === true } : admin)),
+    OWNER_EMAIL,
+  );
+  const saved = await writeStoredSettings({ admins: next });
+  if (!saved) {
+    return res.status(503).json({ success: false, message: "تعذّر حفظ التغيير. تأكد من تنفيذ supabase/projects.sql." });
+  }
+
+  res.json({ success: true, admins: next, email, active: body.active === true });
+});
+
+app.post("/api/admin/admins/remove", requireOwner, async (req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const email = normalizeEmail((req.body as { email?: string } | undefined)?.email);
+  if (!email) return res.status(400).json({ success: false, message: "أدخل بريداً إلكترونياً صحيحاً." });
+
+  const current = await readStoredAdmins();
+  if (!current.some((admin) => admin.email === email)) {
+    return res.status(404).json({ success: false, message: "هذا البريد ليس في قائمة المشرفين." });
+  }
+
+  // Never let the owner delete themselves through this path — ownership comes
+  // from the environment, but removing the owner here would look like it worked
+  // while changing nothing, so reject it with an explanation instead.
+  if (email === OWNER_EMAIL) {
+    return res.status(400).json({ success: false, message: "لا يمكن إزالة صاحب الموقع." });
+  }
+
+  const next = normalizeAdmins(current.filter((admin) => admin.email !== email), OWNER_EMAIL);
+  const saved = await writeStoredSettings({ admins: next });
+  if (!saved) {
+    return res.status(503).json({ success: false, message: "تعذّر حفظ التغيير. تأكد من تنفيذ supabase/projects.sql." });
+  }
+
+  res.json({ success: true, admins: next, removed: email });
+});
+
+/**
+ * Read the delegated-admin list out of the stored settings row.
+ *
+ * Returns [] when the row is missing or unreadable rather than throwing, so a
+ * database hiccup surfaces as an honest "no admins yet" instead of a 500 that
+ * the owner cannot act on.
+ */
+async function readStoredAdmins(): Promise<AdminDelegate[]> {
+  try {
+    const rows = await dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
+      query: { select: "key,value", key: `eq.${SETTINGS_ROW_KEY}`, limit: "1" },
+    });
+    if (!rows.ok || !Array.isArray(rows.data) || !rows.data[0]) return [];
+    const value = rows.data[0].value;
+    const source = (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
+    return normalizeAdmins(source.admins, OWNER_EMAIL);
+  } catch (err) {
+    console.error("admins read failed:", err);
+    return [];
+  }
+}
+
+/** Merge `patch` into the stored settings row, preserving every other field. */
+async function writeStoredSettings(patch: Record<string, unknown>): Promise<boolean> {
+  try {
+    const current = await readRawSettings();
+    const merged = normalizePlatformSettings({ ...current, ...patch });
+    const written = await dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
+      method: "POST",
+      query: { on_conflict: "merge-duplicates" },
+      body: JSON.stringify({ key: SETTINGS_ROW_KEY, value: merged }),
+    });
+    return written.ok;
+  } catch (err) {
+    console.error("admins write failed:", err);
+    return false;
+  }
+}
+
+/** The raw stored settings object, or {} when absent — no validation here. */
+async function readRawSettings(): Promise<Record<string, unknown>> {
+  try {
+    const rows = await dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
+      query: { select: "key,value", key: `eq.${SETTINGS_ROW_KEY}`, limit: "1" },
+    });
+    if (!rows.ok || !Array.isArray(rows.data) || !rows.data[0]) return {};
+    const value = rows.data[0].value;
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 // ── Owner: credit controls ────────────────────────────────────────────────────
 // WHY: the dashboard needs to top a user up (support request, a good-review
