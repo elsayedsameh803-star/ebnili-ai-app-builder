@@ -680,7 +680,7 @@ export const StudioSidebar = ({
                     </button>
                   )}
 
-                  {/* ── Owner-only tools ──────────────────────────────────────────
+          {/* ── Owner-only tools ──────────────────────────────────────────
               Owner surfaces live HERE, inside the account panel, and only for
               the site owner. `isOwner` is the server-issued flag — see
               `isOwnerAccount`; server-side `requireOwner` is the real boundary. */}

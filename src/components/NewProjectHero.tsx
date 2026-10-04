@@ -76,7 +76,11 @@ export const NewProjectHero = ({
 
     setSpeechError(null);
 
-    const SpeechRecognitionCtor = (window as unknown as Record<string, new () => {
+    // WHY THE INLINE SHAPE: the Web Speech API is not in the DOM lib yet, so it
+    // is read off `window` through a cast. The constructor is declared as
+    // `| undefined` because the property is genuinely absent in Firefox/Safari
+    // — hence the guard below, which is the only thing that makes `new` legal.
+    type SpeechRecognitionCtor = new () => {
       lang: string;
       onstart: (() => void) | null;
       onend: (() => void) | null;
@@ -84,15 +88,11 @@ export const NewProjectHero = ({
       onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
       start: () => void;
       stop: () => void;
-    } | undefined>).SpeechRecognition || (window as unknown as Record<string, new () => {
-      lang: string;
-      onstart: (() => void) | null;
-      onend: (() => void) | null;
-      onerror: (() => void) | null;
-      onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-      start: () => void;
-      stop: () => void;
-    } | undefined>).webkitSpeechRecognition;
+    };
+
+    const speechWindow = window as unknown as Record<string, SpeechRecognitionCtor | undefined>;
+    const SpeechRecognitionCtor =
+      speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
       // Safari on iOS, Firefox and most in-app browsers do not ship the Web
       // Speech API. Say so inline instead of firing a native dialog.

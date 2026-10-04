@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
-import { Share2, X, Check, Copy, QrCode, Globe, Info } from 'lucide-react';
+import { Share2, X, Check, Copy, QrCode, Globe, Info, Terminal } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Language } from '../types';
 import { useModalAccessibility } from './useModalAccessibility';
+import { CommandTerminal } from './CommandTerminal';
 
 interface DeployModalProps {
   projectName: string;
@@ -29,6 +30,13 @@ export const DeployModal = ({
   language,
 }: DeployModalProps) => {
   const [copied, setCopied] = useState(false);
+  /**
+   * Two tabs, because they answer different questions: "how do I show this to
+   * someone right now" (share) versus "how do I put it on the internet
+   * permanently" (deploy). Hiding the second one behind a button used to make
+   * the product look like it had no deployment story at all.
+   */
+  const [tab, setTab] = useState<'share' | 'deploy'>('share');
   const handleClose = useCallback(() => onClose(), [onClose]);
   const dialogRef = useModalAccessibility(true, handleClose);
   const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'app';
@@ -48,7 +56,7 @@ export const DeployModal = ({
         role="dialog"
         aria-modal="true"
         aria-label={language === 'ar' ? 'مشاركة التطبيق' : 'Share your app'}
-        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150"
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150"
       >
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
@@ -73,6 +81,31 @@ export const DeployModal = ({
           </button>
         </div>
 
+        {/* Two tabs: share now vs. deploy for good. */}
+        <div className="flex gap-1 p-1 bg-slate-950/70 rounded-xl border border-slate-800">
+          {([['share', language === 'ar' ? 'مشاركة' : 'Share'], ['deploy', language === 'ar' ? 'نشر ودفع' : 'Deploy & push']] as const).map(
+            ([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                aria-selected={tab === id}
+                role="tab"
+                className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition cursor-pointer ${
+                  tab === id ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {id === 'deploy' && <Terminal className="w-3.5 h-3.5" aria-hidden="true" />}
+                {label}
+              </button>
+            ),
+          )}
+        </div>
+
+        {tab === 'deploy' ? (
+          <CommandTerminal projectName={projectName} language={language} />
+        ) : (
+          <>
         {/* Status badge — honest wording.
             The old badge claimed the app was "live on the global edge" before
             anything was published, which is a promise the platform cannot keep. */}
@@ -149,13 +182,17 @@ export const DeployModal = ({
           </div>
         </div>
 
-        {/* Honest note about what this does and does not do yet. */}
+        {/* Honest note about what this does and does not do yet.
+            The old text sent visitors to the export dialog for a ZIP, which was
+            a dead end — it gave them files and no way to publish them. The
+            "Deploy & push" tab above is now the real answer, so it is named
+            directly instead of describing the missing feature. */}
         <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[11px] text-amber-100 leading-relaxed">
           <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
           <span>
             {language === 'ar'
-              ? 'النشر على نطاق خاص والدومين المخصص غير مفعّلين بعد. للحصول على موقع يعمل دائماً، صدّر المشروع كملف ZIP من نافذة التصدير.'
-              : 'Custom-domain publishing is not enabled yet. For a site that is always online, export the project as a ZIP from the export dialog.'}
+              ? 'استخدم تبويب «نشر ودفع» للحصول على أوامر البناء والنشر جاهزة للنسخ، أو صدّر المشروع كملف ZIP. النشر على نطاق مخصّص غير مفعّل بعد.'
+              : 'Use the "Deploy & push" tab for copy-ready build and publish commands, or export the project as a ZIP. Custom-domain publishing is not enabled yet.'}
           </span>
         </div>
 
@@ -167,6 +204,8 @@ export const DeployModal = ({
             {language === 'ar' ? 'غير متاح حالياً' : 'Not available yet'}
           </span>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -480,15 +480,39 @@ function receiptStorageConfigured(): boolean {
   return supabase || s3;
 }
 
-/** Map a content type to a short, safe file extension for the object name. */
-function safeExtension(contentType: string): string {
-  const map: Record<string, string> = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/webp": "webp",
-    "application/pdf": "pdf",
-  };
-  return map[contentType] || "bin";
+/**
+ * The ONLY content types a receipt may be stored as.
+ *
+ * SECURITY — why this allowlist exists
+ * -----------------------------------
+ * `fileType` arrives from the request body, so it is attacker-controlled. It was
+ * previously forwarded verbatim into `Content-Type` on the storage `PUT`/`POST`,
+ * while `safeExtension()` quietly renamed the object to `.bin`. That combination
+ * is a stored-content-type spoof: a caller could post
+ * `fileType: "text/html"` with an HTML body and the bucket would hold an object
+ * that browsers treat as a page. On a public bucket that is stored XSS, and on a
+ * bucket fronted by a static host it is a phishing page on the owner's domain.
+ *
+ * Two things are now pinned instead of trusted:
+ *   • the type must be a member of this exact set, and
+ *   • the extension is DERIVED from the matched type, never from the input.
+ * Anything else is refused with 415 before a single byte is written.
+ */
+const RECEIPT_CONTENT_TYPES = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+} as const;
+
+type ReceiptContentType = keyof typeof RECEIPT_CONTENT_TYPES;
+
+/** Validate a caller-supplied type, ignoring case and any `;charset=` suffix. */
+function normalizeReceiptType(raw: unknown): ReceiptContentType | null {
+  const value = String(raw ?? "").split(";")[0]!.trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(RECEIPT_CONTENT_TYPES, value)
+    ? (value as ReceiptContentType)
+    : null;
 }
 
 /**
@@ -825,10 +849,17 @@ function ghStateNonce(): string {
   return crypto.randomBytes(16).toString("hex");
 }
 
-/** Signed, so a hand-edited cookie cannot smuggle a token in. */
+/**
+ * Signed, so a hand-edited cookie cannot smuggle a token in.
+ *
+ * Throws when no strong secret is configured rather than signing with a weak
+ * one: a token signed with a guessable key is a GitHub access token handed to
+ * anyone who reads the bundle. The caller is already inside a try/catch that
+ * answers with a JSON error, so a throw is the honest outcome here.
+ */
 function issueGhToken(value: StoredGhToken): string {
   const payload = Buffer.from(JSON.stringify(value), "utf-8").toString("base64url");
-  return `${payload}.${hmacB64With(payload, planSigningSecret())}`;
+  return `${payload}.${hmacB64With(payload, requirePlanSigningSecret())}`;
 }
 
 function readGhToken(req: AuthReq): StoredGhToken | null {
@@ -837,7 +868,11 @@ function readGhToken(req: AuthReq): StoredGhToken | null {
   const sep = token.indexOf(".");
   if (sep <= 0) return null;
   const body = token.slice(0, sep);
-  if (!safeEqual(token.slice(sep + 1), hmacB64With(body, planSigningSecret()))) return null;
+  // No secret configured means nothing can be verified — and an unverifiable
+  // cookie must be treated as absent, never as trusted.
+  const secret = planSigningSecret();
+  if (!secret) return null;
+  if (!safeEqual(token.slice(sep + 1), hmacB64With(body, secret))) return null;
   try {
     const parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf-8")) as StoredGhToken;
     if (!parsed?.accessToken || !parsed?.userId) return null;
@@ -1262,6 +1297,35 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
     });
   }
 
+  // SECURITY: the type is pinned to an allowlist BEFORE anything is written, and
+  // the extension below is derived from the matched type rather than from the
+  // caller's string. See `RECEIPT_CONTENT_TYPES`.
+  const receiptType = normalizeReceiptType(fileType);
+  if (!receiptType) {
+    return res.status(415).json({
+      success: false,
+      code: "UNSUPPORTED_RECEIPT_TYPE",
+      message: "صيغة الملف غير مدعومة. ارفع صورة PNG أو JPG أو WEBP أو ملف PDF.",
+    });
+  }
+
+  // SECURITY: the global parser limit is 15mb because project JSON is large, so
+  // without a check here any signed-in account could push a ~11mb base64 blob
+  // per request into the bucket. The payment limiter allows 10 writes a minute,
+  // which turns that into a cheap way to fill the owner's storage. A transfer
+  // receipt is a phone photo or a one-page PDF; 5mb is far above that and still
+  // refuses the abuse. The check is on the ENCODED length, which is what the
+  // request actually carried.
+  const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
+  const encodedBytes = Math.floor((fileData.length * 3) / 4);
+  if (encodedBytes > MAX_RECEIPT_BYTES) {
+    return res.status(413).json({
+      success: false,
+      code: "RECEIPT_TOO_LARGE",
+      message: "حجم الملف كبير جداً. الحد الأقصى 5 ميجابايت — صوّر الصورة بجودة أقل.",
+    });
+  }
+
   if (!receiptStorageConfigured()) {
     // Honest failure: the page falls back to sending the receipt on WhatsApp.
     return res.status(503).json({
@@ -1282,17 +1346,20 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
     senderPhone,
     transactionReference: reference,
     account: session?.email ?? "",
+    // The stored type is the VALIDATED one, so the metadata sidecar can never
+    // disagree with the bytes that were actually written.
     fileName: fileName || "receipt",
-    fileType,
+    fileType: receiptType,
     createdAt: new Date().toISOString(),
   };
 
   // Store the receipt bytes together with a metadata sidecar, under one object
-  // name, so the owner can review the pair later.
-  const objectKey = `${RECEIPT_BUCKET}/${record.id}.${safeExtension(fileType)}`;
+  // name, so the owner can review the pair later. The extension comes from the
+  // validated type, so the object's name and its stored type always agree.
+  const objectKey = `${RECEIPT_BUCKET}/${record.id}.${RECEIPT_CONTENT_TYPES[receiptType]}`;
   try {
     const base64 = fileData.includes(",") ? fileData.slice(fileData.indexOf(",") + 1) : fileData;
-    const ok = await storagePut(objectKey, base64, fileType || "application/octet-stream", JSON.stringify(record));
+    const ok = await storagePut(objectKey, base64, receiptType, JSON.stringify(record));
     if (!ok) throw new Error("storage rejected the write");
   } catch (err) {
     console.error("receipt upload failed:", err instanceof Error ? err.message : String(err));
@@ -1448,9 +1515,13 @@ app.get("/api/protection/status", async (req: Request, res: Response) => {
   }
 
   const now = new Date().toISOString();
+  // CORRECTNESS: same upsert fix as `touchAccount` — the conflict target must be
+  // named explicitly, otherwise PostgREST cannot resolve `device_id` and the row
+  // is never updated. A `Prefer` header is also added so the write is verified.
   const upsert = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
     method: "POST",
-    query: { on_conflict: "merge-duplicates" },
+    query: { device_id: `eq.${deviceId}`, on_conflict: "device_id" },
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       device_id: deviceId,
       fingerprint_hash: fingerprintHash,
@@ -1529,10 +1600,12 @@ const DEFAULT_ADMIN_SETTINGS = {
   siteName: "إبنيلي | Ebnili AI Studio",
   adminEmail: OWNER_EMAIL,
   /**
-   * Owner-delegated administrators. Empty by default — nobody is an admin until
-   * the owner adds them from the dashboard. See `normalizeAdminEmails`.
+   * Owner-delegated administrators, with their on/off switch.
+   *
+   * `{ email, active }` records, NOT plain strings: an admin can be suspended
+   * without losing their row. See `normalizeAdmins`.
    */
-  admins: [] as string[],
+  admins: [] as AdminDelegate[],
 };
 
 /**
@@ -2020,17 +2093,49 @@ async function readStoredAdmins(): Promise<AdminDelegate[]> {
   }
 }
 
-/** Merge `patch` into the stored settings row, preserving every other field. */
+/**
+ * Merge `patch` into the stored settings row, preserving every other field.
+ *
+ * SECURITY / CORRECTNESS — why the row is written BY KEY, not blindly
+ * --------------------------------------------------------------------
+ * The upsert below was `POST /ebnily_settings?on_conflict=merge-duplicates`
+ * with no `key` filter. `on_conflict=merge-duplicates` alone is a no-op
+ * preference for PostgREST: without the conflict target being resolvable it
+ * cannot resolve `key`, and the request either errors or — worse — INSERTs a
+ * SECOND row instead of updating the seeded one. That is exactly the reported
+ * symptom: the owner presses "add admin", the API answers 200, and the list is
+ * empty again on the next read because `readStoredAdmins()` reads
+ * `limit: "1"` and gets the untouched seed row back.
+ *
+ * Fixes applied here:
+ *  1. `key=eq.<SETTINGS_ROW_KEY>` in the query — PostgREST now upserts THAT row.
+ *  2. `Prefer: resolution=merge-duplicates` — the same instruction as a real
+ *     header, which is what PostgREST actually reads.
+ *  3. `Prefer: return=representation` — the write is verified by re-reading what
+ *     the database stored, so a silent no-op can never report success.
+ *  4. A re-read confirms the value landed. A write that reports `ok` but leaves
+ *     the old row is treated as a FAILURE, not a success.
+ */
 async function writeStoredSettings(patch: Record<string, unknown>): Promise<boolean> {
   try {
     const current = await readRawSettings();
     const merged = normalizePlatformSettings({ ...current, ...patch });
     const written = await dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
       method: "POST",
-      query: { on_conflict: "merge-duplicates" },
+      query: { key: `eq.${SETTINGS_ROW_KEY}`, on_conflict: "key" },
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
       body: JSON.stringify({ key: SETTINGS_ROW_KEY, value: merged }),
     });
-    return written.ok;
+    if (!written.ok) {
+      console.error("settings write failed:", written.status, written.error);
+      return false;
+    }
+
+    // SECURITY: never trust a 2xx on its own. `writeStoredSettings` gates the
+    // owner's admin list, so a silently-dropped write must fail loudly — the UI
+    // shows "تعذّر الحفظ" and the owner retries, instead of the button lying.
+    const verify = await readRawSettings();
+    return verify.admins !== undefined && JSON.stringify(verify.admins ?? null) === JSON.stringify(merged.admins ?? null);
   } catch (err) {
     console.error("admins write failed:", err);
     return false;
@@ -2129,16 +2234,42 @@ app.post("/api/admin/account/toggle-block", requireAdmin, async (req: Request, r
 app.post("/api/admin/settings", requireAdmin, async (req: Request, res: Response) => {
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const next = normalizePlatformSettings(body);
+
+  // SECURITY / CORRECTNESS — the delegated-admin list must survive a settings
+  // save. The body is a partial form payload (wallet number, site name, limit)
+  // and never contains `admins`, so normalising the body alone produced a
+  // settings object with `admins: []`. That row was then written back over the
+  // stored list, and the next "add admin" read an empty list and reported
+  // "already added" for an address the owner had just removed. The list is
+  // re-merged from the STORED row, so only the fields the form actually owns
+  // are changed. It stays owner-only to edit: this route merely preserves it.
+  const stored = await readRawSettings();
+  const next = normalizePlatformSettings({ ...stored, ...body });
+
+  // Same upsert bug as `writeStoredSettings`: without `key=eq.<key>` this
+  // inserts a duplicate row instead of updating the seed, and the next read with
+  // `limit: "1"` returns the untouched original.
   const updated = await dbRequest<DbSettingsRow[]>(SETTINGS_TABLE, {
     method: "POST",
-    query: { on_conflict: "merge-duplicates" },
+    query: { key: `eq.${SETTINGS_ROW_KEY}`, on_conflict: "key" },
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({ key: SETTINGS_ROW_KEY, value: next }),
   });
   if (!updated.ok) {
-    console.error("settings write failed:", updated.error);
+    console.error("settings write failed:", updated.status, updated.error);
     return res.status(503).json({ success: false, message: "تعذّر حفظ الإعدادات. تأكد من تنفيذ supabase/projects.sql." });
   }
+
+  // Verify rather than trusting the 2xx — the same reason the admin routes do.
+  const verify = await readRawSettings();
+  const storedAdmins = JSON.stringify(normalizeAdmins(stored.admins, OWNER_EMAIL));
+  if (JSON.stringify(normalizeAdmins(verify.admins, OWNER_EMAIL)) !== storedAdmins) {
+    return res.status(503).json({
+      success: false,
+      message: "تم الحفظ لكن قائمة المشرفين لم تتغيّر بأمان. راجع تنفيذ supabase/projects.sql.",
+    });
+  }
+
   res.json({ success: true, persisted: true, settings: next });
 });
 
@@ -2151,9 +2282,11 @@ app.post("/api/admin/device/toggle-block", requireAdmin, async (req: Request, re
   const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 200) : null;
 
   // An upsert so blocking a device that has never reported in still takes hold.
+  // The conflict target must be named explicitly — see `touchAccount`.
   const write = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
     method: "POST",
-    query: { on_conflict: "merge-duplicates" },
+    query: { device_id: `eq.${deviceId}`, on_conflict: "device_id" },
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       device_id: deviceId,
       fingerprint_hash: String(body.fingerprintHash ?? ""),
@@ -2205,9 +2338,11 @@ app.post("/api/admin/device/set-tier", requireAdmin, async (req: Request, res: R
     return res.status(400).json({ success: false, message: "الباقة غير صحيحة." });
   }
 
+  // The conflict target must be named explicitly — see `touchAccount`.
   const write = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
     method: "POST",
-    query: { on_conflict: "merge-duplicates" },
+    query: { device_id: `eq.${deviceId}`, on_conflict: "device_id" },
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       device_id: deviceId,
       fingerprint_hash: String(body.fingerprintHash ?? ""),
@@ -2979,9 +3114,20 @@ async function touchAccount(
   // The table's `tier` column is constrained to ('free','pro','business').
   const tier: Tier = staff ? "business" : "free";
 
+  // SECURITY / CORRECTNESS — the account row MUST actually be created here.
+  // This upsert was `on_conflict=merge-duplicates` with no `account_id=eq.<id>`
+  // filter. PostgREST cannot resolve the conflict target without a filter, so
+  // the request did not update the existing row: every sign-in either errored
+  // or created a duplicate, and `ebnily_accounts` stayed empty — which is why the
+  // dashboard reported 0 accounts and an empty users list.
+  //
+  // Three things make the upsert resolve against the PRIMARY KEY:
+  //   • `account_id=eq.<id>` — the row this request is about.
+  //   • `on_conflict=account_id` — an explicit conflict target.
+  //   • `Prefer: resolution=merge-duplicates` — the instruction PostgREST reads.
   const res = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
     method: "POST",
-    query: { on_conflict: "merge-duplicates" },
+    query: { account_id: `eq.${session.id}`, on_conflict: "account_id" },
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       account_id: session.id,

@@ -1,10 +1,11 @@
 import { useState, useCallback } from 'react';
-import { Download, X, Copy, Check, FileArchive, Terminal, Code, AlertCircle } from 'lucide-react';
+import { Download, X, Copy, Check, FileArchive, Code, AlertCircle } from 'lucide-react';
 import JSZip from 'jszip';
 import { Language } from '../types';
-import { buildProjectExport, slugify } from '../lib/auth';
+import { buildProjectExport } from '../lib/auth';
 import { exportProjectFiles } from '../lib/projects';
 import { useModalAccessibility } from './useModalAccessibility';
+import { CommandTerminal } from './CommandTerminal';
 
 interface ExportModalProps {
   projectName: string;
@@ -110,7 +111,7 @@ export const ExportModal = ({
         role="dialog"
         aria-modal="true"
         aria-label={language === 'ar' ? 'تصدير مشروع التطبيق' : 'Export project code'}
-        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150"
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 text-slate-100 animate-in fade-in zoom-in-95 duration-150"
       >
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
@@ -215,19 +216,13 @@ export const ExportModal = ({
           </div>
         </div>
 
-        {/* Option 3: Terminal Quick Start */}
-        <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-1 text-xs">
-          <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
-            <Terminal className="w-3 h-3 text-amber-400" />
-            <span>{language === 'ar' ? 'التشغيل المحلي عبر الطرفية:' : 'Terminal Quickstart:'}</span>
-          </div>
-          <pre className="font-mono text-[11px] text-slate-300 pt-1">
-            unzip {slugify(projectName)}.zip
-            {'\n'}cd {slugify(projectName)}
-            {'\n'}npm install
-            {'\n'}npm run dev
-          </pre>
-        </div>
+        {/* Option 3: Quick Start commands
+            Replaced a hard-coded four-line block. It always said `npm install`
+            / `npm run dev` for a ZIP whose contents depend on the project, and
+            it offered no way to publish — which is the only reason most visitors
+            opened this dialog. The same `CommandTerminal` used by the deploy
+            dialog now renders here, with the real project name. */}
+        <CommandTerminal projectName={projectName} language={language} />
 
         <div className="flex justify-end pt-2">
           <button

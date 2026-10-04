@@ -147,6 +147,48 @@ export function buildProjectExport(
     'npm run dev',
     '```',
     '',
+    '## Build for production',
+    '',
+    '```bash',
+    'npm run build      # writes the optimised site to dist/',
+    'npm run preview    # serve dist/ exactly as the host will',
+    '```',
+    '',
+    '## Publish it',
+    '',
+    'The project ships with `vercel.json` and `netlify.toml` already written,',
+    'so both hosts need no extra configuration.',
+    '',
+    '```bash',
+    '# Vercel — logs you in once in the browser, then deploys',
+    'npx vercel --prod',
+    '',
+    '# Netlify',
+    'npx netlify deploy --prod --dir=dist',
+    '```',
+    '',
+    '## Publish it with GitHub instead',
+    '',
+    'Create an empty repository on GitHub, then:',
+    '',
+    '```bash',
+    'git init',
+    'git add .',
+    'git commit -m "Initial commit"',
+    'git remote add origin https://github.com/OWNER/REPO.git',
+    'git branch -M main',
+    'git push -u origin main',
+    '```',
+    '',
+    'Import that repository on Vercel or Netlify and every later deploy is',
+    'just `git push`.',
+    '',
+    '## Secrets',
+    '',
+    '`.env.example` documents the variables this project understands. Copy it to',
+    '`.env` and fill in your own values — `.env` is git-ignored, so real keys',
+    'are never committed.',
+    '',
   ].join('\n');
 
   // No parseable document: fall back to dumping whatever files we were given.
@@ -232,6 +274,69 @@ export function buildProjectExport(
   out[p('package.json')] = `${JSON.stringify(packageJson, null, 2)}\n`;
   out[p('README.md')] = readme;
   out[p('.gitignore')] = 'node_modules\ndist\n.DS_Store\n';
+
+  // ── Deploy-ready files ────────────────────────────────────────────────────
+  // WHY: a visitor who exported the ZIP used to receive a folder with no host
+  // config, so "deploy it" meant hand-writing a config file from memory. These
+  // three files are the whole deployment story, already written and correct:
+  // a static build, no server, and secrets documented but never filled in.
+  out[p('vercel.json')] = [
+    '{',
+    '  "buildCommand": "npm run build",',
+    '  "outputDirectory": "dist",',
+    '  "installCommand": "npm install",',
+    '  "framework": "vite",',
+    '  "headers": [',
+    '    {',
+    '      "source": "/assets/(.*)",',
+    '      "headers": [',
+    '        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }',
+    '      ]',
+    '    }',
+    '  ]',
+    '}',
+    '',
+  ].join('\n');
+
+  out[p('netlify.toml')] = [
+    '[build]',
+    '  command = "npm run build"',
+    '  publish = "dist"',
+    '',
+    '[[headers]]',
+    '  for = "/assets/*"',
+    '  [headers.values]',
+    '    Cache-Control = "public, max-age=31536000, immutable"',
+    '',
+  ].join('\n');
+
+  // SECURITY: a template, never a value. Shipping a filled `.env` in a ZIP that
+  // gets committed to a public repository is how keys leak; this file is also
+  // in `.gitignore` below so it stays local.
+  out[p('.env.example')] = [
+    '# Copy this file to `.env` and fill in your own values.',
+    '# `.env` is git-ignored — NEVER commit real keys.',
+    '',
+    '# Your site URL, no trailing slash. Used for canonical links and OAuth.',
+    'APP_URL=https://your-app.vercel.app',
+    '',
+    '# Only needed if you connect Supabase from the generated project.',
+    'SUPABASE_URL=',
+    'SUPABASE_ANON_KEY=',
+    '',
+  ].join('\n');
+
+  out[p('.gitignore')] = [
+    'node_modules',
+    'dist',
+    '.DS_Store',
+    '',
+    '# Secrets — never commit these.',
+    '.env',
+    '.env.local',
+    '.env.*.local',
+    '',
+  ].join('\n');
 
   return { files: out, rootDir };
 }

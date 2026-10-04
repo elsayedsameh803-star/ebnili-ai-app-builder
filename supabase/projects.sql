@@ -188,5 +188,115 @@ create index if not exists ebnily_accounts_email_idx
 
 alter table public.ebnily_accounts enable row level security;
 
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- REPAIR SCRIPT  (safe to re-run)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- WHY THIS FILE EXISTS NOW
+-- -----------------------
+-- Both owner-dashboard problems reported ("تعذّر إضافة الأدمن" and "المستخدمون
+-- 0") had ONE shared root cause, and it is in this database, not in the UI:
+--
+--   Every write used `POST ...?on_conflict=merge-duplicates` with NO column
+--   filter. PostgREST cannot resolve a conflict target it is not told, so the
+--   upsert resolved against nothing: it inserted a duplicate row instead of
+--   updating the seeded one. Reads then used `limit: "1"` and kept returning the
+--   untouched original row — so an added admin vanished and no account was ever
+--   recorded, no matter how many times the owner retried.
+--
+-- The application code now names the conflict target explicitly
+-- (`on_conflict=key` / `on_conflict=account_id` / `on_conflict=device_id`).
+-- A conflict target MUST be backed by a unique index, so the statements below
+-- guarantee those indexes exist even on a database created before them, and
+-- they clean up the duplicate rows the old buggy upserts already created.
+--
+-- Run this once in the Supabase SQL editor. It is idempotent.
+
+-- 1) ── De-duplicate before adding a unique index ──────────────────────────────
+-- If the broken upsert ever appended a second 'platform' row, `limit: "1"` reads
+-- a coin-flip. Keep the row that actually carries the owner's data.
+
+delete from public.ebnily_settings s
+using public.ebnily_settings keep
+where s.key = 'platform'
+  and keep.key = 'platform'
+  and s.ctid < keep.ctid;
+
+delete from public.ebnily_accounts a
+using public.ebnily_accounts keep
+where a.account_id = keep.account_id
+  and a.ctid < keep.ctid;
+
+delete from public.ebnily_devices d
+using public.ebnily_devices keep
+where d.device_id = keep.device_id
+  and d.ctid < keep.ctid;
+
+-- 2) ── The conflict targets the API now names ────────────────────────────────
+-- A PRIMARY KEY already implies a unique index, so these are normally no-ops.
+-- They exist so an older table that was created WITHOUT one (or with the column
+-- dropped) still accepts `on_conflict=<column>` instead of failing every write.
+
+create unique index if not exists ebnily_settings_key_uniq
+  on public.ebnily_settings (key);
+
+create unique index if not exists ebnily_accounts_account_id_uniq
+  on public.ebnily_accounts (account_id);
+
+create unique index if not exists ebnily_devices_device_id_uniq
+  on public.ebnily_devices (device_id);
+
+-- 3) ── Column defaults the insert path relies on ─────────────────────────────
+-- `created_at` was referenced by the (now removed) trigger approach; the table
+-- is stamped by the API, so the column is kept with a safe default rather than
+-- left NOT NULL without one.
+
+alter table public.ebnily_accounts
+  alter column first_seen_at set default now(),
+  alter column last_seen_at  set default now();
+
+alter table public.ebnily_devices
+  alter column first_seen_at set default now(),
+  alter column last_seen_at  set default now();
+
+-- 4) ── Make sure the single settings row exists ───────────────────────────────
+
+insert into public.ebnily_settings (key, value)
+values (
+  'platform',
+  '{"orangeWalletNumber":"01207782741","defaultFreeLimit":5,"autoVerificationEnabled":true,"supportWhatsappNumber":"01207782741","siteName":"إبنيلي | Ebnili AI Studio","admins":[]}'::jsonb
+)
+on conflict (key) do update set value = public.ebnily_settings.value;
+
+-- 5) ── SERVICE-ROLE ACCESS (RLS) ─────────────────────────────────────────────
+-- RLS is ENABLED on every table above, and `revoke all … from anon, authenticated`
+-- locks the browser out — both are correct and must stay. They are also why the
+-- API must present the SERVICE key: `service_role` bypasses RLS by design.
+--
+-- The grant below is therefore NOT a new privilege — service_role already holds
+-- it in a stock Supabase project. It is stated explicitly so a project whose
+-- service_role grant was dropped can be repaired here instead of silently
+-- failing every admin write with "new row violates row-level security policy".
+
+grant usage on schema public to service_role;
+grant all on all tables in schema public to service_role;
+grant all on all sequences in schema public to service_role;
+
+-- 6) ── VERIFY ────────────────────────────────────────────────────────────────
+-- Run this after a user signs in once. It must list their row; if it returns
+-- nothing, /api/auth/me could not write, and `problems` in /api/health will name
+-- the missing configuration.
+--
+--   select account_id, email, provider, tier, credits, last_seen_at
+--     from public.ebnily_accounts
+--    order by first_seen_at desc
+--    limit 20;
+--
+-- And the delegated-admin list must live inside the ONE settings row:
+--
+--   select key, value -> 'admins' as admins
+--     from public.ebnily_settings
+--    where key = 'platform';
+
 revoke all on public.ebnily_accounts from anon, authenticated;
 

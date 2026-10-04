@@ -280,6 +280,32 @@ export const AdminDashboardModal = ({
 
   const [devices, setDevices] = useState<DeviceProtectionInfo[]>([]);
 
+  const [transactions, setTransactions] = useState<OrangeCashTransaction[]>([]);
+  const [isCheckingSession, setIsCheckingSession] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
+  // Filtering & Search
+  const [searchQuery, setSearchQuery] = useState('');
+  /**
+   * Tables the server could not read.
+   *
+   * WHY THIS EXISTS: the overview answers `partial: true` plus `failedTables`
+   * when one of the five tables is missing or unreadable. Previously the owner
+   * saw "0 users" with no explanation, and concluded nobody had ever signed up —
+   * when the real cause was an uninstalled table. This renders the actual names
+   * plus the fix, so the diagnosis is one screen instead of a support thread.
+   */
+  const [missingTables, setMissingTables] = useState<string[]>([]);
+  const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+  /**
+   * Failures are kept out of `actionSuccessMessage`.
+   *
+   * The single toast used to render everything on a green background, so a
+   * rejected write ("تعذّر تحديث الكريديت") looked exactly like a successful
+   * one. Two states, two colours.
+   */
+  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
+
   /**
    * Devices matching the search box.
    *
@@ -290,6 +316,10 @@ export const AdminDashboardModal = ({
    * The needle is lower-cased once: the search compares against an e-mail, and
    * `toLowerCase()` on every device on every keystroke is both slower and a
    * bug source when it is forgotten on one side only.
+   *
+   * WHY IT SITS BELOW `searchQuery`: it reads that state, so it has to be
+   * declared after it — a `useMemo` above its own dependency is a temporal-dead-
+   * zone crash on the first render, not a lint nit.
    */
   const visibleDevices = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
@@ -301,21 +331,6 @@ export const AdminDashboardModal = ({
       return device.registeredEmails?.some((email) => email.toLowerCase().includes(needle)) ?? false;
     });
   }, [devices, searchQuery]);
-  const [transactions, setTransactions] = useState<OrangeCashTransaction[]>([]);
-  const [isCheckingSession, setIsCheckingSession] = useState(false);
-  const [sessionError, setSessionError] = useState<string | null>(null);
-
-  // Filtering & Search
-  const [searchQuery, setSearchQuery] = useState('');
-  const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
-  /**
-   * Failures are kept out of `actionSuccessMessage`.
-   *
-   * The single toast used to render everything on a green background, so a
-   * rejected write ("تعذّر تحديث الكريديت") looked exactly like a successful
-   * one. Two states, two colours.
-   */
-  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
 
   // Verify the HttpOnly session cookie whenever the modal opens. The legacy
   // sessionStorage flag is only a hint and can survive an expired cookie.
@@ -332,6 +347,7 @@ export const AdminDashboardModal = ({
     setDataError(null);
     setSessionError(null);
     setAuthError(null);
+    setMissingTables([]);
 
     // The overview response is both session verification and dashboard data.
     // Use one request so opening the modal cannot race two state transitions.
@@ -401,6 +417,17 @@ export const AdminDashboardModal = ({
             5,
           ),
         });
+
+        // WHY THIS SURFACES: `partial: true` means one of the five tables could
+        // not be read. An empty users list with `partial: true` and
+        // `ebnily_accounts` in `failedTables` is a missing table — "0 accounts"
+        // then means "not installed", not "nobody has signed up". Without this
+        // the owner is told the site has no users when it is really unconfigured.
+        const failed = Array.isArray(data.failedTables)
+          ? data.failedTables.filter((name): name is string => typeof name === 'string')
+          : [];
+        setMissingTables(failed);
+
         setIsDataReady(true);
         setIsAuthenticated(true);
       } catch (err: unknown) {
@@ -644,6 +671,13 @@ export const AdminDashboardModal = ({
       setAdminEmails(normalizeAdminSettings(data.settings, null).admins);
       setDevices(normalizeDevices(data.devices));
       setTransactions(normalizeTransactions(data.recentTransactions));
+      // Kept in sync with the initial load, so a table that starts missing and is
+      // then installed clears its own warning on refresh — no reload required.
+      setMissingTables(
+        Array.isArray(data.failedTables)
+          ? data.failedTables.filter((name): name is string => typeof name === 'string')
+          : [],
+      );
       setIsDataReady(true);
       return true;
     } catch (err) {
@@ -1107,7 +1141,29 @@ export const AdminDashboardModal = ({
         ) : (
           /* Main Authenticated Admin View */
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            
+
+            {/* Unreadable tables — the difference between "0 users" and
+                "the users table is not installed". Without this the owner sees
+                an empty list and concludes nobody ever signed up. */}
+            {missingTables.length > 0 && (
+              <div className="mx-4 mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-[11px] leading-relaxed flex items-start gap-2 shrink-0">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="min-w-0">
+                  <span className="font-bold">
+                    {language === 'ar'
+                      ? 'جداول لم يتمكّن الخادم من قراءتها:'
+                      : 'Tables the server could not read:'}
+                  </span>{' '}
+                  <span className="font-mono">{missingTables.join('، ')}</span>
+                  <span className="block mt-1 text-amber-100/90">
+                    {language === 'ar'
+                      ? 'البيانات هنا غير مكتملة وليست فارغة فعلياً. نفّذ supabase/projects.sql (أو قسم الإصلاح REPAIR الموجود فيه) في محرّر SQL ثم اضغط إعادة المحاولة.'
+                      : 'The data here is incomplete, not genuinely empty. Run supabase/projects.sql (or its REPAIR section) in the SQL editor, then retry.'}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Tabs Bar */}
             <div className="px-6 py-2 bg-slate-950/60 border-b border-slate-800 flex items-center gap-2 shrink-0 overflow-x-auto">
               <button
@@ -1561,7 +1617,7 @@ export const AdminDashboardModal = ({
                                       ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                                       : 'bg-slate-800 text-slate-400'
                                   }`}>
-                                    {dev.associatedTier.toUpperCase()}
+                                    {(dev.associatedTier ?? 'free').toUpperCase()}
                                   </span>
                                 </td>
                                 <td className="p-3">
