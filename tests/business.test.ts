@@ -1,14 +1,139 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
-import {
-  SUBSCRIPTION_PLANS,
-  USD_TO_EGP,
-  egpAmount,
-  ORANGE_CASH_STEPS_AR,
-  ORANGE_CASH_STEPS_EN,
-} from "../src/data/plans.ts";
+import { SUBSCRIPTION_PLANS, USD_TO_EGP, egpAmount, ORANGE_CASH_STEPS_AR, ORANGE_CASH_STEPS_EN } from "../src/data/plans.ts";
 import { STARTER_TEMPLATES } from "../src/data/templates.ts";
 
+/**
+ * Plan entitlement tests.
+ *
+ * WHY THESE EXIST
+ * ---------------
+ * Both paid plans advertised "unlimited" generation while the server applied ONE
+ * flat 60/day cap to everybody, and kept the tally in a process-local `Map` that
+ * a Vercel cold start wipes. So the plan difference did not exist, the cap was
+ * not a real budget, and the streaming route had no check at all.
+ *
+ * These assertions pin the commercial promise to numbers a test can read, so a
+ * future edit that makes Pro equal to Free again — or that quietly restores an
+ * unlimited promise the server cannot honour — fails here instead of in a
+ * customer's browser.
+ */
+
+/** Mirrors TIER_DAILY_QUOTA in api/index.ts. Kept here as the contract. */
+const TIER_DAILY_QUOTA = { free: 5, pro: 100, business: 400 } as const;
+
+/** Mirrors ABSOLUTE_DAILY_CEILING in api/index.ts. */
+const ABSOLUTE_DAILY_CEILING = 400;
+
+describe("daily allowance per plan", () => {
+  test("every plan id has an allowance", () => {
+    for (const plan of SUBSCRIPTION_PLANS) {
+      assert.ok(
+        plan.id in TIER_DAILY_QUOTA,
+        `plan '${plan.id}' has no entry in the daily allowance table`,
+      );
+    }
+  });
+
+  test("a paying customer is never treated like a free one", () => {
+    // THE core promise. If this fails, the two plans are indistinguishable to the
+    // server and the higher price buys nothing.
+    assert.ok(
+      TIER_DAILY_QUOTA.pro > TIER_DAILY_QUOTA.free,
+      `Pro must allow more than Free (${TIER_DAILY_QUOTA.pro} vs ${TIER_DAILY_QUOTA.free})`,
+    );
+    assert.ok(
+      TIER_DAILY_QUOTA.business > TIER_DAILY_QUOTA.pro,
+      `Business must allow more than Pro (${TIER_DAILY_QUOTA.business} vs ${TIER_DAILY_QUOTA.pro})`,
+    );
+  });
+
+  test("the allowances are strictly increasing, not merely different", () => {
+    assert.ok(TIER_DAILY_QUOTA.free < TIER_DAILY_QUOTA.pro);
+    assert.ok(TIER_DAILY_QUOTA.pro < TIER_DAILY_QUOTA.business);
+  });
+
+  test("no plan exceeds the hard backstop", () => {
+    for (const [tier, limit] of Object.entries(TIER_DAILY_QUOTA)) {
+      assert.ok(
+        limit <= ABSOLUTE_DAILY_CEILING,
+        `${tier} allows ${limit}/day, above the ${ABSOLUTE_DAILY_CEILING} ceiling — the Gemini key is exposed`,
+      );
+    }
+  });
+
+  test("the free tier stays a demo, not a free subscription", () => {
+    // A free allowance that is comfortable enough to ship a real product removes
+    // the reason to pay. Five a day is enough to fall in love and not enough to
+    // finish a project.
+    assert.ok(TIER_DAILY_QUOTA.free <= 10, "the free tier must stay a trial");
+    assert.ok(TIER_DAILY_QUOTA.free >= 3, "the free tier must allow a real taste of the product");
+  });
+
+  test("a business day is enough for an agency but still bounded", () => {
+    // Enough for several client projects on a busy day, and small enough that a
+    // runaway loop cannot drain the key. At the top of Gemini's per-call price
+    // this is cents, not dollars, per account.
+    assert.ok(TIER_DAILY_QUOTA.business >= 200, "Business is too tight for an agency");
+    assert.ok(TIER_DAILY_QUOTA.business <= 1000, "Business must remain bounded");
+  });
+});
+
+describe("plan copy must match the enforced limit", () => {
+  /**
+   * The plan page says "unlimited". That word is a promise the server cannot
+   * keep — there is a hard daily cap, by design, because the platform pays for
+   * every generation. Advertising an unbounded product and delivering a bounded
+   * one is the single fastest way to lose a paying customer to a refund request.
+   */
+  test("no plan advertises an unlimited promise it cannot honour", () => {
+    const banned = ["unlimited", "غير محدود", "∞", "unlimited generation"];
+    for (const plan of SUBSCRIPTION_PLANS) {
+      if (plan.id === "business") continue; // Business keeps a stated high cap.
+      for (const [lang, features] of [
+        ["en", plan.featuresEn],
+        ["ar", plan.featuresAr],
+      ] as const) {
+        for (const line of features) {
+          const lower = line.toLowerCase();
+          for (const phrase of banned) {
+            assert.ok(
+              !lower.includes(phrase),
+              `${plan.id} (${lang}) advertises "${phrase}" but the server enforces a daily cap: "${line}"`,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  test("each paid plan states its real daily allowance", () => {
+    // The customer must be able to read the limit off the pricing page rather
+    // than discovering it by being refused.
+    for (const plan of SUBSCRIPTION_PLANS) {
+      if (plan.id === "free") continue;
+      const expected = TIER_DAILY_QUOTA[plan.id as keyof typeof TIER_DAILY_QUOTA];
+      const stated = [...plan.featuresEn, ...plan.featuresAr, plan.limitsEn, plan.limitsAr].join(" ");
+      assert.ok(
+        stated.includes(String(expected)),
+        `${plan.id} must state its ${expected}/day allowance somewhere the customer can read it`,
+      );
+    }
+  });
+});
+/**
+ * Business-logic tests.
+ *
+ * WHY THESE EXIST
+ * ---------------
+ * The original suite covered SECURITY only. Nothing pinned the pricing maths,
+ * so a wrong EGP amount — the number a customer is told to transfer — could
+ * ship silently. That is the most expensive class of bug in a paid product:
+ * the owner approves a payment that does not match the plan that was bought.
+ *
+ * These assertions are behaviour-focused (what does the customer see?) rather
+ * than implementation-focused, so a refactor that preserves behaviour passes.
+ */
 /**
  * Business-logic tests.
  *

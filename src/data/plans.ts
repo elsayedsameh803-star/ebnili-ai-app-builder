@@ -76,8 +76,8 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     id: 'pro',
     nameAr: 'باقة المحترفين (Pro)',
     nameEn: 'Professional Pro',
-    taglineAr: 'للمطورين ورواد الأعمال وصناع المنتجات الرقمية',
-    taglineEn: 'For creators, developers and indie hackers shipping fast',
+    taglineAr: 'للمطورين وصنّاع المنتجات: ١٠٠ توليد يومياً و٣ مشاريع نشطة',
+    taglineEn: 'For developers and indie makers: 100 generations a day, 3 live projects',
     priceMonthly: PRO_USD,
     priceYearly: PRO_USD_YEARLY,
     currency: 'USD',
@@ -87,34 +87,32 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     badgeEn: 'Most Popular 🔥',
     isPopular: true,
     featuresAr: [
-      'توليد وتعديل لا محدود للتطبيقات بالذكاء الاصطناعي (Unlimited)',
+      '١٠٠ توليد بالذكاء الاصطناعي يومياً — أكثر من كافية لمشروع كامل',
       'تصدير كود المشروع بالكامل كملف ZIP نظيف جاهز للنشر (React + Tailwind)',
       'تعديل بصري مباشر على أي عنصر بنقرة زر (Visual Inspector Pro)',
       'ربط قواعد بيانات Supabase و PostgreSQL و APIs خارجية',
-      'نشر مباشر على نطاقات مخصصة وتضمين (Embed) في المواقع',
-      'أولوية معالجة قصوى وسرعة استجابة فائقة بمحرك إبنيلي الذكي',
-      'حفظ ومزامنة لا محدودة لسجل الإصدارات والتراجع',
-      'تفعيل فوري ومباشر عبر فودافون كاش أو أورانج كاش (01207782741)'
+      'نشر مباشر على نطاق فرعي من إبنيلي + ٣ مشاريع نشطة',
+      'أولوية في الطابور وسرعة استجابة أعلى',
+      'مؤشر usage يوضح كم توليداً متبقياً لك كل يوم'
     ],
     featuresEn: [
-      'Unlimited AI app prompts and iterative refinements',
+      '100 AI generations per day — more than a full project needs',
       'Full source code ZIP export ready for production (React & Tailwind)',
-      'Advanced Visual Inspector: Click & modify any element directly',
+      'Advanced Visual Inspector: click & modify any element directly',
       'Connect Supabase, PostgreSQL schemas & external APIs',
-      'Deploy to live global preview & embed iframe widgets',
-      'Priority Ebnili AI processing pipeline with zero wait times',
-      'Unlimited revision history and rollback checkpoints',
-      'Fast activation via Orange Cash wallet (01207782741) after transfer review'
+      'Publish to a live Ebnili subdomain + 3 active projects',
+      'Priority processing queue',
+      'Live usage meter showing your remaining daily generations'
     ],
-    limitsAr: 'توليد غير محدود + تصدير كامل',
-    limitsEn: 'Unlimited prompts + Full code export'
+    limitsAr: '١٠٠ توليد/يوم · ٣ مشاريع',
+    limitsEn: '100 generations/day · 3 projects'
   },
   {
     id: 'business',
     nameAr: 'باقة الأعمال والشركات',
     nameEn: 'Business & Agency',
-    taglineAr: 'للشركات والوكالات التي تبني تطبيقات لعملائها',
-    taglineEn: 'For agencies and studios building software for clients',
+    taglineAr: 'للوكالات والفرق: مشاريع غير محدودة + نطاق مخصص + ٤٠٠ توليد يومياً',
+    taglineEn: 'For agencies: unlimited projects, your own domain, 400 generations a day',
     priceMonthly: BUSINESS_USD,
     priceYearly: BUSINESS_USD_YEARLY,
     currency: 'USD',
@@ -123,23 +121,25 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     badgeAr: 'للوكالات والفرق',
     badgeEn: 'Agencies',
     featuresAr: [
-      'كل مزايا باقة المحترفين Pro بلا أي حدود',
-      'تصدير كود White-label بدون شعارات المنصة',
-      'أولوية حصرية في خوادم المعالجة السريعة (Dedicated Priority Queue)',
-      'دعم فني خاص ومباشر عبر واتساب وأورانج كاش VIP',
-      'إمكانية توليد لوحات تحكم وأنظمة معقدة وتطبيقات SaaS كاملة',
-      'تفعيل فوري لعدة مشاريع مع إمكانية استخراج فواتير ضريبية للمؤسسات'
+      '٤٠٠ توليد بالذكاء الاصطناعي يومياً — استوديو وكالة كامل',
+      'مشاريع غير محدودة (Pro: ٣ فقط) — عميل جديد = مشروع جديد بلا تكلفة',
+      'نشر على نطاق مخصص باسم علامتك (Live URL خاص بك)',
+      'تصدير White-label بدون أي شعار أو نسبة لإبنيلي',
+      'وصول عبر API لأتمتة التوليد داخل أنظمة وكالتك',
+      'أولوية قصوى في طابور المعالجة + دعم VIP عبر واتساب',
+      'فواتير ضريبية للشركات (VAT) عند الطلب'
     ],
     featuresEn: [
-      'Everything in Pro tier with zero restrictions',
-      'White-label source code exports (no platform watermark)',
-      'Dedicated priority queue for instant generation',
-      'Direct VIP tech support via WhatsApp & Orange Cash desk',
-      'Complex multi-tier SaaS and CRM full-stack generation',
-      'Corporate invoicing & priority payment validation'
+      '400 AI generations per day — a full agency studio',
+      'Unlimited projects (Pro: only 3) — a new client costs you nothing extra',
+      'Deploy to your OWN custom domain (not a subdomain)',
+      'White-label export: no watermark, no attribution to Ebnili',
+      'API access to automate generation inside your agency tooling',
+      'Highest priority queue + VIP support over WhatsApp',
+      'Tax invoices (VAT) for registered businesses'
     ],
-    limitsAr: 'غير محدود + دعم VIP + White-label',
-    limitsEn: 'Unlimited + VIP support + White-label'
+    limitsAr: '٤٠٠ توليد/يوم · مشاريع + نطاق مخصص + API',
+    limitsEn: '400 generations/day · unlimited projects + custom domain + API'
   }
 ];
 

@@ -175,6 +175,20 @@ create table if not exists public.ebnily_accounts (
   last_ip          text,
   user_agent       text,
 
+  -- ── Daily AI allowance (per plan: free 5 / pro 100 / business 400) ─────────
+  -- WHY THIS IS PERSISTED AND NOT A COOKIE OR AN IN-MEMORY COUNTER: the quota
+  -- used to live in a process-local `Map`, which a Vercel cold start wipes and
+  -- two instances never share. That "limit" was reset by traffic, so it bounded
+  -- a burst rather than a day's spending — and the SSE generation route had no
+  -- check at all. Counting here makes the allowance real: it survives a redeploy,
+  -- a sign-out, another device and a second instance.
+  --
+  -- `ai_day` is the UTC day the counter belongs to, stored as YYYY-MM-DD. The
+  -- daily reset is therefore free: a request on a new day simply does not match
+  -- `ai_day = today`, so the counter restarts from zero. No cron, no cleanup.
+  ai_used          integer     not null default 0,
+  ai_day           date,
+
   tier             text        not null default 'free'
                      check (tier in ('free','pro','business')),
   is_blocked       boolean     not null default false,
@@ -301,6 +315,26 @@ delete from public.ebnily_devices d
 using public.ebnily_devices keep
 where d.device_id = keep.device_id
   and d.ctid < keep.ctid;
+
+-- ── 2.3  DAILY AI ALLOWANCE — the columns that make the plan limit real ──────
+-- WHY THIS IS A REPAIR, NOT JUST A CREATE
+-- ----------------------------------------
+-- A database created before this change has an `ebnily_accounts` table WITHOUT
+-- `ai_used` / `ai_day`, so the quota code would have nothing to read and would
+-- treat every account as having spent nothing — which is worse than having no
+-- quota at all, because it would look correct.
+--
+-- Both statements are `if not exists`, so they are no-ops on a fresh database
+-- (PHASE 1 above already created them) and a real migration on an old one.
+-- Existing rows get ai_used = 0 / ai_day = NULL, which reads as "nothing spent
+-- today" — the correct starting state, and NOT a free day of double spending,
+-- because the counter is only trusted when `ai_day` equals today.
+
+alter table public.ebnily_accounts
+  add column if not exists ai_used integer not null default 0;
+
+alter table public.ebnily_accounts
+  add column if not exists ai_day  date;
 
 -- 2) ── The conflict targets the API now names ────────────────────────────────
 -- A PRIMARY KEY already implies a unique index, so these are normally no-ops.
