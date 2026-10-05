@@ -424,9 +424,9 @@ export default function App() {
     return () => clearInterval(id);
   }, [isGenerating]);
 
-  const AUTOSAVE_KEY = 'ebnili_autosave_v1';
-
-
+  // NOTE: the old `AUTOSAVE_KEY` constant here was never read or written by any
+  // code — it was a leftover from a localStorage autosave that the server store
+  // replaced. It is removed so nobody assumes a second save path exists.
   const [currentPlanSteps, setCurrentPlanSteps] = useState<string[]>([]);
   // Prompt of the last generation that failed, so the chat can offer a real
   // "try again" instead of making the user retype a long specification.
@@ -496,13 +496,27 @@ export default function App() {
 
   // Auto-save: every project is stored under its own id, debounced, so a
   // refresh (or a crashed tab) never costs a generated site.
+  //
+  // WHY A REF, NOT A DEPENDENCY: `projectId` flips from null to a real id in the
+  // same tick a generation finishes, and the id the SERVER issues arrives later
+  // still. Reading the state variable inside the timer body would save a project
+  // under whichever id happened to be current when the 800ms elapsed — which is
+  // how an update ended up PATCHing a row that did not exist yet, silently
+  // dropping the save. The ref is read at the moment of writing instead.
+  const projectIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+
   useEffect(() => {
     if (!projectId || isGenerating) return;
     if (!hasRealContent(project.code)) return;
     const timer = setTimeout(() => {
+      // The id is re-read here, at write time, not captured at schedule time.
+      const id = projectIdRef.current ?? projectId;
       if (authUser) {
         // The server owns the row; the id came from it, so this is an update.
-        void updateRemoteProject(projectId, {
+        void updateRemoteProject(id, {
           name: project.name,
           code: project.code,
           files: project.files,
@@ -510,13 +524,36 @@ export default function App() {
           theme: project.theme,
         })
           .then(() => {
-            cacheProjectBody(projectId, project);
+            cacheProjectBody(id, project);
             void refreshProjectList();
           })
-          .catch(() => setProjectsSyncError('تعذّر حفظ المشروع على الخادم.'));
+          // A 404 means the row was never created — the first-generation create
+          // did not land. Fall back to creating it so a generated site is never
+          // lost to a race between "mint the id" and "write the row".
+          .catch(async () => {
+            try {
+              const created = await createRemoteProject({
+                ...project,
+                id,
+                name: project.name,
+                code: project.code,
+                files: project.files,
+                versions: project.versions,
+                theme: project.theme,
+              });
+              projectIdRef.current = created.id;
+              setProjectId(created.id);
+              setActiveId(created.id);
+              cacheProjectBody(created.id, project);
+              void refreshProjectList();
+            } catch {
+              cacheProjectBody(id, project);
+              setProjectsSyncError('تعذّر حفظ المشروع على الخادم — حُفظ على هذا الجهاز فقط.');
+            }
+          });
         return;
       }
-      saveProject(projectId, project, chatMessages);
+      saveProject(id, project, chatMessages);
       void refreshProjectList();
     }, 800);
     return () => clearTimeout(timer);
@@ -701,8 +738,15 @@ export default function App() {
         updatedAt: importedAt,
         theme: createBlankProject().theme,
       });
-      setProjectId(null);
-      setActiveId(null);
+      // SECURITY / CORRECTNESS — mint the id HERE instead of clearing it.
+      // `setProjectId(null)` used to run right after `setProject`, which left the
+      // import with no id at all: the auto-save effect bails out on a falsy
+      // `projectId`, so an imported repository was never persisted and vanished
+      // the moment the user left the page. Minting it here means the imported
+      // tree lands in its own saved project and is listed like any other.
+      const importedId = newProjectId();
+      setProjectId(importedId);
+      setActiveId(importedId);
       setSelectedElement(null);
       setHasStarted(true);
       setLastFailedPrompt(null);
@@ -745,13 +789,6 @@ export default function App() {
   const commitGeneratedSite = (prompt: string, rawCode: string, appName?: string) => {
     const updatedCode = closeDocument(rawCode) || project.code;
     const name = appName || prompt.slice(0, 25);
-    // The first real generation mints the project id, so the list never fills
-    // up with empty placeholders and the work is saved from the first second.
-    if (!projectId) {
-      const id = newProjectId();
-      setProjectId(id);
-      setActiveId(id);
-    }
     const newVersionNum = `v1.0`;
 
     const newVersion: VersionHistoryItem = {
@@ -770,9 +807,10 @@ export default function App() {
 
     setProject((prev) => ({
       ...prev,
-      // The stored id is the source of truth, so a re-opened project is saved
-      // back to the right slot instead of creating a duplicate.
-      id: projectId ?? prev.id,
+      // `localId` (not the stale `projectId` state) is the id this project is
+      // being saved under, so the row the server creates and the state the UI
+      // renders always point at the same slot.
+      id: localId,
       name,
       description: prompt.slice(0, 80),
       code: updatedCode,
@@ -784,9 +822,56 @@ export default function App() {
     // A signed-in account's first generation CREATES the row on the server, and
     // the server mints the id. That is what guarantees one row per project with
     // a real owner — a reload can never leave a phantom or a duplicate behind.
+    //
+    // SECURITY / CORRECTNESS — why `localId` is carried alongside `projectId`
+    // ------------------------------------------------------------------------
+    // `projectId` is React state, so the `setProjectId(id)` above has NOT taken
+    // effect yet when the next line reads it. The `if (!projectId)` branch
+    // therefore ran with the OLD value: on a fresh start that is `null`, so
+    // `setProjectId(localId)` was issued AND `createRemoteProject` ran — and the
+    // two ids competed for `getActiveId()`. Whichever lost, a later reload read a
+    // different id than the row the server had just created, so the project came
+    // back empty and the user was told to start over.
+    //
+    // `localId` is the id minted in THIS call, so it is never stale. Both the
+    // guest path and the server path now agree on one id, and the server id
+    // replaces it as soon as the row exists.
+    const localId = projectId ?? newProjectId();
+    setProjectId(localId);
+    setActiveId(localId);
+
+    // IMMEDIATE PERSIST, THEN DEBOUNCED
+    // -------------------------------
+    // The auto-save effect above deliberately skips while `isGenerating` is true,
+    // so it only runs 800ms AFTER this function returns. A user who generates a
+    // site and immediately closes the tab, switches projects, or loses signal
+    // loses the whole thing — which is exactly the reported "built it and it was
+    // gone" symptom. Saving the finished document here means the work is durable
+    // the moment it exists, and the debounced effect only handles later edits.
+    //
+    // The guest store is synchronous and safe to call directly. For a signed-in
+    // account the row is created below, which is what gives it a real owner.
+    if (!authUser) {
+      const nextProject: AppProject = {
+        ...project,
+        id: localId,
+        name,
+        description: prompt.slice(0, 80),
+        code: updatedCode,
+        files: { ...project.files, 'index.html': updatedCode },
+        versions: [newVersion, ...project.versions],
+        updatedAt: new Date().toISOString(),
+      };
+      saveProject(localId, nextProject, chatMessages);
+      void refreshProjectList();
+    }
+
     if (authUser && !projectId) {
       const nextProject: AppProject = {
         ...project,
+        // Seed the row with the id we just chose so the client's state and the
+        // server's row agree from the very first byte.
+        id: localId,
         name,
         description: prompt.slice(0, 80),
         code: updatedCode,
@@ -800,7 +885,15 @@ export default function App() {
           cacheProjectBody(created.id, nextProject);
           void refreshProjectList();
         })
-        .catch(() => setProjectsSyncError('تعذّر إنشاء المشروع على الخادم.'));
+        .catch(() => {
+          // SECURITY / HONESTY: a failed create must not leave the browser
+          // pointing at an id the server never issued. Falling back to the local
+          // id keeps the guest cache usable, and `projectsSyncError` above tells
+          // the owner the server copy is missing instead of silently diverging.
+          cacheProjectBody(localId, nextProject);
+          setProjectsSyncError('تعذّر إنشاء المشروع على الخادم — حُفظ محلياً فقط.');
+          void refreshProjectList();
+        });
     }
 
     const assistantMsg: ChatMessage = {

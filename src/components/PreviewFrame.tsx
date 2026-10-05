@@ -220,16 +220,31 @@ export const PreviewFrame = ({
 
   // Determine viewport styles based on deviceMode
   //
-  // MOBILE: the frames carry fixed pixel sizes (375×720 / 768px) that are
-  // larger than a phone's remaining space, so the preview was being clipped
-  // and looked blank. `max-w-full max-h-full` lets the frame shrink into
-  // whatever space is actually available instead of overflowing it.
+  // WHY A PHONE ALWAYS SHOWS THE SITE AT FULL WIDTH
+  // ------------------------------------------------
+  // The mobile frame used to carry `w-[375px] h-[720px] border-4 rounded-[24px]`
+  // — a picture of a phone. Inside a real phone that frame is WIDER than the
+  // screen, so `max-w-full` clipped it and the visitor saw a sliver of a page
+  // squeezed into the left edge, with dead space beside it. That reads as "the
+  // preview is broken", which is exactly what was reported.
+  //
+  // The fix is to drop the mock frame on a phone and let the frame fill the
+  // space, because on a phone the phone IS the frame. `max-sm:` keeps the
+  // device mock for tablet/desktop widths, where it is still useful.
+  //
+  // `dvh` is used for the height because `100vh` on mobile browsers includes the
+  // collapsing URL bar, which is what pushed the bottom of the page off-screen.
+  const isNarrow = typeof window !== 'undefined' && window.innerWidth < 640;
   const getDeviceStyles = () => {
     switch (deviceMode) {
       case 'mobile':
-        return 'w-[375px] max-w-full h-[720px] max-h-full rounded-[24px] sm:rounded-[36px] border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
+        return isNarrow
+          ? 'w-full h-full max-sm:rounded-none max-sm:border-0 bg-white'
+          : 'w-[375px] max-w-full h-[720px] max-h-full rounded-[24px] sm:rounded-[36px] border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
       case 'tablet':
-        return 'w-[768px] max-w-full h-[86%] max-h-full rounded-xl sm:rounded-2xl border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
+        return isNarrow
+          ? 'w-full h-full max-sm:rounded-none max-sm:border-0 bg-white'
+          : 'w-[768px] max-w-full h-[86%] max-h-full rounded-xl sm:rounded-2xl border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
       case 'desktop':
       default:
         return 'w-full h-full rounded-none border-0';
