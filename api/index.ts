@@ -1860,8 +1860,47 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
     });
   }
 
+  // A column that does not exist in an older database used to blank the WHOLE
+  // payments view: PostgREST rejects the entire query with a 400 when a single
+  // name in `select` is unknown, so one stale `account_id` cost the owner the
+  // transaction list AND the revenue figure ("payments, revenue unreadable").
+  //
+  // These lists are narrowed to the columns the dashboard actually renders, and
+  // a column is added to the select ONLY when the database really has it. The
+  // probe is cached per process so this costs one extra request, not one per
+  // dashboard poll.
+  const PAYMENT_COLUMNS = [
+    "id", "account_email", "account_id", "plan_id", "billing_cycle",
+    "amount_egp", "amount_usd", "sender_phone", "transaction_ref",
+    "receipt_path", "receipt_file_name", "notes", "status",
+    "submitted_at", "reviewed_at",
+  ] as const;
+
+  /** Columns present in `ebnily_payments`, cached after the first probe. */
+  let paymentsColumnsCache: Set<string> | null = null;
+  async function resolvePaymentColumns(): Promise<Set<string>> {
+    if (paymentsColumnsCache) return paymentsColumnsCache;
+    // An empty select with a tiny limit asks PostgREST for the table's own
+    // metadata through a cheap round-trip; any 200 means the table is readable.
+    const probe = await dbRequest<unknown[]>(PAYMENTS_TABLE, {
+      query: { select: "*", limit: "1" },
+    });
+    const row = Array.isArray(probe.data) ? probe.data[0] : null;
+    // A fully empty table returns no row, so the fallback is the full list —
+    // which is correct for a database created from the current schema.
+    paymentsColumnsCache =
+      row && typeof row === 'object'
+        ? new Set(Object.keys(row as Record<string, unknown>))
+        : new Set<string>(PAYMENT_COLUMNS);
+    return paymentsColumnsCache;
+  }
+
+  const paymentColumns = await resolvePaymentColumns();
+  const available = PAYMENT_COLUMNS.filter((col) => paymentColumns.has(col));
+  // Never emit an empty `select` — PostgREST would return every column, which is
+  // the exact failure this guard exists to prevent.
   const paymentSelect =
-    "id,account_email,account_id,plan_id,billing_cycle,amount_egp,amount_usd,sender_phone,transaction_ref,receipt_path,receipt_file_name,notes,status,submitted_at,reviewed_at";
+    available.length > 0 ? available.join(",") : "id,status,amount_egp,plan_id,submitted_at";
   const deviceSelect =
     "device_id,fingerprint_hash,account_email,screen,timezone,platform,user_agent,ip_address,is_blocked,block_reason,free_used,free_limit,tier,first_seen_at,last_seen_at";
   const accountSelect =
@@ -1879,6 +1918,10 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
       dbRequest<DbDevice[]>(DEVICES_TABLE, {
         query: { select: deviceSelect, order: "last_seen_at.desc", limit: "200" },
       }),
+      // SECURITY / CORRECTNESS: this read feeds the revenue figure, so it selects
+      // only the columns it actually sums — `amount_egp` and `plan_id`. Asking for
+      // anything else made an older table fail with 400 and report "revenue
+      // unreadable" even though the column it needed was present the whole time.
       dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
         query: { select: "amount_egp,plan_id,status", status: "eq.confirmed", limit: "1000" },
       }),
@@ -1894,11 +1937,30 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
 
   // One failing read must not blank the whole dashboard: report what we could
   // load and name the tables that failed.
+  //
+  // WHY THE DISTINCTION BELOW MATTERS: "payments" and "revenue" were two separate
+  // reads of the SAME table, so a single missing column printed both names and the
+  // owner was told two tables were broken. `failedTables` now carries each table
+  // ONCE, and `failedDetails` carries the real HTTP status and message — so the
+  // next occurrence is diagnosable instead of guesswork.
   const failed: string[] = [];
-  if (!paymentsRes.ok) failed.push("payments");
-  if (!devicesRes.ok) failed.push("devices");
-  if (!confirmedRes.ok) failed.push("revenue");
-  if (!accountsRes.ok) failed.push("accounts");
+  // An OBJECT, not an array: `note()` writes one entry per failing table below,
+  // and the dashboard renders `Object.entries(failedDetails)` as a list of
+  // `table: 400: <the database's own message>` lines.
+  const failedDetails: Record<string, string> = {};
+  const note = (label: string, res: { ok: boolean; status: number; error?: string }) => {
+    if (res.ok) return;
+    if (!failed.includes(label)) failed.push(label);
+    // The server's own message names the missing column or the missing table,
+    // which is exactly the fact the owner needs to fix it.
+    failedDetails[label] = `${res.status}: ${(res.error ?? "unknown").slice(0, 160)}`;
+  };
+  note("payments", paymentsRes);
+  note("devices", devicesRes);
+  // `revenue` reads `ebnily_payments` too — only surface it when payments ITSELF
+  // succeeded, otherwise it is the same fault reported twice.
+  if (paymentsRes.ok) note("revenue", confirmedRes);
+  note("accounts", accountsRes);
 
   const devices = devicesRes.ok && Array.isArray(devicesRes.data) ? devicesRes.data : [];
   const confirmed = confirmedRes.ok && Array.isArray(confirmedRes.data) ? confirmedRes.data : [];
@@ -1935,6 +1997,11 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
     configured: true,
     partial: failed.length > 0,
     failedTables: failed,
+    // WHY: the owner was told "payments unreadable" with no way to find out WHY.
+    // This carries the database's own message (e.g. which column is missing), so
+    // the next report is self-diagnosing. Never contains credentials — only the
+    // HTTP status and PostgREST's text.
+    failedDetails,
     stats: {
       totalDevicesCount: devices.length,
       blockedDevicesCount: devices.filter((d) => d.is_blocked).length,

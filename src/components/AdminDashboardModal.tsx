@@ -296,6 +296,15 @@ export const AdminDashboardModal = ({
    * plus the fix, so the diagnosis is one screen instead of a support thread.
    */
   const [missingTables, setMissingTables] = useState<string[]>([]);
+  /**
+   * The database's own error text per failed table.
+   *
+   * WHY: "payments unreadable" alone told the owner nothing actionable. PostgREST
+   * names the exact problem — `column ebnily_payments.account_id does not exist`
+   * — and that single line is the whole diagnosis. Surfacing it here replaces a
+   * support conversation with a fix.
+   */
+  const [failedDetails, setFailedDetails] = useState<Record<string, string>>({});
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
   /**
    * Failures are kept out of `actionSuccessMessage`.
@@ -348,6 +357,7 @@ export const AdminDashboardModal = ({
     setSessionError(null);
     setAuthError(null);
     setMissingTables([]);
+    setFailedDetails({});
 
     // The overview response is both session verification and dashboard data.
     // Use one request so opening the modal cannot race two state transitions.
@@ -427,6 +437,7 @@ export const AdminDashboardModal = ({
           ? data.failedTables.filter((name): name is string => typeof name === 'string')
           : [];
         setMissingTables(failed);
+        setFailedDetails(isRecord(data.failedDetails) ? (data.failedDetails as Record<string, string>) : {});
 
         setIsDataReady(true);
         setIsAuthenticated(true);
@@ -678,6 +689,7 @@ export const AdminDashboardModal = ({
           ? data.failedTables.filter((name): name is string => typeof name === 'string')
           : [],
       );
+      setFailedDetails(isRecord(data.failedDetails) ? (data.failedDetails as Record<string, string>) : {});
       setIsDataReady(true);
       return true;
     } catch (err) {
@@ -1155,10 +1167,21 @@ export const AdminDashboardModal = ({
                       : 'Tables the server could not read:'}
                   </span>{' '}
                   <span className="font-mono">{missingTables.join('، ')}</span>
+                  {/* WHY: the database's own message. "column X does not exist"
+                      IS the fix list — no guessing, no support thread. */}
+                  {Object.keys(failedDetails).length > 0 && (
+                    <ul className="mt-1.5 space-y-0.5 font-mono text-[10px] text-amber-100/80" dir="ltr">
+                      {Object.entries(failedDetails).map(([table, detail]) => (
+                        <li key={table} className="break-all">
+                          <span className="font-semibold">{table}</span>: {detail}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <span className="block mt-1 text-amber-100/90">
                     {language === 'ar'
-                      ? 'البيانات هنا غير مكتملة وليست فارغة فعلياً. نفّذ supabase/projects.sql (أو قسم الإصلاح REPAIR الموجود فيه) في محرّر SQL ثم اضغط إعادة المحاولة.'
-                      : 'The data here is incomplete, not genuinely empty. Run supabase/projects.sql (or its REPAIR section) in the SQL editor, then retry.'}
+                      ? 'البيانات هنا غير مكتملة وليست فارغة فعلياً. نفّذ قسم "COLUMN REPAIR" ثم "REPAIR" من ملف supabase/projects.sql في محرّر SQL، ثم اضغط إعادة المحاولة.'
+                      : 'The data here is incomplete, not genuinely empty. Run the "COLUMN REPAIR" then "REPAIR" sections of supabase/projects.sql in the SQL editor, then retry.'}
                   </span>
                 </div>
               </div>

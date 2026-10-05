@@ -1,7 +1,40 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EBNILY  ·  Supabase schema + repair script
+-- Run this ONCE in the Supabase SQL editor. Safe to run again at any time:
+-- every statement below is `if not exists`, `on conflict … do nothing`, or a
+-- `do $$ … if not exists` guard, so re-running repairs an existing database
+-- instead of breaking it.
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- WHY THIS FILE IS SPLIT INTO TWO PHASES  (keep the order!)
+-- ---------------------------------------------
+-- The column-repair block for `ebnily_payments` used to sit ABOVE that table's
+-- own `create table if not exists`. On a database where the table did not exist
+-- yet, the very first ALTER aborted the whole run with:
+--
+--     ERROR:  relation "public.ebnily_payments" does not exist
+--
+-- and every statement after it was silently skipped. The layout below fixes
+-- that permanently:
+--
+--   PHASE 1  ·  CREATE   →  every `create table if not exists` (plus its indexes)
+--                           comes FIRST. Nothing in this phase refers to a
+--                           relation it has not just created, so the script can
+--                           never stop with "relation … does not exist".
+--   PHASE 2  ·  ALTER    →  every `alter table` / column repair / constraint /
+--                           unique index / RLS / revoke / seed / grant comes
+--                           SECOND, once all five relations are guaranteed to
+--                           exist.
+--
+-- ═══════════════════════════════════════════════════════════════════════════
+--  PHASE 1 · CREATE  —  the five tables, in creation order
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- ── 1.1  Projects ──────────────────────────────────────────────────────────
 -- Projects store (one row per project, owned by the signed-in account).
 --
--- Run this ONCE in the Supabase SQL editor. Until it exists, /api/projects
--- answers 503 DB_UNAVAILABLE and the UI says so — it never invents data.
+-- Until it exists, /api/projects answers 503 DB_UNAVAILABLE and the UI says so
+-- — it never invents data.
 --
 -- owner_id is the Supabase user id taken from the signed session cookie. The API
 -- filters every read AND every write by it, so one account can never read or
@@ -24,14 +57,7 @@ create table if not exists public.ebnily_projects (
 create index if not exists ebnily_projects_owner_updated_idx
   on public.ebnily_projects (owner_id, updated_at desc);
 
--- Defence in depth: the API only ever talks to this table with the service key,
--- but locking the anon role out means a leaked anon key cannot read anyone's
--- projects even if someone changes the request headers.
-alter table public.ebnily_projects enable row level security;
-
--- ═══════════════════════════════════════════════════════════════════════════
--- PAYMENT REQUESTS  (Orange Cash review queue)
--- ═══════════════════════════════════════════════════════════════════════════
+-- ── 1.2  Payment requests ──────────────────────────────────────────────────
 -- WHY THIS EXISTS: a payment used to be written only as a file in object
 -- storage, so /api/admin/overview always answered `recentTransactions: []` and
 -- the owner could never see or approve a payment from the dashboard. The row
@@ -41,6 +67,11 @@ alter table public.ebnily_projects enable row level security;
 -- account_email is the signed-in address that submitted the request, and it is
 -- what the plan grant is minted for — so it must be filled by the SERVER from
 -- the session cookie, never from the request body.
+--
+-- NOTE: this is the FULL, current shape of the table. The `alter table … add
+-- column` block in PHASE 2 only exists to bring an OLDER copy of this table up
+-- to the same shape, so a database created before those columns existed stops
+-- answering 400 "column … does not exist".
 
 create table if not exists public.ebnily_payments (
   id                   text primary key,
@@ -69,13 +100,7 @@ create index if not exists ebnily_payments_status_submitted_idx
 create index if not exists ebnily_payments_account_idx
   on public.ebnily_payments (account_email);
 
-alter table public.ebnily_payments enable row level security;
-
-revoke all on public.ebnily_payments from anon, authenticated;
-
--- ═══════════════════════════════════════════════════════════════════════════
--- DEVICES  (abuse protection registry)
--- ═══════════════════════════════════════════════════════════════════════════
+-- ── 1.3  Devices  (abuse protection registry) ──────────────────────────────
 -- WHY THIS EXISTS: /api/protection/status answered `isBlocked: false` for
 -- everyone and the dashboard's device list was always empty, so the block /
 -- quota / tier buttons had nothing to act on and silently did nothing.
@@ -105,13 +130,7 @@ create table if not exists public.ebnily_devices (
 create index if not exists ebnily_devices_last_seen_idx
   on public.ebnily_devices (last_seen_at desc);
 
-alter table public.ebnily_devices enable row level security;
-
-revoke all on public.ebnily_devices from anon, authenticated;
-
--- ═══════════════════════════════════════════════════════════════════════════
--- PLATFORM SETTINGS  (owner-editable values that survive a redeploy)
--- ═══════════════════════════════════════════════════════════════════════════
+-- ── 1.4  Platform settings  (owner-editable values that survive a redeploy) ─
 -- WHY THIS EXISTS: POST /api/admin/settings used to answer `persisted: false`
 -- and throw the values away, so changing the Orange Cash wallet number in the
 -- dashboard did nothing at all.
@@ -122,21 +141,7 @@ create table if not exists public.ebnily_settings (
   updated_at             timestamptz not null default now()
 );
 
-alter table public.ebnily_settings enable row level security;
-
-revoke all on public.ebnily_settings from anon, authenticated;
-
--- Seed the single settings row so the first read has something to return.
-insert into public.ebnily_settings (key, value)
-values (
-  'platform',
-  '{"orangeWalletNumber":"01207782741","defaultFreeLimit":5,"autoVerificationEnabled":true,"supportWhatsappNumber":"01207782741","siteName":"إبنيلي | Ebnili AI Studio"}'::jsonb
-)
-on conflict (key) do nothing;
-
--- ═══════════════════════════════════════════════════════════════════════════
--- ACCOUNTS  (who signed up, what they were given, and whether they are here)
--- ═══════════════════════════════════════════════════════════════════════════
+-- ── 1.5  Accounts  (who signed up, what they were given, still here?) ──────
 -- WHY THIS EXISTS: the dashboard could only ever show devices and payments.
 -- There was no record of a signed-in ACCOUNT, so "who is using my site, which
 -- email registered, do they still have credits" had no answer at all. The
@@ -186,13 +191,80 @@ create index if not exists ebnily_accounts_last_seen_idx
 create index if not exists ebnily_accounts_email_idx
   on public.ebnily_accounts (email);
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  PHASE 2 · ALTER / REPAIR  —  everything below is safe now that all five
+--                            relations created above are guaranteed to exist
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 2.1  ROW LEVEL SECURITY + client lock-out ───────────────────────────────
+-- The API only ever talks to these tables with the service key, but locking the
+-- anon role out means a leaked anon key cannot read anyone's rows even if
+-- someone changes the request headers.
+
+alter table public.ebnily_projects enable row level security;
+alter table public.ebnily_payments  enable row level security;
+alter table public.ebnily_devices   enable row level security;
+alter table public.ebnily_settings  enable row level security;
 alter table public.ebnily_accounts enable row level security;
 
+revoke all on public.ebnily_payments  from anon, authenticated;
+revoke all on public.ebnily_devices   from anon, authenticated;
+revoke all on public.ebnily_settings  from anon, authenticated;
+revoke all on public.ebnily_accounts from anon, authenticated;
 
--- ═══════════════════════════════════════════════════════════════════════════
--- REPAIR SCRIPT  (safe to re-run)
--- ═══════════════════════════════════════════════════════════════════════════
--- WHY THIS FILE EXISTS NOW
+-- ── 2.2  COLUMN REPAIR — ebnily_payments  (safe to re-run) ─────────────────
+-- WHY THIS EXISTS — the dashboard said: "payments, revenue unreadable"
+--
+-- `create table if not exists` SKIPS an existing table entirely. It never adds a
+-- column. So a database created before `account_id` / `receipt_file_name` /
+-- `receipt_path` existed kept the OLD shape, and every dashboard read failed:
+--
+--   GET /rest/v1/ebnily_payments?select=id,...,account_id,...
+--   → 400  {"message":"column ebnily_payments.account_id does not exist"}
+--
+-- Both `payments` and `revenue` appear in the warning because they are two
+-- separate reads of the SAME table, so one broken column was reported twice.
+--
+-- `add column … if not exists` below brings an old table up to the current shape
+-- without touching existing rows or recreating the table. On a brand-new
+-- database every line here is a harmless no-op, because PHASE 1 already created
+-- the table with exactly these columns.
+
+alter table public.ebnily_payments add column if not exists account_id        text        not null default '';
+alter table public.ebnily_payments add column if not exists receipt_path      text;
+alter table public.ebnily_payments add column if not exists receipt_file_name text;
+alter table public.ebnily_payments add column if not exists amount_usd        numeric(10,2) not null default 0;
+alter table public.ebnily_payments add column if not exists billing_cycle     text        not null default 'monthly';
+alter table public.ebnily_payments add column if not exists notes              text;
+alter table public.ebnily_payments add column if not exists reviewed_at       timestamptz;
+alter table public.ebnily_payments add column if not exists reviewed_by       text;
+alter table public.ebnily_payments add column if not exists submitted_at      timestamptz not null default now();
+
+-- The status CHECK was absent on older tables, so a bad value could be stored.
+-- Adding it is safe because the table only ever holds the three legal values.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.ebnily_payments'::regclass
+      and contype  = 'c'
+      and conname  = 'ebnily_payments_status_check'
+  ) then
+    update public.ebnily_payments set status = 'pending'
+      where status not in ('pending','confirmed','rejected');
+    alter table public.ebnily_payments
+      add constraint ebnily_payments_status_check
+      check (status in ('pending','confirmed','rejected'));
+  end if;
+end $$;
+
+-- ─── VERIFY (returns the columns the API selects; all must appear) ────────────
+--   select column_name from information_schema.columns
+--    where table_name = 'ebnily_payments'
+--    order by ordinal_position;
+
+-- ── 2.3  REPAIR SCRIPT — conflict targets the API now names ────────────────
+-- WHY THIS SECTION EXISTS
 -- -----------------------
 -- Both owner-dashboard problems reported ("تعذّر إضافة الأدمن" and "المستخدمون
 -- 0") had ONE shared root cause, and it is in this database, not in the UI:
@@ -209,8 +281,6 @@ alter table public.ebnily_accounts enable row level security;
 -- A conflict target MUST be backed by a unique index, so the statements below
 -- guarantee those indexes exist even on a database created before them, and
 -- they clean up the duplicate rows the old buggy upserts already created.
---
--- Run this once in the Supabase SQL editor. It is idempotent.
 
 -- 1) ── De-duplicate before adding a unique index ──────────────────────────────
 -- If the broken upsert ever appended a second 'platform' row, `limit: "1"` reads
@@ -260,6 +330,8 @@ alter table public.ebnily_devices
   alter column last_seen_at  set default now();
 
 -- 4) ── Make sure the single settings row exists ───────────────────────────────
+-- `on conflict … do update set value = <itself>` keeps the owner's current
+-- values while letting the statement run on every deployment.
 
 insert into public.ebnily_settings (key, value)
 values (
@@ -283,20 +355,23 @@ grant all on all tables in schema public to service_role;
 grant all on all sequences in schema public to service_role;
 
 -- 6) ── VERIFY ────────────────────────────────────────────────────────────────
--- Run this after a user signs in once. It must list their row; if it returns
--- nothing, /api/auth/me could not write, and `problems` in /api/health will name
--- the missing configuration.
+-- Payments — every column the API selects must appear:
+--
+--   select column_name from information_schema.columns
+--    where table_name = 'ebnily_payments'
+--    order by ordinal_position;
+--
+-- Accounts — run this after a user signs in once. It must list their row; if it
+-- returns nothing, /api/auth/me could not write, and `problems` in /api/health
+-- will name the missing configuration.
 --
 --   select account_id, email, provider, tier, credits, last_seen_at
 --     from public.ebnily_accounts
 --    order by first_seen_at desc
 --    limit 20;
 --
--- And the delegated-admin list must live inside the ONE settings row:
+-- Delegated admins — the list must live inside the ONE settings row:
 --
 --   select key, value -> 'admins' as admins
 --     from public.ebnily_settings
 --    where key = 'platform';
-
-revoke all on public.ebnily_accounts from anon, authenticated;
-
