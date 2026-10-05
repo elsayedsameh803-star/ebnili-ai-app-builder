@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 import { SUBSCRIPTION_PLANS, USD_TO_EGP, egpAmount, ORANGE_CASH_STEPS_AR, ORANGE_CASH_STEPS_EN } from "../src/data/plans.ts";
 import { STARTER_TEMPLATES } from "../src/data/templates.ts";
+import {
+  TIER_DAILY_QUOTA as SERVER_TIER_DAILY_QUOTA,
+  AI_ABSOLUTE_DAILY_CEILING,
+} from "../api/security.ts";
 
 /**
  * Plan entitlement tests.
@@ -19,11 +23,12 @@ import { STARTER_TEMPLATES } from "../src/data/templates.ts";
  * customer's browser.
  */
 
-/** Mirrors TIER_DAILY_QUOTA in api/index.ts. Kept here as the contract. */
-const TIER_DAILY_QUOTA = { free: 5, pro: 100, business: 400 } as const;
-
-/** Mirrors ABSOLUTE_DAILY_CEILING in api/index.ts. */
-const ABSOLUTE_DAILY_CEILING = 400;
+// The allowance table and the ceiling are NOT re-typed here. `api/security.ts` is
+// the single source of truth, imported by both the API and the quota tests, so a
+// copy in this file could drift from what the server actually enforces — which is
+// exactly the class of bug these tests exist to catch.
+const TIER_DAILY_QUOTA = SERVER_TIER_DAILY_QUOTA;
+const ABSOLUTE_DAILY_CEILING = AI_ABSOLUTE_DAILY_CEILING;
 
 describe("daily allowance per plan", () => {
   test("every plan id has an allowance", () => {

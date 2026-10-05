@@ -28,6 +28,110 @@
 import type { Request, Response, NextFunction } from "express";
 
 /**
+ * The plan allowance, and the ONE rule for spending it.
+ *
+ * WHY THIS EXISTS AS CODE
+ * -----------------------
+ * The spend used to be a SELECT followed by a PATCH inside the request handler.
+ * That is a race: concurrent requests all read the same counter, all conclude
+ * they are under the limit, and all write used+1 — so the counter under-reports
+ * and the customer receives N times the allowance for the price of one. Clicking
+ * "generate" five times in a second is this product's normal interaction, not an
+ * exotic edge case.
+ *
+ * The real fix is the row lock inside `ebnily_consume_ai_credit` (see
+ * `supabase/add_atomic_ai_credit.sql`): Postgres serialises the read, the check
+ * and the write across every instance at once. This module is the *contract* that
+ * function implements, expressed as pure code so the property that actually
+ * matters can be tested — under concurrency, exactly `limit` calls are ever
+ * allowed and the counter never passes it.
+ */
+
+/** The central ceiling. No account may exceed it, whatever a plan or a caller asks for. */
+export const AI_ABSOLUTE_DAILY_CEILING = 400;
+
+/** Per-plan daily allowance. The numbers the pricing page promises. */
+export const TIER_DAILY_QUOTA = {
+  free: 5,
+  pro: 100,
+  business: 400,
+} as const;
+
+/** The ceiling for a tier, always clamped by the absolute maximum.
+ *
+ * A caller can pass any `p_limit`; this is the only place a tier becomes a
+ * number, so raising a plan in one edit cannot open an unbounded key. */
+export function quotaForTier(tier: unknown): number {
+  const base =
+    tier === "free" || tier === "pro" || tier === "business"
+      ? TIER_DAILY_QUOTA[tier]
+      : TIER_DAILY_QUOTA.free;
+  return Math.min(base, AI_ABSOLUTE_DAILY_CEILING);
+}
+
+/** What one spend attempt did. Mirrors the SQL function's return row. */
+export interface QuotaDecision {
+  allowed: boolean;
+  used: number;
+  limit: number;
+  day: string;
+}
+
+/** The mutable state a single account's day is made of. */
+export interface AccountDay {
+  used: number;
+  day: string | null;
+}
+
+/** The UTC day a timestamp belongs to — the boundary the reset happens on. */
+export function utcDay(now: Date): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/** A fresh account day — a brand-new account, or one the server has not synced. */
+export function newAccountDay(): AccountDay {
+  return { used: 0, day: null };
+}
+
+/**
+ * Spend one credit, or refuse.
+ *
+ * A faithful model of `ebnily_consume_ai_credit`: same order of operations, same
+ * day rollover, same clamping. The SQL version takes a real `SELECT … FOR UPDATE`
+ * row lock; this one is synchronous, so the concurrency it is tested against is
+ * modelled by running many spends inside a single turn of the event loop — which
+ * is exactly the interleaving the lock exists to prevent.
+ *
+ * @param state  the account's day, mutated in place (the "row").
+ * @param pLimit the plan ceiling the caller believes applies.
+ * @param now    injectable, so a day boundary can be tested.
+ */
+export function spendAiCredit(
+  state: AccountDay,
+  pLimit: number,
+  now: Date = new Date(),
+): QuotaDecision {
+  const day = utcDay(now);
+  const limit = Math.min(pLimit, AI_ABSOLUTE_DAILY_CEILING);
+
+  // Day rollover: the old count is discarded, never carried into the new day.
+  if (state.day !== day) {
+    state.day = day;
+    state.used = 0;
+  }
+
+  if (state.used >= limit) {
+    // Refused, and the counter is NOT advanced: a rejected request must not push
+    // the customer further from using what they paid for, and the number reported
+    // is the true usage, which is what a meter needs in order to draw.
+    return { allowed: false, used: state.used, limit, day };
+  }
+
+  state.used += 1;
+  return { allowed: true, used: state.used, limit, day };
+}
+
+/**
  * Values that must never be accepted as a real secret.
  *
  * SECURITY: this list exists because the literal `"ebnili-insecure-dev-secret"`

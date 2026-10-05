@@ -154,9 +154,27 @@ cannot take the site down.
 **`x-forwarded-for` is trusted.** Correct on Vercel (the platform sets it and the
 first value is the real client). Behind another proxy, review it.
 
-**The daily AI cap is still in-memory** (`aiUsage`), so it resets per instance. The
-short-window `RATE_LIMIT_AI_*` limit is the effective bound; the daily cap is a
-second, longer-horizon layer.
+**The daily AI allowance is now enforced in the DATABASE, not in memory.** This
+line used to say the opposite, and it described a real hole: the counter lived
+in a process-local `Map` that a Vercel cold start wipes and two instances never
+share, so it bounded a burst rather than a day's spending.
+
+The budget is `ebnily_accounts.ai_used` / `ai_day`, and it is spent through
+`ebnily_consume_ai_credit` — a `PL/pgSQL` function that takes a `SELECT … FOR
+UPDATE` row lock, so the day rollover, the limit check and the increment cannot
+interleave. It is the only code path that writes `ai_used`. See
+`supabase/add_atomic_ai_credit.sql`.
+
+**Fail-closed.** If the database is unreachable, AI requests are REFUSED. The
+previous code fell back to the in-process `Map` when Supabase was down, which
+meant an outage opened an unlimited window on the owner's Gemini key — the
+opposite of the intent. A 503 during an incident is the correct failure mode.
+
+**The short-window limiters are a second layer, never the boundary.** They
+answer a different question: a burst from one address. `RATE_LIMIT_AI_*` is
+keyed per account-or-IP, and a separate 40/minute per-IP ceiling sits in
+`requireAiSession` so that one machine opening many sessions cannot get a fresh
+per-minute budget each time. The allowance is what actually bounds spend.
 
 ---
 

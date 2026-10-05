@@ -336,6 +336,111 @@ alter table public.ebnily_accounts
 alter table public.ebnily_accounts
   add column if not exists ai_day  date;
 
+-- ── 2.4  THE ATOMIC SPEND — the only place an allowance is ever consumed ─────
+-- WHY A FUNCTION AND NOT A SELECT-THEN-PATCH FROM THE API
+-- -------------------------------------------------------
+-- Reading the counter and writing it back is a race: N simultaneous requests all
+-- read the same value, all decide they are under the limit, and all write
+-- used+1. The counter under-reports and the customer receives N times the
+-- allowance for the price of one. That is not a rare race — clicking "generate"
+-- five times in a second is this product's normal interaction.
+--
+-- A single `SELECT … FOR UPDATE` inside a PL/pgSQL function is atomic: Postgres
+-- holds the row lock for the whole function, so the day rollover, the limit
+-- check and the increment cannot interleave with another request. No
+-- application-level locking, nothing to get wrong, and it is correct across
+-- every Vercel instance at once.
+--
+-- `security definer` + `set search_path` so the function cannot be redirected to
+-- a hostile schema, and EXECUTE is granted to `service_role` ONLY — the browser
+-- must never be able to credit itself.
+
+create or replace function public.ebnily_consume_ai_credit(
+  p_account_id text,
+  p_limit      integer
+)
+returns table (allowed boolean, used integer, limit_value integer, day date)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_today date := (now() at time zone 'utc')::date;
+  v_row   public.ebnily_accounts;
+  v_allow integer;
+begin
+  select * into v_row
+    from public.ebnily_accounts
+   where account_id = p_account_id
+     for update;
+
+  -- No row: authenticated but never synced. Refusing is correct — a missing row
+  -- must never read as "unlimited".
+  if not found then
+    return query select false, 0, p_limit, v_today;
+    return;
+  end if;
+
+  -- Day rollover inside the same locked transaction: no cron, and a client
+  -- cannot race the boundary by reading before the write.
+  if v_row.ai_day is distinct from v_today then
+    v_row.ai_used := 0;
+  end if;
+
+  -- The hard ceiling clamps the argument, so neither a code change nor a
+  -- tampered parameter can push one account past it.
+  v_allow := least(coalesce(p_limit, 0), public.ebnily_ai_ceiling());
+
+  if v_row.ai_used >= v_allow then
+    update public.ebnily_accounts set ai_day = v_today where account_id = p_account_id;
+    return query select false, v_row.ai_used, v_allow, v_today;
+    return;
+  end if;
+
+  v_row.ai_used := v_row.ai_used + 1;
+
+  update public.ebnily_accounts
+     set ai_used = v_row.ai_used, ai_day = v_today
+   where account_id = p_account_id;
+
+  return query select true, v_row.ai_used, v_allow, v_today;
+end;
+$$;
+
+-- The read-only sibling. A UI that polls this on an interval must not be
+-- charged for watching the meter.
+create or replace function public.ebnily_read_ai_credit(
+  p_account_id text
+)
+returns table (used integer, day date)
+language sql
+security definer
+set search_path = public
+as $$
+  select a.ai_used::integer, a.ai_day
+    from public.ebnily_accounts a
+   where a.account_id = p_account_id;
+$$;
+
+-- THE central number. No account may exceed it, whatever the plan says and
+-- whatever `p_limit` is passed. Changing it here changes it everywhere; the API
+-- keeps no competing copy.
+create or replace function public.ebnily_ai_ceiling()
+returns integer
+language sql
+immutable
+as $$
+  select 400;
+$$;
+
+revoke all on function public.ebnily_consume_ai_credit(text, integer) from public, anon, authenticated;
+revoke all on function public.ebnily_read_ai_credit(text) from public, anon, authenticated;
+revoke all on function public.ebnily_ai_ceiling() from public, anon, authenticated;
+
+grant execute on function public.ebnily_consume_ai_credit(text, integer) to service_role;
+grant execute on function public.ebnily_read_ai_credit(text) to service_role;
+grant execute on function public.ebnily_ai_ceiling() to service_role;
+
 -- 2) ── The conflict targets the API now names ────────────────────────────────
 -- A PRIMARY KEY already implies a unique index, so these are normally no-ops.
 -- They exist so an older table that was created WITHOUT one (or with the column

@@ -33,6 +33,11 @@ import {
   isActiveAdmin,
   MAX_ADMIN_EMAILS,
   type AdminDelegate,
+  // The plan allowance lives in security.ts so the test suite asserts the same
+  // numbers this file sends to the database. One table, no second copy.
+  TIER_DAILY_QUOTA as SECURITY_TIER_DAILY_QUOTA,
+  AI_ABSOLUTE_DAILY_CEILING,
+  quotaForTier,
 } from "./security.js";
 
 const app = express();
@@ -1428,6 +1433,31 @@ app.post("/api/subscriptions/reset-free", (_req: Request, res: Response) => {
 // studio itself is already behind the login gate, so requiring the same signed
 // session cookie costs a real user nothing and closes the door on abuse.
 // Reuses the existing `requireSignedIn` guard (line 145) in middleware form.
+/**
+ * A second, INDEPENDENT ceiling on the per-minute AI limit, keyed by IP.
+ *
+ * WHY THIS EXISTS ALONGSIDE THE ACCOUNT LIMIT
+ * -------------------------------------------
+ * The account allowance is the real budget, but it is keyed by the signed
+ * session, so it says nothing about one machine opening many sessions. The
+ * per-minute limiter above is keyed by `clientKey`, which PREFERS the account —
+ * which means an attacker who signs in repeatedly from one IP gets a fresh
+ * per-minute budget each time while still being limited per account. This closes
+ * that direction: many sessions, one address.
+ *
+ * IT IS DELIBERATELY LOOSER THAN THE ACCOUNT LIMIT. Its job is to make a single
+ * host expensive, not to be the boundary a legitimate user hits — a customer on
+ * a university or corporate NAT shares an address with many other people, so a
+ * tight per-IP cap would punish them for their neighbours.
+ *
+ * Never the only defence: the allowance in the database is what actually
+ * guarantees the owner is not billed for someone else's loop.
+ */
+const aiIpLimiter = new RateLimiter({ max: 40, windowMs: 60_000 });
+
+startLimiterSweeper(aiIpLimiter);
+
+/** The two short-window ceilings every AI request must clear, in order. */
 function requireAiSession(req: Request, res: Response, next: NextFunction) {
   if (!readAuthSession(req as AuthReq)) {
     return res.status(401).json({
@@ -1452,7 +1482,37 @@ function requireAiSession(req: Request, res: Response, next: NextFunction) {
       retryAfter: result.retryAfterSec,
     });
   }
+
+  // The per-IP ceiling. Deliberately checked AFTER the account limiter so a
+  // shared office or campus NAT is judged on its own traffic, and deliberately
+  // NOT the only defence — the atomic allowance is.
+  const byIp = aiIpLimiter.check(clientIpKey(req), { max: 40, windowMs: 60_000 });
+  if (!byIp.allowed) {
+    res.setHeader("Retry-After", String(byIp.retryAfterSec));
+    return res.status(429).json({
+      success: false,
+      code: "RATE_LIMITED",
+      message: "طلبات كثيرة جداً من هذا الجهاز. انتظر قليلاً ثم أعد المحاولة.",
+      retryAfter: byIp.retryAfterSec,
+    });
+  }
+
   next();
+}
+
+/**
+ * The client address, from the FIRST `x-forwarded-for` entry only.
+ *
+ * WHY: the header is client-controlled. Trusting the LAST entry (the closest
+ * proxy's own append) or any list of them would let a caller present whatever
+ * identity they liked and walk straight through a per-IP limit. On Vercel the
+ * first entry is the real client address.
+ */
+function clientIpKey(req: Request): string {
+  const fwd = req.headers["x-forwarded-for"];
+  const first = Array.isArray(fwd) ? fwd[0] : String(fwd ?? "").split(",")[0];
+  const ip = (first ?? "").trim();
+  return ip || String(req.socket?.remoteAddress ?? "unknown");
 }
 
 /**
@@ -1485,26 +1545,21 @@ function requireAiSession(req: Request, res: Response, next: NextFunction) {
  * the ceiling protects the key from abuse without ever being the reason a
  * legitimate customer is stopped.
  */
-const TIER_DAILY_QUOTA: Record<Tier, number> = {
-  free: 5,
-  pro: 100,
-  business: 400,
-};
-
 /**
- * Hard backstop for everyone, staff included.
+ * The plan allowance table.
  *
- * WHY IT EXISTS: `TIER_DAILY_QUOTA` is the commercial promise, but the owner's
- * own account and the staff addresses are the ones a leaked session cookie would
- * most plausibly be replayed from. Nothing above `business` exists, so this is
- * simply "the business allowance, and no further" — stated as its own constant
- * so raising the business plan does not silently hand staff an unlimited key.
+ * THE SINGLE SOURCE OF TRUTH is `api/security.ts` (`TIER_DAILY_QUOTA` /
+ * `AI_ABSOLUTE_DAILY_CEILING`), which is where the tests read it from too. These
+ * are re-exported rather than re-typed so the numbers the pricing page promises,
+ * the numbers this file sends to the database, and the numbers the test suite
+ * asserts can never drift apart.
  */
-const ABSOLUTE_DAILY_CEILING = 400;
+const TIER_DAILY_QUOTA = SECURITY_TIER_DAILY_QUOTA;
+const ABSOLUTE_DAILY_CEILING = AI_ABSOLUTE_DAILY_CEILING;
 
+/** Clamp a plan to its real allowance. Unknown tier → free, never a paid one. */
 function dailyQuotaFor(tier: Tier | undefined): number {
-  const base = tier && TIER_DAILY_QUOTA[tier] !== undefined ? TIER_DAILY_QUOTA[tier] : TIER_DAILY_QUOTA.free;
-  return Math.min(base, ABSOLUTE_DAILY_CEILING);
+  return quotaForTier(tier);
 }
 
 /**
@@ -1537,62 +1592,52 @@ async function consumeAiAllowance(
   // ever does the free allowance is the safe answer.
   if (!session) return { allowed: false, used: 0, limit: TIER_DAILY_QUOTA.free, reason: "auth" };
 
-  const today = new Date().toISOString().slice(0, 10);
-
+  // FAIL-CLOSED, DELIBERATELY: with no database we cannot check the allowance,
+  // and "cannot check" must never mean "allowed". The previous code fell back to
+  // an in-process Map here, which was worse than useless — it is reset by every
+  // cold start, so an outage would have handed the owner's Gemini key an
+  // unlimited window. A 503 is the correct failure mode; a paying customer is
+  // inconvenienced for the length of the incident and nothing more.
   if (!supabaseConfig().dbConfigured) {
-    // No database: keep the old in-process behaviour rather than failing every
-    // request, but still use the PLAN ceiling so a paid account is not punished
-    // for a transient configuration problem.
-    const tier = (req as Request & { accountTier?: Tier }).accountTier;
-    const limit = dailyQuotaFor(tier);
-    const rec = aiUsage.get(session.id);
-    const used = rec && rec.day === today ? rec.count : 0;
-    if (used >= limit) return { allowed: false, used, limit };
-    aiUsage.set(session.id, { day: today, count: used + 1 });
-    return { allowed: true, used: used + 1, limit };
+    return { allowed: false, used: 0, limit: TIER_DAILY_QUOTA.free, reason: "db_unavailable" };
   }
 
   const account = await findAccountByEmail(session.email);
   const tier: Tier = account ? tierOf(account.tier) : tierOf((req as Request & { accountTier?: Tier }).accountTier);
   const limit = dailyQuotaFor(tier);
 
-  const usedToday = account && account.ai_day === today ? toNumber(account.ai_used) : 0;
-  if (usedToday >= limit) {
-    return { allowed: false, used: usedToday, limit, reason: "daily" };
-  }
-
-  // Conditional on `ai_day` so two concurrent requests cannot both read the old
-  // counter and each write used+1 — which would under-count and hand out free
-  // generations. PostgREST returns no row when the filter does not match, and
-  // that "no row" is the signal to fall back to an unconditional write.
-  const next = usedToday + 1;
-  const stamped = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
-    method: "PATCH",
-    query: { account_id: `eq.${session.id}`, ai_day: `eq.${today}` },
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ ai_used: next, ai_day: today }),
+  // THE SINGLE SPEND PATH. `ebnily_consume_ai_credit` takes a row lock, so the
+  // check and the increment cannot interleave with another request. Every AI
+  // call in the product goes through this one statement — there is no second
+  // place that writes `ai_used`, which is what makes the guarantee hold.
+  const rpc = await dbRequest<RpcConsumeResult[]>(RPC_CONSUME_AI, {
+    method: "POST",
+    body: JSON.stringify({ p_account_id: session.id, p_limit: limit }),
   });
 
-  if (stamped.ok && Array.isArray(stamped.data) && stamped.data.length > 0) {
-    return { allowed: true, used: next, limit };
+  if (!rpc.ok) {
+    // The RPC failing is NOT treated as "allowed". That would turn a broken
+    // function into an unlimited key.
+    console.error("ai credit RPC failed:", rpc.status, rpc.error);
+    return { allowed: false, used: 0, limit, reason: "quota_unavailable" };
   }
 
-  // Either the row moved to a new day (ai_day no longer equals today) or the
-  // account has no counter columns yet. Unconditional write, then re-read so the
-  // number reported is the one actually stored.
-  await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
-    method: "PATCH",
-    query: { account_id: `eq.${session.id}` },
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ ai_used: 1, ai_day: today }),
-  });
+  const row = Array.isArray(rpc.data) ? rpc.data[0] : undefined;
+  if (!row) {
+    return { allowed: false, used: 0, limit, reason: "quota_unavailable" };
+  }
 
-  const after = await findAccountByEmail(session.email);
-  const stored = after && after.ai_day === today ? toNumber(after.ai_used) : 1;
-  // Best-effort: when the counter could not be persisted we still allow the
-  // request (a database hiccup must not block a paying customer) but the count
-  // is reported from what we managed to store.
-  return { allowed: true, used: stored, limit };
+  const used = toNumber(row.used);
+  const ceiling = toNumber(row.limit_value, limit);
+  return { allowed: row.allowed === true, used, limit: ceiling, reason: row.allowed === true ? undefined : "daily" };
+}
+
+/** The JSON a `rpc/<fn>` call returns: a single-element array of the row. */
+interface RpcConsumeResult {
+  allowed: boolean;
+  used: number;
+  limit_value: number;
+  day: string;
 }
 
 /**
@@ -1603,6 +1648,10 @@ async function consumeAiAllowance(
  * something else. Falling back to "free" means an unreadable plan can never
  * silently grant a PAID allowance; the stingy default is the safe one.
  */
+/** The RPC endpoints that own the allowance. `rpc/<name>` on the PostgREST base. */
+const RPC_CONSUME_AI = "rpc/ebnily_consume_ai_credit";
+const RPC_READ_AI = "rpc/ebnily_read_ai_credit";
+
 function tierOf(value: unknown): Tier {
   return value === "pro" || value === "business" || value === "free" ? value : "free";
 }
@@ -1666,28 +1715,54 @@ function nextUtcMidnightIso(): string {
 async function readAiAllowance(req: Request): Promise<{ used: number; limit: number; tier: Tier }> {
   const session = readAuthSession(req as AuthReq);
   const tagged = req as Request & { accountTier?: Tier };
-  if (!session) {
-    return { used: 0, limit: TIER_DAILY_QUOTA.free, tier: "free" };
+  if (!session || !supabaseConfig().dbConfigured) {
+    const tier: Tier = session ? tierOf(tagged.accountTier) : "free";
+    return { used: 0, limit: dailyQuotaFor(tier), tier };
   }
-  const today = new Date().toISOString().slice(0, 10);
-  const account = supabaseConfig().dbConfigured ? await findAccountByEmail(session.email) : null;
+  const account = await findAccountByEmail(session.email);
   const tier: Tier = account ? tierOf(account.tier) : tierOf(tagged.accountTier);
-  const used = account && account.ai_day === today ? toNumber(account.ai_used) : 0;
-  return { used, limit: dailyQuotaFor(tier), tier };
+  const limit = dailyQuotaFor(tier);
+  // Read-only, and spent by nobody: the same function the spend path uses, but
+  // its read-only sibling, so the number the meter shows is the number the
+  // database holds — not a recomputation that could drift from it.
+  const rpc = await dbRequest<RpcConsumeResult[]>(RPC_READ_AI, {
+    method: "POST",
+    body: JSON.stringify({ p_account_id: session.id }),
+  });
+  const used = rpc.ok && Array.isArray(rpc.data) && rpc.data[0] ? toNumber(rpc.data[0].used) : 0;
+  return { used, limit, tier };
 }
 
 /**
- * In-process fallback tally, used ONLY when the database is unreachable.
+ * The one guard every AI route goes through.
  *
- * WHY IT STAYS: `consumeAiAllowance` must not fail every request because Supabase
- * is briefly down — blocking a paying customer over a transient outage would be
- * worse than letting them through. So this Map backs the no-database path.
+ * WHY IT IS A MIDDLEWARE AND NOT A CALL INSIDE EACH HANDLER
+ * --------------------------------------------------------
+ * The six AI routes each carried their own copy of the quota check, and one of
+ * them (`refine-app`) had none at all — a per-handler check is a check that will
+ * eventually be forgotten when a seventh route is added. Applied as middleware
+ * it cannot be forgotten: a new `/api/ai/*` route is guarded the moment it
+ * declares `requireAiAllowance`, and the pattern is visible at the route line.
  *
- * It is deliberately NOT the primary counter: a process-local Map is reset by
- * every cold start and is not shared between instances, so it bounds a burst,
- * not a day's spending. The real allowance is `ebnily_accounts.ai_used`.
+ * IT RUNS BEFORE ANY GEMINI CALL. The guard is a middleware, so it completes
+ * before the handler body executes, and no handler reaches `getGeminiClient()`
+ * without passing. A refused request therefore never spends a token.
+ *
+ * FAIL-CLOSED: if the database is unreachable the request is REFUSED, not
+ * allowed. The alternative — "let it through when we cannot check" — is exactly
+ * the hole this closes: an outage would become an unlimited window on the
+ * owner's Gemini key. A 503 during an incident is the correct failure mode.
  */
-const aiUsage = new Map<string, { day: string; count: number }>();
+async function requireAiAllowance(req: Request, res: Response, next: NextFunction) {
+  const quota = await consumeAiAllowance(req);
+  if (!quota.allowed) {
+    return aiQuotaRefusal(res, quota);
+  }
+  // Carried on the request so a handler can report the remaining allowance in
+  // its own response without spending a second credit to ask.
+  (req as Request & { aiQuota?: typeof quota }).aiQuota = quota;
+  return next();
+}
 
 /**
  * The signed-in account's remaining daily allowance.
@@ -4714,12 +4789,8 @@ function friendlyAiError(raw: string, language: string): string {
     : "فشل توليد التطبيق. حاول مرة أخرى.";
 }
 
-app.post("/api/ai/generate-app", requireAiSession, async (req: Request, res: Response) => {
+app.post("/api/ai/generate-app", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const quota = await consumeAiAllowance(req);
-    if (!quota.allowed) {
-      return aiQuotaRefusal(res, quota);
-    }
     const ai = getGeminiClient();
     if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const { prompt, language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
@@ -4767,24 +4838,20 @@ app.post("/api/ai/generate-app", requireAiSession, async (req: Request, res: Res
 // the model is still writing. Same models, same system rules, same fallbacks —
 // only the transport changes. On any model-level failure the client silently
 // falls back to the non-streaming /api/ai/generate-app above.
-app.post("/api/ai/generate-app/stream", requireAiSession, async (req: Request, res: Response) => {
+app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   const language = String((req.body as { language?: string })?.language ?? "ar");
   const promptRaw = String((req.body as { prompt?: string })?.prompt ?? "");
   const ai = getGeminiClient();
 
   // SECURITY / COST: this route had NO quota check at all — it inherited only the
   // per-minute limiter from `requireAiSession`. A single signed-in account could
-  // therefore stream for an unbounded number of days, which is the most expensive
-  // surface in the product and the one the old flat cap never reached. It now
-  // counts against the same plan allowance as every other AI call.
+  // therefore stream for an unbounded number of days, and it is the most
+  // expensive surface in the product. It now goes through `requireAiAllowance`.
   //
-  // The count happens BEFORE the SSE headers are written, because after
-  // `text/event-stream` is sent the status code is already on the wire and a 429
-  // can no longer be expressed — the refusal would arrive as a broken stream.
-  const quota = await consumeAiAllowance(req);
-  if (!quota.allowed) {
-    return aiQuotaRefusal(res, quota);
-  }
+  // The middleware runs BEFORE this handler, so the credit is taken before the
+  // SSE headers are written. That ordering matters: once `text/event-stream` is
+  // on the wire the status code is already sent, and a refusal could no longer
+  // be expressed as a 429 — the customer would just see a broken stream.
 
   if (!ai || !promptRaw.trim()) {
     return res.status(400).json({ success: false, message: !ai ? "GEMINI_API_KEY غير مُعد" : "prompt مطلوب" });
@@ -4862,7 +4929,12 @@ app.post("/api/ai/generate-app/stream", requireAiSession, async (req: Request, r
   return res.end();
 });
 
-app.post("/api/ai/refine-app", requireAiSession, async (req: Request, res: Response) => {
+// SECURITY / COST: this route had NO allowance check of any kind. It is the
+// "modify the generated app" button — the most-used action in the studio after
+// the initial generate — so it was a full-cost Gemini call that the old flat
+// cap never touched. `refine-app` now spends from the same plan allowance as
+// every other AI route.
+app.post("/api/ai/refine-app", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as {
     prompt?: string;
     currentCode?: string;
@@ -4939,12 +5011,8 @@ app.post("/api/ai/refine-app", requireAiSession, async (req: Request, res: Respo
 // `improvements` in the doctor. The keys never matched, so all three buttons
 // silently did nothing. Each handler below asks the model for its own JSON
 // contract and maps the answer onto the exact keys the UI already reads.
-app.post("/api/ai/gemini-enhance-prompt", requireAiSession, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const quota = await consumeAiAllowance(req);
-    if (!quota.allowed) {
-      return aiQuotaRefusal(res, quota);
-    }
     const ai = getGeminiClient();
     if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { prompt?: string; category?: string; language?: string };
@@ -4999,12 +5067,8 @@ app.post("/api/ai/gemini-enhance-prompt", requireAiSession, async (req: Request,
   }
 });
 
-app.post("/api/ai/gemini-architect", requireAiSession, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-architect", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const quota = await consumeAiAllowance(req);
-    if (!quota.allowed) {
-      return aiQuotaRefusal(res, quota);
-    }
     const ai = getGeminiClient();
     if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { prompt?: string; language?: string };
@@ -5065,12 +5129,8 @@ app.post("/api/ai/gemini-architect", requireAiSession, async (req: Request, res:
   }
 });
 
-app.post("/api/ai/gemini-code-doctor", requireAiSession, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-code-doctor", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const quota = await consumeAiAllowance(req);
-    if (!quota.allowed) {
-      return aiQuotaRefusal(res, quota);
-    }
     const ai = getGeminiClient();
     if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { code?: string; issueDescription?: string; language?: string };
