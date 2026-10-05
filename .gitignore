@@ -11,7 +11,6 @@ coverage/
 .vercel/
 
 .vercel
-.env*
 
 # Local runtime data — these are mutable state files, not source, and the
 # legacy settings file can hold owner credentials. They must never be in git.

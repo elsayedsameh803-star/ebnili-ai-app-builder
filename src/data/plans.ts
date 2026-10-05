@@ -1,4 +1,12 @@
-import { SubscriptionPlan } from '../types';
+// TYPE-ONLY: written as a plain `import type` with an explicit `.ts` extension
+// so this module can be loaded by Node's test runner (`node --test
+// --experimental-strip-types`) as well as by Vite.
+//
+// WHY: a value import of `'../types'` (no extension) resolves fine under Vite's
+// bundler but throws ERR_MODULE_NOT_FOUND under Node's ESM resolver, which made
+// the pricing data untestable from `npm test`. `import type` is erased at
+// compile time, so nothing is added to the bundle either.
+import type { SubscriptionPlan } from '../types.ts';
 
 export const ORANGE_CASH_WALLET_NUMBER = '01207782741';
 export const ORANGE_CASH_USSD_CODE = '#115#';
@@ -154,7 +162,7 @@ export const ORANGE_CASH_STEPS_AR = [
   {
     step: 4,
     title: 'أدخل المبلغ المطلوب',
-    desc: 'أدخل قيمة الباقة المختارة بالجنيه المصري كما هي معروضة في صفحة الدفع (مثلاً 499 ج.م للباقة الشهرية Pro).'
+    desc: 'أدخل قيمة الباقة المختارة بالجنيه المصري كما هي معروضة في صفحة الدفع.'
   },
   {
     step: 5,
@@ -187,7 +195,7 @@ export const ORANGE_CASH_STEPS_EN = [
   {
     step: 4,
     title: 'Enter Exact Amount',
-    desc: 'Enter the plan amount in Egyptian pounds exactly as shown on the payment page (e.g. 499 EGP for Pro Monthly).'
+    desc: 'Enter the plan amount in Egyptian pounds exactly as shown on the payment page.'
   },
   {
     step: 5,

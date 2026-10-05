@@ -1,4 +1,8 @@
-import { StarterTemplate } from '../types';
+// TYPE-ONLY with an explicit `.ts` extension: see the identical note in
+// `plans.ts`. A bare `'../types'` value import resolves under Vite but not
+// under Node's ESM resolver, which made the template catalogue untestable from
+// `npm test`.
+import type { StarterTemplate } from '../types.ts';
 
 export const STARTER_TEMPLATES: StarterTemplate[] = [
   {
