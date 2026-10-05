@@ -2040,6 +2040,84 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
 // passes `requireAdmin` and can run the console, but must never reach these —
 // otherwise one co-admin could promote a friend, suspend the real owner, or lock
 // everyone out. This is the "not for any admin" half of the request.
+/**
+ * Send the "you are an admin now" welcome mail to a newly delegated admin.
+ *
+ * WHY A RAW `fetch` AND NOT A LIBRARY
+ * ----------------------------------
+ * The project ships no mail dependency, and the only mail we ever send is this
+ * one transactional notice. Adding `resend`/`nodemailer` to the bundle for a
+ * single request would grow the serverless function for no gain, so this talks
+ * to the provider's REST API directly.
+ *
+ * UNAVAILABLE BY DESIGN: with no `RESEND_API_KEY` set this returns `false` and
+ * sends nothing. That is not a bug and must never block the grant — the owner
+ * already gets the address on screen, and the UI says the mail was skipped.
+ *
+ * @returns true when the provider accepted the message.
+ */
+async function notifyNewAdmin(email: string): Promise<boolean> {
+  const apiKey = (process.env.RESEND_API_KEY ?? "").trim();
+  // `SITE_URL` keeps the button correct on preview deployments; the production
+  // domain is the fallback so the mail is never sent with a dead link.
+  const siteUrl = (process.env.SITE_URL ?? "https://ebnily.vercel.app").trim().replace(/\/+$/, "");
+  const from = (process.env.MAIL_FROM ?? "Ebnili <onboarding@resend.dev>").trim();
+
+  if (!apiKey) {
+    console.warn("notifyNewAdmin: RESEND_API_KEY is not set — welcome mail skipped.");
+    return false;
+  }
+
+  const subject = "إبنيلي | أصبحت مسؤولاً في لوحة التحكم";
+  const html = `<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:24px;background:#0b1120;font-family:'Segoe UI',Tahoma,Arial,sans-serif;color:#e2e8f0">
+  <div style="max-width:560px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:32px">
+    <h1 style="margin:0 0 16px;font-size:20px;color:#fb7185">تم إعطاؤك صلاحية مسؤول</h1>
+    <p style="margin:0 0 12px;font-size:15px;line-height:1.8">مرحباً،</p>
+    <p style="margin:0 0 12px;font-size:15px;line-height:1.8">
+      أصبح بريدك <strong dir="ltr">${escapeHtml(email)}</strong> مسؤولاً في لوحة تحكم إبنيلي،
+      ويمكنك الآن إدارة الاشتراكات والمستخدمين والأجهزة وتفعيل الخطط المدفوعة.
+    </p>
+    <p style="margin:0 0 24px;font-size:14px;line-height:1.8;color:#94a3b8">
+      ملاحظة: صلاحية المسؤول لا تتيح لك إضافة أو حذف مسؤولين آخرين — هذه صلاحية صاحب الموقع وحده.
+    </p>
+    <a href="${siteUrl}/api/admin/auth"
+       style="display:inline-block;background:#e11d48;color:#fff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:12px">
+      الدخول إلى لوحة التحكم
+    </a>
+    <p style="margin:24px 0 0;font-size:12px;color:#64748b">هذه رسالة آلية من ${escapeHtml(from)}.</p>
+  </div>
+</body></html>`;
+
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: [email], subject, html }),
+    });
+    if (!res.ok) {
+      // Logged, never surfaced as a failure: the grant itself succeeded.
+      console.error("notifyNewAdmin failed:", res.status, (await res.text().catch(() => "")).slice(0, 300));
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("notifyNewAdmin error:", err);
+    return false;
+  }
+}
+
+/** Minimal HTML escape — the recipient address is interpolated into the body. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 app.post("/api/admin/admins/add", requireOwner, async (req: Request, res: Response) => {
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
 
@@ -2073,7 +2151,12 @@ app.post("/api/admin/admins/add", requireOwner, async (req: Request, res: Respon
     return res.status(503).json({ success: false, message: "تعذّر حفظ المشرف. تأكد من تنفيذ supabase/projects.sql." });
   }
 
-  res.json({ success: true, admins: next, added: email });
+  // The grant is saved. Tell the new admin about it — but NEVER let a mail
+  // failure undo a successful grant or hide it from the owner: the response is
+  // built first and the send is fire-and-forget, so `notified` only reports
+  // whether the welcome mail actually went out.
+  const notified = await notifyNewAdmin(email);
+  res.json({ success: true, admins: next, added: email, notified });
 });
 
 /**
@@ -2082,6 +2165,60 @@ app.post("/api/admin/admins/add", requireOwner, async (req: Request, res: Respon
  * This is the owner's on/off switch. Suspension takes effect on the delegate's
  * very next request, because `requireAdmin` re-reads the list every time.
  */
+/**
+ * A readable roster of who administers this site.
+ *
+ * WHY THIS EXISTS: the settings screen only ever knew an EMAIL address, so the
+ * owner could not answer "who exactly is an admin on my site?" — the one
+ * question that matters when a grant has to be revoked or audited.
+ *
+ * `ebnily_accounts.display_name` holds the name the person signed up with, so
+ * the owner's own row plus every delegate is joined on `email`. A delegate who
+ * has never signed in has no account row yet: they are still listed (the grant
+ * is real and must be visible) with their address and a null `name`.
+ *
+ * The owner is included first and flagged `isOwner`, because the owner's access
+ * comes from `SITE_OWNER_EMAIL` in the environment and NOT from this list —
+ * showing only delegates would hide the most privileged account on the site.
+ */
+app.get("/api/admin/admins/directory", requireAdmin, async (_req: Request, res: Response) => {
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const [delegates, accountsRes] = await Promise.all([
+    readStoredAdmins(),
+    dbRequest<Array<{ email: string; display_name: string | null }>>(ACCOUNTS_TABLE, {
+      query: { select: "email,display_name", limit: "1000" },
+    }),
+  ]);
+
+  const nameByEmail = new Map<string, string>();
+  if (accountsRes.ok && Array.isArray(accountsRes.data)) {
+    for (const row of accountsRes.data) {
+      const key = normalizeEmail(row.email ?? "");
+      // First non-empty name wins: a later row with a blank name must not erase
+      // one that was already resolved.
+      if (key && row.display_name && !nameByEmail.has(key)) nameByEmail.set(key, row.display_name);
+    }
+  }
+
+  const roster = [
+    {
+      email: OWNER_EMAIL,
+      name: nameByEmail.get(OWNER_EMAIL) ?? null,
+      active: true,
+      isOwner: true,
+    },
+    ...delegates.map((admin) => ({
+      email: admin.email,
+      name: nameByEmail.get(admin.email) ?? null,
+      active: admin.active,
+      isOwner: false,
+    })),
+  ];
+
+  res.json({ success: true, admins: roster });
+});
+
 app.post("/api/admin/admins/set-active", requireOwner, async (req: Request, res: Response) => {
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
 

@@ -24,6 +24,22 @@ import {
 import { Language, PlatformRealStats, AdminSettings, DeviceProtectionInfo, OrangeCashTransaction, AdminDelegate } from '../types';
 import { useModalAccessibility } from './useModalAccessibility';
 
+/**
+ * One row of the "who runs this site" roster, as returned by
+ * GET /api/admin/admins/directory.
+ *
+ * `name` is nullable ON PURPOSE: it is joined from `ebnily_accounts.display_name`,
+ * and an admin who has been granted access but has not signed in yet has no row
+ * there. Their grant is real, so the roster still lists them and the UI falls
+ * back to the address rather than hiding an active administrator.
+ */
+interface AdminDirectoryEntry {
+  email: string;
+  name: string | null;
+  active: boolean;
+  isOwner: boolean;
+}
+
 interface AdminDashboardModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -257,6 +273,32 @@ export const AdminDashboardModal = ({
   const [newAdminEmail, setNewAdminEmail] = useState<string>('');
   /** The e-mail being added or removed, so that row alone shows a spinner. */
   const [busyAdminEmail, setBusyAdminEmail] = useState<string | null>(null);
+
+  /**
+   * The owner + delegates WITH the name each one signed up with.
+   *
+   * WHY A SEPARATE FETCH AND NOT A DERIVED VALUE: `adminEmails` stores only
+   * `{ email, active }` — that is all the grant needs, and it is what the
+   * server persists. A person's name lives in `ebnily_accounts.display_name`,
+   * so it can only come from the server. Without this the roster shows bare
+   * addresses and the owner cannot tell "who is an admin here?".
+   */
+  const [adminDirectory, setAdminDirectory] = useState<AdminDirectoryEntry[]>([]);
+
+  const refreshAdminDirectory = async () => {
+    try {
+      const res = await fetch('/api/admin/admins/directory', {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (res.status === 401 || res.status === 404) { handleSessionExpired(); return; }
+      const data = (await res.json().catch(() => ({}))) as { admins?: AdminDirectoryEntry[] };
+      if (res.ok && Array.isArray(data.admins)) setAdminDirectory(data.admins);
+    } catch {
+      // A missing roster must never break the settings tab — the grant list
+      // below is still authoritative for what is enabled.
+    }
+  };
 
   /**
    * Accounts + their presence.
@@ -680,6 +722,10 @@ export const AdminDashboardModal = ({
       setStats(normalizeStats(data.stats));
       setSettings((prev) => normalizeAdminSettings(data.settings, prev));
       setAdminEmails(normalizeAdminSettings(data.settings, null).admins);
+      // The overview carries only `{ email, active }`; the names live in a
+      // separate read. Not awaited on purpose — a slow or failing roster must
+      // not delay the dashboard the owner is waiting to see.
+      void refreshAdminDirectory();
       setDevices(normalizeDevices(data.devices));
       setTransactions(normalizeTransactions(data.recentTransactions));
       // Kept in sync with the initial load, so a table that starts missing and is
@@ -937,11 +983,25 @@ export const AdminDashboardModal = ({
         body: JSON.stringify({ email }),
       });
       if (res.status === 401 || res.status === 404) { handleSessionExpired(); return; }
-      const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: AdminDelegate[]; message?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        admins?: AdminDelegate[];
+        message?: string;
+        notified?: boolean;
+      };
       if (res.ok && data.success) {
         setAdminEmails(Array.isArray(data.admins) ? data.admins : []);
         setNewAdminEmail('');
-        showToast(`تمت إضافة ${email} كمسؤول.`);
+        // The roster carries the new person's name, so it must be re-read.
+        void refreshAdminDirectory();
+        // `notified` distinguishes "the grant is saved but no mail provider is
+        // configured" from a silent success, so the owner is never told a mail
+        // went out when it did not.
+        showToast(
+          data.notified
+            ? `تمت إضافة ${email} كمسؤول، وأُرسلت له رسالة ترحيب.`
+            : `تمت إضافة ${email} كمسؤول. (لم تُرسل رسالة ترحيب — لم يُضبط مزوّد البريد بعد.)`
+        );
       } else {
         // Never claim success on a 200 that did not persist — that is exactly the
         // bug that made the old dashboard lie to the owner.
@@ -969,6 +1029,7 @@ export const AdminDashboardModal = ({
       const data = (await res.json().catch(() => ({}))) as { success?: boolean; admins?: AdminDelegate[]; message?: string };
       if (res.ok && data.success) {
         setAdminEmails(Array.isArray(data.admins) ? data.admins : []);
+        void refreshAdminDirectory();
         showToast(`تمت إزالة ${email}.`);
       } else {
         setActionErrorMessage(data.message || 'تعذّر إزالة المسؤول.');
@@ -1812,6 +1873,7 @@ export const AdminDashboardModal = ({
 
               {/* TAB 4: SETTINGS */}
               {activeTab === 'settings' && (
+                <>
                 <form onSubmit={handleSaveSettings} className="max-w-xl space-y-4 animate-fadeIn">
                   <div className="space-y-1">
                     <h3 className="text-sm font-bold text-white">إعدادات المنصة ومحفظة أورانج كاش</h3>
@@ -1876,13 +1938,25 @@ export const AdminDashboardModal = ({
                     </div>
                   </div>
 
-                  {/* ── Delegated administrators ──────────────────────────────
-                      Deliberately OUTSIDE the settings <form>: granting or
-                      revoking access is a discrete owner action with its own
-                      result, and nesting it would let the Enter key in the e-mail
-                      field submit the unrelated wallet-number form instead. */}
-                  <div className="mt-6 rounded-2xl border border-rose-500/25 bg-rose-500/5 p-5">
-                    <div className="flex items-start gap-3">
+                  <button
+                    type="submit"
+                    className="py-2.5 px-6 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-xs transition shadow-md shadow-rose-600/20"
+                  >
+                    حفظ التغييرات في النظام
+                  </button>
+                </form>
+
+                {/* Delegated administrators.
+                    This block is a SIBLING of the settings form above, never a
+                    child of it. It used to sit INSIDE that form, and nesting one
+                    form in another is invalid HTML: the parser closes the outer
+                    form at the inner form tag, so pressing the add-admin button
+                    submitted the OUTER form instead. React's onSubmit for the add
+                    form never ran, the settings save navigated the page away, and
+                    the owner landed back on the home screen with nothing added and
+                    no error shown. Two sibling forms keep Enter scoped to its own. */}
+                <div className="mt-6 rounded-2xl border border-rose-500/25 bg-rose-500/5 p-5">
+                  <div className="flex items-start gap-3">
                       <div className="w-9 h-9 rounded-xl bg-rose-500/15 flex items-center justify-center shrink-0">
                         <Users className="w-4.5 h-4.5 text-rose-400" />
                       </div>
@@ -1986,13 +2060,76 @@ export const AdminDashboardModal = ({
                     )}
                   </div>
 
-                  <button
-                    type="submit"
-                    className="py-2.5 px-6 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-xs transition shadow-md shadow-rose-600/20"
-                  >
-                    حفظ التغييرات في النظام
-                  </button>
-                </form>
+                  {/* ── WHO RUNS THIS SITE ─────────────────────────────────────
+                      A named roster, not just addresses. The grant list above is
+                      the control (add / suspend / remove); this is the answer to
+                      "who are the admins on my site?" — the question that decides
+                      whether a grant is still wanted.
+
+                      Names come from `ebnily_accounts.display_name`, so anyone who
+                      has not signed in yet shows their address alone rather than
+                      being hidden: the grant is real even before the first login. */}
+                  <div className="mt-4 rounded-2xl border border-slate-700/70 bg-slate-950/50 p-5">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+                        <ShieldCheck className="w-4.5 h-4.5 text-amber-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-bold text-white">مسؤولو الموقع</h3>
+                        <p className="text-[11px] text-slate-400 leading-relaxed mt-1">
+                          كل من يستطيع الدخول إلى لوحة التحكم — اسماؤهم وبريداتهم.
+                        </p>
+                      </div>
+                    </div>
+
+                    {adminDirectory.length > 0 ? (
+                      <ul className="mt-4 space-y-2">
+                        {adminDirectory.map((person) => (
+                          <li
+                            key={person.email}
+                            className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5"
+                          >
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                person.active ? 'bg-emerald-400' : 'bg-slate-600'
+                              }`}
+                              aria-hidden="true"
+                            />
+                            <span className="min-w-0 flex-1">
+                              {/* The name is the point of this row, so it leads and
+                                  falls back to the address when nobody has signed
+                                  in under that name yet. */}
+                              <span className="block text-xs font-semibold text-white truncate">
+                                {person.name ?? 'لم يسجّل الدخول بعد'}
+                              </span>
+                              <span dir="ltr" className="block text-[11px] text-slate-400 font-mono truncate">
+                                {person.email}
+                              </span>
+                            </span>
+                            {person.isOwner ? (
+                              <span className="shrink-0 text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/25 px-2 py-1 rounded-lg">
+                                صاحب الموقع
+                              </span>
+                            ) : person.active ? (
+                              <span className="shrink-0 text-[10px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-2 py-1 rounded-lg">
+                                مسؤول
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-[10px] font-bold text-slate-400 bg-slate-700/60 px-2 py-1 rounded-lg">
+                                موقوف
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-4 text-[11px] text-slate-500 flex items-center gap-1.5">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        جارٍ تحميل قائمة المسؤولين…
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
 
             </div>
