@@ -12,6 +12,10 @@
       "destination": "/api/index"
     },
     {
+      "source": "/preview/:slug",
+      "destination": "/api/index"
+    },
+    {
       "source": "/privacy",
       "destination": "/privacy.html"
     },
