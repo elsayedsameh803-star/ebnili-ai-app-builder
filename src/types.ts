@@ -146,6 +146,125 @@ export interface DeviceProtectionInfo {
   lastSeen?: string;
 }
 
+export interface UserTeam {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+  createdBy: string;
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+  ownerId: string;
+}
+
+export interface UserTeamMember {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  role: 'owner' | 'member' | 'guest';
+  joinedAt: string;
+  active: boolean;
+}
+
+export interface UserDashboardData {
+  user: { id: string; name: string; email: string; picture?: string; provider: string; isOwner?: boolean };
+  subscription: UserSubscription;
+  teams: UserTeam[];
+  teamMemberships: { teamId: string; role: string; active: boolean }[];
+  orangeWalletNumber: string;
+  profileComplete: boolean;
+  lastActiveAt?: string;
+  isBlocked?: boolean;
+}
+
+export interface UserTeamResponse {
+  success: boolean;
+  team?: UserTeam;
+  teams?: UserTeam[];
+  members?: UserTeamMember[];
+  error?: string;
+}
+
+export interface UserTeamMemberRequest {
+  teamId: string;
+  userName: string;
+  userEmail: string;
+  role?: 'owner' | 'member' | 'guest';
+}
+
+export interface CreateTeamRequest {
+  nameAr: string;
+  nameEn: string;
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  picture?: string;
+  provider: string;
+  isOwner?: boolean;
+  isAdmin?: boolean;
+}
+
+export interface UserSubscription {
+  tier: SubscriptionTier;
+  status: 'active' | 'expired' | 'trial';
+  planName: string;
+  activatedAt?: string;
+  expiresAt?: string;
+  billingCycle?: BillingCycle;
+  generationsUsedToday: number;
+  generationsLimitToday: number;
+  canExportZip: boolean;
+  canDeployCustomDomain: boolean;
+  canUseVisualInspector: boolean;
+  priorityAiModel: boolean;
+  showWatermark?: boolean;
+  transactions: OrangeCashTransaction[];
+}
+
+export interface OrangeCashTransaction {
+  id: string;
+  senderPhone: string;
+  recipientWallet: string;
+  transactionReference: string;
+  amount: number;
+  currency: string;
+  planId: SubscriptionTier;
+  planName: string;
+  billingCycle: BillingCycle;
+  userName?: string;
+  userEmail?: string;
+  submittedAt: string;
+  status: 'confirmed' | 'pending' | 'rejected';
+  verifiedAt?: string;
+  receiptImage?: string;
+  notes?: string;
+}
+
+export interface UserTeam {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+  createdBy: string;
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+  ownerId: string;
+}
+
+export interface UserTeamMember {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  role: 'owner' | 'member' | 'guest';
+  joinedAt: string;
+  active: boolean;
+}
+
 export type AuthProviderId = 'google' | 'github';
 
 export interface AuthUser {
