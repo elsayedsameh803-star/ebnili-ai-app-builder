@@ -2082,8 +2082,25 @@ async function loadDelegateAdmins(): Promise<AdminDelegate[]> {
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const session = readAuthSession(req as AuthReq);
-  if (!isValidAdminSession(readAdminCookie(req)) || !session) {
-    return res.status(404).json({ success: false, message: "Not found" });
+  if (!session) {
+    // No signed-in account at all: tell the client to sign in rather than
+    // pretending the route does not exist — a guest seeing "404" thinks the
+    // site is broken instead of signing in first.
+    return res.status(401).json({
+      success: false,
+      code: "AUTH_REQUIRED",
+      message: "سجّل الدخول أولاً ثم أعد المحاولة.",
+    });
+  }
+  if (!isValidAdminSession(readAdminCookie(req))) {
+    // Signed in but never passed the PIN gate: distinguish "not an admin
+    // session" (401) from "not an admin at all" (404 below), so the client
+    // opens the PIN form instead of reporting a missing page.
+    return res.status(401).json({
+      success: false,
+      code: "ADMIN_PIN_REQUIRED",
+      message: "أدخل رمز دخول لوحة الإدارة للمتابعة.",
+    });
   }
   if (isOwnerAccount(session)) return next();
 
@@ -2107,19 +2124,48 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
  */
 function requireOwner(req: Request, res: Response, next: NextFunction) {
   const session = readAuthSession(req as AuthReq);
-  if (!isOwnerAccount(session) || !isValidAdminSession(readAdminCookie(req))) {
+  if (!session) {
+    return res.status(401).json({
+      success: false,
+      code: "AUTH_REQUIRED",
+      message: "سجّل الدخول أولاً ثم أعد المحاولة.",
+    });
+  }
+  if (!isValidAdminSession(readAdminCookie(req))) {
+    return res.status(401).json({
+      success: false,
+      code: "ADMIN_PIN_REQUIRED",
+      message: "أدخل رمز دخول لوحة الإدارة للمتابعة.",
+    });
+  }
+  if (!isOwnerAccount(session)) {
+    // A signed-in admin session that is NOT the owner: keep the 404 so the
+    // owner-only surface stays invisible from the outside.
     return res.status(404).json({ success: false, message: "Not found" });
   }
   next();
 }
 
-app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "محاولات كثيرة جداً. انتظر قليلاً ثم أعد المحاولة."), (req: Request, res: Response) => {
-  // Admin is the site owner and nothing else. The PIN is a second factor, not
-  // the identity: without the owner account signed in this endpoint answers 404
-  // exactly like every other admin route, so a non-owner cannot even obtain a
+app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "محاولات كثيرة جداً. انتظر قليلاً ثم أعد المحاولة."), async (req: Request, res: Response) => {
+  // Admin is the site owner OR an active delegate. The PIN is a second factor,
+  // not the identity: without a signed-in account this endpoint answers 404
+  // exactly like every other admin route, so a stranger cannot even obtain a
   // session to try elsewhere with.
-  if (!isOwnerAccount(readAuthSession(req as AuthReq))) {
+  const session = readAuthSession(req as AuthReq);
+  if (!session) {
     return res.status(404).json({ success: false, message: "Not found" });
+  }
+  // Delegates need an async lookup, so the check is inline rather than a guard.
+  const isOwner = isOwnerAccount(session);
+  if (!isOwner) {
+    try {
+      const delegates = await loadDelegateAdmins();
+      if (!isActiveAdmin(delegates, session.email)) {
+        return res.status(404).json({ success: false, message: "Not found" });
+      }
+    } catch {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
   }
   // No PIN configured in this deployment: fail loudly with the fix instead of
   // rejecting every attempt as "wrong PIN", which would send the owner looking

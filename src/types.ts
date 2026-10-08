@@ -115,23 +115,6 @@ export interface OrangeCashTransaction {
   notes?: string;
 }
 
-export interface UserSubscription {
-  tier: SubscriptionTier;
-  status: 'active' | 'expired' | 'trial';
-  planName: string;
-  activatedAt?: string;
-  expiresAt?: string;
-  billingCycle?: BillingCycle;
-  generationsUsedToday: number;
-  generationsLimitToday: number; // 5 for free, Infinity for pro
-  canExportZip: boolean;
-  canDeployCustomDomain: boolean;
-  canUseVisualInspector: boolean;
-  priorityAiModel: boolean;
-  showWatermark?: boolean; // False for pro/business, true for free
-  transactions: OrangeCashTransaction[];
-}
-
 export interface DeviceProtectionInfo {
   deviceId: string;
   fingerprintHash: string;
@@ -223,25 +206,6 @@ export interface UserSubscription {
   priorityAiModel: boolean;
   showWatermark?: boolean;
   transactions: OrangeCashTransaction[];
-}
-
-export interface OrangeCashTransaction {
-  id: string;
-  senderPhone: string;
-  recipientWallet: string;
-  transactionReference: string;
-  amount: number;
-  currency: string;
-  planId: SubscriptionTier;
-  planName: string;
-  billingCycle: BillingCycle;
-  userName?: string;
-  userEmail?: string;
-  submittedAt: string;
-  status: 'confirmed' | 'pending' | 'rejected';
-  verifiedAt?: string;
-  receiptImage?: string;
-  notes?: string;
 }
 
 export interface UserTeam {

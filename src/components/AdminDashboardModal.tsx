@@ -427,8 +427,17 @@ export const AdminDashboardModal = ({
             setIsDataReady(true);
             return;
           }
-          if (res.status === 401) {
+          // 401 = session/PIN problem → back to the PIN form; anything else
+          // (404/500) is shown as a data error so it is not confused with an
+          // expired session.
+          if (res.status === 401 || res.status === 404) {
             try { window.sessionStorage.removeItem('ebnili_admin_auth'); } catch { /* noop */ }
+            setPinInput('');
+            setAuthError(
+              res.status === 401
+                ? 'انتهت الجلسة — أدخل رمز لوحة الإدارة مجدداً.'
+                : 'تعذر الوصول إلى لوحة الإدارة. تأكد من تسجيل الدخول بنفس حساب المدير ثم أعد المحاولة.',
+            );
             return;
           }
           throw new Error(`تعذر التحقق من الجلسة (${res.status})`);

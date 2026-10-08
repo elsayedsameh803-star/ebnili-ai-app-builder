@@ -10,6 +10,7 @@ import {
   EyeOff,
   RefreshCw,
   LogOut,
+  Lock,
   Settings,
   Calendar,
   DollarSign,
@@ -256,38 +257,4 @@ export const UserDashboard = ({
 };
 
 export default UserDashboard;
-
-            <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-              <Calendar className="w-3.5 h-3.5 text-slate-500" />
-              <span>{ar ? `ينتهي ${new Date(subscription.expiresAt).toLocaleDateString('ar-EG')}` : `Expires ${new Date(subscription.expiresAt).toLocaleDateString('en-GB')}`}</span>
-            </div>
-          )}
-          <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-            <TrendingUp className="w-3.5 h-3.5 text-slate-500" />
-            <span>{ar ? `${subscription?.generationsUsedToday ?? 0} / ${subscription?.generationsLimitToday ?? 0} استخدامات` : `${subscription?.generationsUsedToday ?? 0} / ${subscription?.generationsLimitToday ?? 0} uses`}</span>
-          </div>
-        </div>
-      </div>
-
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-xl font-extrabold text-white font-['Cairo',sans-serif]">{user.name}</h2>
-              {user.isOwner && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
-                  <Crown className="w-3 h-3" />
-                  {ar ? 'مالك الموقع' : 'Site Owner'}
-                </span>
-              )}
-            </div>
-            <p className="text-sm text-slate-400" dir={ar ? 'rtl' : 'ltr'}>{user.email}</p>
-            <div className="flex items-center gap-2 mt-1">
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${isSubActive ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : isTrial ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' : isExpired ? 'bg-red-500/20 text-red-300 border-red-500/30' : 'bg-slate-500/20 text-slate-300 border-slate-500/30'}`}>
-                {isSubActive ? (ar ? 'نشط ✓' : 'Active ✓') : isTrial ? (ar ? 'تجربة ✓' : 'Trial') : isExpired ? (ar ? 'منتهي ✓' : 'Expired') : (ar ? 'مجاني' : 'Free')}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
 
