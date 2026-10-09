@@ -829,7 +829,7 @@ export const GeminiStudioModal = ({
                     <span className="text-xs font-black text-white">299 ج.م / شهرياً</span>
                   </div>
                   <ul className="text-xs text-slate-300 space-y-1.5">
-                    <li>✓ توليد غير محدود بالذكاء الاصطناعي</li>
+                    <li>✓ ١٠٠ توليد بالذكاء الاصطناعي يومياً</li>
                     <li>✓ أولوية قصوى على محرك إبنيلي الذكي</li>
                     <li>✓ تصدير كامل لملفات المشروع ZIP & Git</li>
                     <li>✓ مهندس الأكواد الشامل (React + Express + SQL)</li>

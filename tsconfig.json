@@ -22,5 +22,10 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  // `original_StudioSidebar.tsx` is a stale root-level backup of the real rail
+  // (src/components/StudioSidebar.tsx). Its `../types` / `../lib/*` imports can
+  // only ever resolve from inside `src/`, so it is excluded rather than allowed
+  // to fail `npm run lint` forever.
+  "exclude": ["original_StudioSidebar.tsx", "node_modules", "dist", "dist-server"]
 }

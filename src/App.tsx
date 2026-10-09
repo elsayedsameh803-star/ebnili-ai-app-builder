@@ -45,6 +45,9 @@ const SubscriptionModal = lazy(() => import('./components/SubscriptionModal').th
 const GeminiStudioModal = lazy(() => import('./components/GeminiStudioModal').then((m) => ({ default: m.GeminiStudioModal })));
 const GitHubImportModal = lazy(() => import('./components/GitHubImportModal').then((m) => ({ default: m.GitHubImportModal })));
 const AdminDashboardModal = lazy(() => import('./components/AdminDashboardModal').then((m) => ({ default: m.AdminDashboardModal })));
+// «لوحة المستخدم» — the signed-in customer's dashboard. Lazy like every other
+// overlay so it stays out of the first paint.
+const UserDashboardModal = lazy(() => import('./components/UserDashboardModal').then((m) => ({ default: m.UserDashboardModal })));
 const PricingPage = lazy(() => import('./components/PricingPage').then((m) => ({ default: m.PricingPage })));
 const PayPage = lazy(() => import('./components/PayPage').then((m) => ({ default: m.PayPage })));
 const AuthModal = lazy(() => import('./components/AuthModal').then((m) => ({ default: m.AuthModal })));
@@ -191,6 +194,8 @@ export default function App() {
   /** Why a GitHub link attempt came back failed, shown inside the import dialog. */
   const [gitHubLinkError, setGitHubLinkError] = useState<string | null>(null);
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
+  /** «لوحة المستخدم» — only ever opened by a signed-in account. */
+  const [showUserDashboard, setShowUserDashboard] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   // Which of the site pages is open (About / Contact / Privacy / Terms).
   const [infoPage, setInfoPage] = useState<PageKey | null>(null);
@@ -1012,40 +1017,44 @@ export default function App() {
     setIsGenerating(true);
     setHasStarted(true);
 
-    // Initial plan placeholder
-    setCurrentPlanSteps([
-      language === 'ar' ? 'تحليل الطلب وتوليد المكونات...' : 'Analyzing prompt & crafting components...',
-      language === 'ar' ? 'تطبيق أنماط Tailwind CSS المتجاوبة...' : 'Applying responsive Tailwind CSS styling...',
-      language === 'ar' ? 'ربط دوال الحالة التفاعلية...' : 'Wiring interactive state & handlers...',
-    ]);
+    // SINGLE-SPEND RULE: the stream already consumed one allowance credit in its
+    // middleware. Falling back to the non-streaming route would consume a
+    // SECOND credit for the same user request, so the fallback only runs when
+    // the stream never started (HTTP error / no body). A started-but-failed
+    // stream surfaces its failure message instead of spending again.
+    const devFp = getDeviceFingerprint();
+    streamStartedAt.current = Date.now();
+    setStreamSeconds(0);
 
-    // Add user message
-    const userMsg: ChatMessage = {
-      id: String(Date.now()),
-      sender: 'user',
-      text: prompt,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setChatMessages((prev) => [...prev, userMsg]);
-
+    // ONE try/catch for the whole generation, INCLUDING the streaming attempt:
+    // `finally` is what guarantees `isGenerating` is cleared on every exit path.
     try {
-      const devFp = getDeviceFingerprint();
-      streamStartedAt.current = Date.now();
-      setStreamSeconds(0);
-
-      // STREAMING FIRST — the preview paints while the model is still writing.
-      // If the stream endpoint is missing or dies before the first token, we
-      // transparently fall back to the non-streaming call below, so this can
-      // never be worse than the previous behaviour.
       let streamed = false;
+      let streamAttempted = false;
       try {
         streamed = await tryStreamedGeneration(prompt, templateId, devFp);
-      } catch (streamErr) {
-        console.error('streaming path unavailable, falling back', streamErr);
-        streamed = false;
-      }
+      streamAttempted = true;
+    } catch (streamErr) {
+      console.error('streaming path unavailable, falling back', streamErr);
+      streamed = false;
+    }
 
-      if (streamed) return;
+    if (streamed) return;
+
+    // The stream endpoint ran but produced no usable output: it already spent
+    // the credit, so show its failure instead of spending a second one.
+    if (streamAttempted) {
+      const assistantMsg: ChatMessage = {
+        id: String(Date.now() + 1),
+        sender: 'assistant',
+        text: language === 'ar'
+          ? '⚠️ تعذر إكمال التوليد المباشر. حاول مرة أخرى بطلب جديد.'
+          : '⚠️ Live generation could not finish. Please try again with a new request.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setChatMessages((prev) => [...prev, assistantMsg]);
+      return;
+    }
 
       const res = await fetch('/api/ai/generate-app', {
         method: 'POST',
@@ -1088,8 +1097,8 @@ export default function App() {
 
       if ((data as { error?: string }).error === 'QUOTA_EXCEEDED') {
         const errorMsg = (data as { message?: string }).message || (language === 'ar'
-          ? '⚠️ لقد استنفذت الرصيد المجاني المخصص لجهازك (لحماية المنصة من الاستخدام المتكرر). يرجى الترقية إلى باقة المحترفين Pro عبر محفظة أورانج كاش (01207782741) للاستمتاع بإنشاء غير محدود وبدون علامة مائية.'
-          : '⚠️ Free generation quota exceeded for this device. Please upgrade to Pro via Orange Cash (01207782741) to unlock unlimited creations without watermark.');
+          ? '⚠️ لقد استنفذت رصيدك اليومي. يرجى الترقية إلى باقة أعلى عبر محفظة أورانج كاش (01207782741).'
+          : '⚠️ Daily AI quota exceeded. Please upgrade via Orange Cash (01207782741).');
         
         const assistantMsg: ChatMessage = {
           id: String(Date.now() + 1),
@@ -1129,21 +1138,9 @@ export default function App() {
 
   // Handle Iterative Prompt Refinement
   const handleRefinePrompt = async (prompt: string, elementContext?: SelectedElementInfo) => {
-    // Check free plan generation limit
-    if (subscription.tier === 'free' && subscription.generationsUsedToday >= subscription.generationsLimitToday) {
-      const limitMsg: ChatMessage = {
-        id: String(Date.now()),
-        sender: 'assistant',
-        text: language === 'ar'
-          ? '⚠️ لقد استهلكت رصيدك اليومي المجاني (5 طلبات). يرجى الترقية إلى باقة المحترفين Pro عبر محفظة Orange Cash (01207782741) للحصول على طلبات ذكاء اصطناعي غير محدودة وتصدير كامل للكود.'
-          : '⚠️ You have reached your daily free generation limit (5 prompts). Please upgrade to Pro via Orange Cash (01207782741) for unlimited AI building and full ZIP export.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setChatMessages((prev) => [...prev, limitMsg]);
-      setShowSubscription(true);
-      return;
-    }
-
+    // لا فحص محلي للرصيد هنا — الخادم هو المرجع الوحيد (middleware يخصم
+    // ويرد 429/AI_QUOTA_EXCEEDED عند النفاد). الفحص المحلي كان يستخدم أرقاماً
+    // قديمة ويعرض "غير محدود" بشكل مضلل.
     setIsGenerating(true);
 
     const userMsg: ChatMessage = {
@@ -1202,8 +1199,8 @@ export default function App() {
 
       if ((data as { error?: string }).error === 'QUOTA_EXCEEDED') {
         const errorMsg = (data as { message?: string }).message || (language === 'ar'
-          ? '⚠️ لقد استنفذت الرصيد المجاني المخصص لجهازك (لحماية المنصة من الاستخدام المتكرر). يرجى الترقية إلى باقة المحترفين Pro عبر محفظة أورانج كاش (01207782741).'
-          : '⚠️ Free generation quota exceeded for this device. Please upgrade to Pro via Orange Cash (01207782741).');
+          ? '⚠️ لقد استنفذت رصيدك اليومي. يرجى الترقية إلى باقة أعلى عبر محفظة أورانج كاش (01207782741).'
+          : '⚠️ Daily AI quota exceeded. Please upgrade via Orange Cash (01207782741).');
         
         const assistantMsg: ChatMessage = {
           id: String(Date.now() + 1),
@@ -1588,6 +1585,12 @@ export default function App() {
             onOpenSubscription={() => setShowSubscription(true)}
             onOpenGeminiStudio={() => setShowGeminiStudio(true)}
             onOpenAdmin={() => setShowAdminDashboard(true)}
+            // The row only exists for a signed-in account (see StudioSidebar),
+            // and the modal refuses to render without `authUser`.
+            onOpenUserDashboard={() => {
+              setSidebarOpen(false);
+              setShowUserDashboard(true);
+            }}
             authUser={authUser}
             onOpenAuth={() => setShowAuthModal(true)}
             onLogout={handleLogout}
@@ -1834,6 +1837,31 @@ export default function App() {
             isOpen={showAdminDashboard}
             onClose={() => setShowAdminDashboard(false)}
             language={language}
+          />
+        )}
+
+        {/* User dashboard — «لوحة المستخدم».
+            Mounted ONLY while a verified session exists, so a guest (or an
+            expired cookie) can never reach it. Every figure inside it is read
+            server-side from this session's own rows — there is no id anywhere
+            in the request that could point at another account. */}
+        {authUser && (
+          <UserDashboardModal
+            isOpen={showUserDashboard}
+            onClose={() => setShowUserDashboard(false)}
+            language={language}
+            authUser={authUser}
+            subscription={subscription}
+            projects={projectList}
+            onOpenSubscription={() => {
+              setShowUserDashboard(false);
+              setShowSubscription(true);
+            }}
+            onSelectProject={(id) => {
+              setShowUserDashboard(false);
+              handleSelectProject(id);
+            }}
+            onRefreshProjects={refreshProjectList}
           />
         )}
 

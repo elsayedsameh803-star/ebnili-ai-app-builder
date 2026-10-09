@@ -523,9 +523,7 @@ export const ChatSidebar = ({
                 <div className="flex justify-between text-slate-400 text-[11px]">
                   <span>{language === 'ar' ? 'توليد الذكاء اليومي:' : 'Daily AI Prompts:'}</span>
                   <strong className="text-white">
-                    {subscription && subscription.generationsLimitToday > 100
-                      ? (language === 'ar' ? 'غير محدود ∞' : 'Unlimited ∞')
-                      : `${subscription?.generationsUsedToday || 0}/${subscription?.generationsLimitToday || 5}`}
+                    {`${subscription?.generationsUsedToday || 0}/${subscription?.generationsLimitToday || 5}`}
                   </strong>
                 </div>
                 <div className="flex justify-between text-slate-400 text-[11px]">

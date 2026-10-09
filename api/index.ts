@@ -252,7 +252,8 @@ function subscriptionPayload(grant: { email: string; tier: "pro" | "business"; e
         tier: grant.tier,
         status: "active" as const,
         planName: grant.tier === "business" ? "Business" : "Pro",
-        generationsLimitToday: 99999,
+        // المركزي: quotaForTier — لا Unlimited (pro → 100, business → 400).
+        generationsLimitToday: dailyQuotaFor(grant.tier),
         canExportZip: true,
         canDeployCustomDomain: grant.tier === "business",
         priorityAiModel: true,
@@ -277,7 +278,8 @@ function ownerSubscription() {
     tier: "business" as const,
     status: "active" as const,
     planName: "Business",
-    generationsLimitToday: 99999,
+    // المركزي: نفس سقف business من quotaForTier — لا Unlimited.
+    generationsLimitToday: quotaForTier("business"),
     canExportZip: true,
     canDeployCustomDomain: true,
     priorityAiModel: true,

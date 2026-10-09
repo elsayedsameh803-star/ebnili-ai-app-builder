@@ -226,8 +226,8 @@ export const SubscriptionModal = ({
               </div>
               <p className="text-xs text-slate-400">
                 {language === 'ar' 
-                  ? 'بناء غير محدود، تصدير الكود بالكامل، وتفعيل عبر محفظة أورانج كاش بعد مراجعة التحويل' 
-                  : 'Unlimited AI generation, complete source code export, activation via Orange Cash after transfer review'}
+                  ? '١٠٠ توليد يومياً لباقة Pro و٤٠٠ لباقة Business، تصدير الكود بالكامل، وتفعيل عبر محفظة أورانج كاش بعد مراجعة التحويل' 
+                  : '100 daily generations on Pro and 400 on Business, complete source code export, activation via Orange Cash after transfer review'}
               </p>
             </div>
           </div>
@@ -861,9 +861,7 @@ export const SubscriptionModal = ({
                   <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80">
                     <span className="text-[11px] text-slate-400 block">{language === 'ar' ? 'توليد الذكاء الاصطناعي' : 'AI Generation'}</span>
                     <strong className="text-white font-bold text-sm">
-                      {subscription.generationsLimitToday > 100 
-                        ? (language === 'ar' ? 'غير محدود ∞' : 'Unlimited ∞') 
-                        : `${subscription.generationsUsedToday}/${subscription.generationsLimitToday}`}
+                      {`${subscription.generationsUsedToday}/${subscription.generationsLimitToday}`}
                     </strong>
                   </div>
 

@@ -38,6 +38,7 @@ import {
   Info,
   Scale,
   FolderTree,
+  LayoutDashboard,
   Pencil,
   Trash2,
   Plus,
@@ -89,6 +90,12 @@ export interface StudioSidebarProps {
   subscription?: UserSubscription;
   onOpenSubscription?: () => void;
   onOpenGeminiStudio?: () => void;
+  /**
+   * Opens «لوحة المستخدم» — the signed-in customer's own dashboard (plan,
+   * balance, quota meter, projects). Never rendered without a session: App only
+   * passes this when `authUser` exists, and the modal itself re-checks.
+   */
+  onOpenUserDashboard?: () => void;
   onOpenAdmin?: () => void;
   authUser?: AuthUser | null;
   onOpenAuth?: () => void;
@@ -178,6 +185,7 @@ export const StudioSidebar = ({
   subscription,
   onOpenSubscription,
   onOpenGeminiStudio,
+  onOpenUserDashboard,
   onOpenAdmin,
   authUser = null,
   onOpenAuth,
@@ -470,6 +478,17 @@ export const StudioSidebar = ({
         )}
         {onOpenGeminiStudio && (
           <Row icon={Sparkles} label={ar ? '╪º╪│╪¬┘ê╪»┘è┘ê ╪Ñ╪¿┘å┘è┘ä┘è' : 'Ebnili Studio'} onClick={onOpenGeminiStudio} iconClass="text-amber-400" />
+        )}
+        {/* «لوحة المستخدم» — the customer's OWN dashboard. Gated on the session:
+            a guest has no account to show, so the row simply does not exist. */}
+        {authUser && onOpenUserDashboard && (
+          <Row
+            icon={LayoutDashboard}
+            label={ar ? 'لوحة المستخدم' : 'My dashboard'}
+            onClick={onOpenUserDashboard}
+            iconClass="text-rose-400"
+            title={ar ? 'باقتك ورصيدك واستهلاك الكوتة ومشاريعك' : 'Your plan, balance, quota and projects'}
+          />
         )}
         {onOpenSubscription && (
           <Row
