@@ -2148,6 +2148,20 @@ function requireOwner(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+/**
+ * GET `/api/admin/auth` — the link inside the "you are an admin now" e-mail.
+ *
+ * WHY THIS EXISTS: the invitation button used to point at this exact path, but
+ * only POST was registered, so a newly added administrator who clicked it got a
+ * bare 404 and could never find the PIN form — "لا أستطيع تسجيل الدخول". A GET
+ * now bounces the browser to the SPA deep link that opens the console (and asks
+ * the guest to sign in first when there is no session).
+ */
+app.get("/api/admin/auth", (req: Request, res: Response) => {
+  const home = requestBaseUrl(req);
+  res.redirect(`${home}/?admin=1`);
+});
+
 app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "محاولات كثيرة جداً. انتظر قليلاً ثم أعد المحاولة."), async (req: Request, res: Response) => {
   // Admin is the site owner OR an active delegate. The PIN is a second factor,
   // not the identity: without a signed-in account this endpoint answers 404
@@ -2155,7 +2169,14 @@ app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "�
   // session to try elsewhere with.
   const session = readAuthSession(req as AuthReq);
   if (!session) {
-    return res.status(404).json({ success: false, message: "Not found" });
+    // The ONE exception to the bare 404: a browser that reached this route from
+    // the invitation link needs an instruction, not a phantom page. It grants
+    // nothing — the delegate + PIN checks below still run on the next attempt.
+    return res.status(401).json({
+      success: false,
+      code: "AUTH_REQUIRED",
+      message: "سجّل الدخول أولاً بنفس البريد المضاف كمسؤول، ثم أعد إدخال رمز الدخول.",
+    });
   }
   // Delegates need an async lookup, so the check is inline rather than a guard.
   const isOwner = isOwnerAccount(session);
@@ -2446,10 +2467,14 @@ async function notifyNewAdmin(email: string): Promise<boolean> {
     <p style="margin:0 0 24px;font-size:14px;line-height:1.8;color:#94a3b8">
       ملاحظة: صلاحية المسؤول لا تتيح لك إضافة أو حذف مسؤولين آخرين — هذه صلاحية صاحب الموقع وحده.
     </p>
-    <a href="${siteUrl}/api/admin/auth"
+    <a href="${siteUrl}/?admin=1"
        style="display:inline-block;background:#e11d48;color:#fff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:12px">
       الدخول إلى لوحة التحكم
     </a>
+    <p style="margin:16px 0 0;font-size:13px;line-height:1.8;color:#94a3b8">
+      الطريقة: افتح الرابط، سجّل الدخول بحساب <strong dir="ltr">${escapeHtml(email)}</strong>،
+      ثم أدخل رمز دخول لوحة الإدارة (الـ PIN) الذي أرسله لك صاحب الموقع.
+    </p>
     <p style="margin:24px 0 0;font-size:12px;color:#64748b">هذه رسالة آلية من ${escapeHtml(from)}.</p>
   </div>
 </body></html>`;

@@ -384,6 +384,62 @@ export default function App() {
   // every route re-checks server-side, so this is a rendering hint only.
   const canOpenAdmin = isAdminAccount(authUser);
 
+  // ── `?admin=1` — the deep link inside the "you are an admin now" e-mail ────
+  // WHY: the invitation button pointed at a POST-only API route, so a newly
+  // added administrator who clicked it got a bare 404 and could never find the
+  // PIN form — the reported "لا أستطيع تسجيل الدخول إلى لوحة التحكم".
+  //
+  // The flag is HELD until the session resolves rather than consumed on mount:
+  // a guest is sent to sign in first, and the console then opens by itself once
+  // `/api/auth/me` stamps `isAdmin`. It is cleared the moment it is acted on, so
+  // it can never re-open the modal after the user closes it.
+  const [pendingAdminDeepLink, setPendingAdminDeepLink] = useState<boolean>(() => {
+    // Read on every mount, INCLUDING the return leg of the OAuth round trip:
+    // signing in navigates away to the provider and comes back on a different
+    // query string, so `?admin=1` alone would be lost exactly when it matters.
+    const ADMIN_DEEP_LINK_KEY = 'ebnili_admin_deep_link';
+    try {
+      if (new URLSearchParams(window.location.search).get('admin') === '1') {
+        window.sessionStorage.setItem(ADMIN_DEEP_LINK_KEY, '1');
+        return true;
+      }
+      return window.sessionStorage.getItem(ADMIN_DEEP_LINK_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const clearAdminDeepLink = useCallback(() => {
+    setPendingAdminDeepLink(false);
+    try {
+      window.sessionStorage.removeItem('ebnili_admin_deep_link');
+    } catch {
+      /* storage may be disabled; the state flag is the authoritative one */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pendingAdminDeepLink || !authChecked) return;
+    // Scrub the address bar exactly like the auth/github query params: a flag
+    // that stays in the URL would re-fire on every reload.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('admin');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      /* history is best-effort; the flag below is what actually matters */
+    }
+    if (!authUser) {
+      // Not signed in: ask for sign-in and KEEP the flag (also in sessionStorage)
+      // so the console opens by itself after the provider round trip.
+      setShowAuthModal(true);
+      return;
+    }
+    if (canOpenAdmin) setShowAdminDashboard(true);
+    clearAdminDeepLink();
+  }, [pendingAdminDeepLink, authChecked, authUser, canOpenAdmin, clearAdminDeepLink]);
+
+
   // Subscription State with Orange Cash support
   const [subscription, setSubscription] = useState<UserSubscription>({
     tier: 'free',

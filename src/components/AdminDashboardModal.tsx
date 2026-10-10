@@ -682,9 +682,27 @@ export const AdminDashboardModal = ({
         body: JSON.stringify({ pin: pinInput.trim() }),
       });
 
-      const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
+      const data: { error?: string; message?: string; code?: string } = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.message || data.error || 'رمز الدخول غير صحيح');
+        const raw = (data.message || data.error || '').trim();
+        // The server deliberately answers a bare 404 for anyone who is not an
+        // active admin, which rendered as the English string "Not found" in the
+        // form — the exact "لا أستطيع تسجيل الدخول" report. Translate each
+        // status into the instruction the person actually needs.
+        let message = raw;
+        if (res.status === 404 || raw === 'Not found') {
+          message =
+            'تعذّر الدخول: سجّل الدخول بنفس البريد المضاف كمسؤول، وتأكد أن حسابك مفعّل (غير موقوف) لدى صاحب الموقع.';
+        } else if (data.code === 'AUTH_REQUIRED' || (res.status === 401 && data.code === 'AUTH_REQUIRED')) {
+          message = raw || 'سجّل الدخول أولاً بنفس البريد المضاف كمسؤول، ثم أعد المحاولة.';
+        } else if (res.status === 429) {
+          message = raw || 'محاولات دخول كثيرة جداً — أعد المحاولة بعد 10 دقائق.';
+        } else if (res.status === 503) {
+          message = raw || 'لوحة الإدارة غير مُهيأة على الخادم — تواصل مع صاحب الموقع.';
+        } else if (!message) {
+          message = 'رمز الدخول غير صحيح أو تعذّر إكمال تسجيل الدخول.';
+        }
+        throw new Error(message);
       }
 
       try { window.sessionStorage.setItem('ebnili_admin_auth', 'true'); } catch { /* noop */ }
