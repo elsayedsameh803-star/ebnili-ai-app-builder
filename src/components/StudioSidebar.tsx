@@ -1,13 +1,13 @@
 /**
- * Studio sidebar ΓÇö the single home for every workspace control.
+ * Studio sidebar — the single home for every workspace control.
  *
  * WHY THIS REPLACED THE TOP BAR
  * ----------------------------
  * The header was a single 56px row holding thirteen controls. Below ~1100px they
  * no longer fitted, so the row was made horizontally scrollable and labels were
  * progressively hidden behind `hidden lg:inline`, `hidden sm:inline`, `hidden
- * md:inline`ΓÇª What survived was a strip of unlabelled icons, and because the bar
- * is a scroll container its height could not grow ΓÇö so a long project name
+ * md:inline`… What survived was a strip of unlabelled icons, and because the bar
+ * is a scroll container its height could not grow — so a long project name
  * overlapped the device buttons next to it. That overlap is what this removes.
  *
  * A vertical rail gives every control its own row: a label never competes with
@@ -16,10 +16,10 @@
  *
  * LAYOUT RULES THAT MUST NOT BE BROKEN
  * ------------------------------------
- *  ΓÇó Never put an absolutely-positioned panel inside an `overflow` container ΓÇö
+ *  • Never put an absolutely-positioned panel inside an `overflow` container —
  *    it gets clipped. The panels are siblings rendered after the scroll area,
  *    inside the sidebar's own `relative` box.
- *  ΓÇó `min-w-0` on every flex child holding text, otherwise `truncate` has no
+ *  • `min-w-0` on every flex child holding text, otherwise `truncate` has no
  *    effect and the text escapes its box. This is the real cause of most
  *    "text overlapping icons" reports in flex toolbars.
  */
@@ -57,17 +57,17 @@ import { DeviceMode, ViewMode, Language, UserSubscription, AuthUser } from '../t
 import { isOwnerAccount, isAdminAccount } from '../lib/auth';
 import type { ProjectSummary } from '../lib/projects';
 
-/** "┘à┘å╪░ 5 ╪»┘é╪º╪ª┘é" / "2 hours ago" ΓÇö the project list is a recency list. */
+/** "منذ 5 دقائق" / "2 hours ago" — the project list is a recency list. */
 function formatRelative(iso: string, language: Language): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return '';
   const minutes = Math.max(0, Math.round((Date.now() - then) / 60000));
-  if (minutes < 1) return language === 'ar' ? '╪º┘ä╪ó┘å' : 'now';
-  if (minutes < 60) return language === 'ar' ? `┘à┘å╪░ ${minutes} ╪»` : `${minutes}m ago`;
+  if (minutes < 1) return language === 'ar' ? 'الآن' : 'now';
+  if (minutes < 60) return language === 'ar' ? `منذ ${minutes} دقيقة` : `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return language === 'ar' ? `┘à┘å╪░ ${hours} ╪│` : `${hours}h ago`;
+  if (hours < 24) return language === 'ar' ? `منذ ${hours} ساعة` : `${hours}h ago`;
   const days = Math.round(hours / 24);
-  if (days < 30) return language === 'ar' ? `┘à┘å╪░ ${days} ┘è┘ê┘à` : `${days}d ago`;
+  if (days < 30) return language === 'ar' ? `منذ ${days} يوم` : `${days}d ago`;
   return new Date(iso).toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-GB');
 }
 
@@ -113,10 +113,10 @@ export interface StudioSidebarProps {
  * One full-width row. The icon and the label can never fight for pixels.
  *
  * `active` is what separates the two kinds of row in this rail:
- *   ΓÇó `true` / `false` ΓåÆ a toggle (Preview / Split / Code, Desktop / Tablet /
+ *   • `true` / `false` → a toggle (Preview / Split / Code, Desktop / Tablet /
  *     Mobile, Visual edit). `aria-pressed` is then meaningful and the state is
  *     announced.
- *   ΓÇó omitted          ΓåÆ a plain action (New project, Publish, Export, Open
+ *   • omitted          → a plain action (New project, Publish, Export, Open
  *     in tab). These have no on/off state, and announcing one is worse than
  *     announcing nothing.
  *
@@ -207,11 +207,11 @@ export const StudioSidebar = ({
 
   // Owner-only controls stay hidden from ordinary users. `authUser.isOwner` is
   // stamped by the server on `/api/auth/me`, so the browser cannot talk its way
-  // into these buttons ΓÇö and server-side `requireAdmin` remains the real boundary.
+  // into these buttons — and server-side `requireAdmin` remains the real boundary.
   const isOwner = isOwnerAccount(authUser);
 
   // Console access: the owner OR an active delegate. This only decides what to
-  // RENDER ΓÇö `requireAdmin` on the server is the real boundary, and the
+  // RENDER — `requireAdmin` on the server is the real boundary, and the
   // owner-only tools below stay gated on `isOwner`.
   const canOpenAdmin = isAdminAccount(authUser);
 
@@ -222,7 +222,7 @@ export const StudioSidebar = ({
   }, [projectName]);
 
   // Close both panels on any outside click. The panels are siblings AFTER the
-  // scroll area, so the check covers the triggers AND the panels themselves ΓÇö
+  // scroll area, so the check covers the triggers AND the panels themselves —
   // otherwise the first click on an item would register as "outside" and close
   // the panel before the click landed.
   useEffect(() => {
@@ -254,21 +254,21 @@ export const StudioSidebar = ({
 
   return (
     // `relative` anchors the two panels. The rail itself must NOT be the scroll
-    // container ΓÇö overflow lives on an inner box, otherwise the panels clip.
+    // container — overflow lives on an inner box, otherwise the panels clip.
     <aside className="relative shrink-0 w-64 bg-slate-900 text-slate-100 border-e border-slate-800 flex flex-col z-30">
-      {/* ΓöÇΓöÇ Brand + project name ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-          `relative` here ΓÇö not on the rail ΓÇö is what anchors the project
+      {/* ── Brand + project name ───────────────────────────────────────────
+          `relative` here — not on the rail — is what anchors the project
           switcher. See the panel note further down for why the rail cannot
           be the anchor. */}
       <div ref={projectsMenuRef} className="relative shrink-0 border-b border-slate-800 p-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center shadow-md shadow-rose-500/20">
-            <span className="text-white text-base font-bold">ΓÖÑ</span>
+            <span className="text-white text-base font-bold">♥</span>
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="font-extrabold text-sm tracking-tight text-white font-['Cairo',sans-serif] truncate">
-                ╪Ñ╪¿┘å┘è┘ä┘è
+                إبنيلي
               </span>
               <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 font-semibold border border-orange-500/30">
                 AI
@@ -289,21 +289,21 @@ export const StudioSidebar = ({
               onBlur={handleNameSubmit}
               onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
               autoFocus
-              aria-label={ar ? '╪º╪│┘à ╪º┘ä┘à╪┤╪▒┘ê╪╣' : 'Project name'}
+              aria-label={ar ? 'اسم المشروع' : 'Project name'}
               className="w-full bg-slate-800 text-xs font-semibold px-2.5 py-2 rounded-lg border border-slate-700 text-white outline-none focus:ring-1 focus:ring-rose-500"
             />
           ) : (
             <button
               type="button"
               onClick={() => setIsEditingName(true)}
-              title={ar ? '╪º┘å┘é╪▒ ┘ä╪¬╪║┘è┘è╪▒ ╪º╪│┘à ╪º┘ä┘à╪┤╪▒┘ê╪╣' : 'Click to rename'}
+              title={ar ? 'انقر لتغيير اسم المشروع' : 'Click to rename'}
               className="w-full text-start px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 transition cursor-pointer min-w-0"
             >
               <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                {ar ? '╪º┘ä┘à╪┤╪▒┘ê╪╣' : 'Project'}
+                {ar ? 'المشروع' : 'Project'}
               </span>
               <span className="block text-xs font-bold text-slate-200 truncate">
-                {projectName || (ar ? '┘à╪┤╪▒┘ê╪╣ ╪¿╪»┘ê┘å ╪º╪│┘à' : 'Untitled project')}
+                {projectName || (ar ? 'مشروع بدون اسم' : 'Untitled project')}
               </span>
             </button>
           )}
@@ -312,12 +312,12 @@ export const StudioSidebar = ({
             {isGenerating ? (
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-full border border-amber-500/20 animate-pulse min-w-0">
                 <Sparkles className="w-3 h-3 animate-spin shrink-0" aria-hidden="true" />
-                <span className="truncate">{ar ? '╪¼╪º╪▒┘ì ╪º┘ä╪¿┘å╪º╪íΓÇª' : 'BuildingΓÇª'}</span>
+                <span className="truncate">{ar ? 'جارٍ البناء…' : 'Building…'}</span>
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/20 min-w-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                <span className="truncate">{ar ? '╪¼╪º┘ç╪▓' : 'Ready'}</span>
+                <span className="truncate">{ar ? 'جاهز' : 'Ready'}</span>
               </span>
             )}
 
@@ -326,16 +326,16 @@ export const StudioSidebar = ({
                 type="button"
                 onClick={() => setShowProjectsMenu((v) => !v)}
                 className="shrink-0 text-[10px] font-bold text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition cursor-pointer"
-                title={ar ? '╪¬╪¿╪»┘è┘ä ╪º┘ä┘à╪┤╪▒┘ê╪╣' : 'Switch project'}
+                title={ar ? 'تبديل المشروع' : 'Switch project'}
                 aria-expanded={showProjectsMenu}
               >
-                Γû╛
+                ▾
               </button>
             )}
           </div>
         </div>
 
-        {/* Project switcher ΓÇö anchored to THIS header, not to the rail.
+        {/* Project switcher — anchored to THIS header, not to the rail.
             `top-full` drops it directly under the button it belongs to. It used
             to be a sibling of the scroll area using `bottom-full`, which
             resolved against the full-height `<aside>` and pushed the whole
@@ -344,9 +344,9 @@ export const StudioSidebar = ({
         {showProjectsMenu && (
           <div className="absolute top-full inset-x-2 mt-1 max-h-80 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5">
             <div className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase flex items-center justify-between gap-2">
-              <span className="truncate">{ar ? '┘à╪┤╪º╪▒┘è╪╣┘è' : 'My projects'}</span>
+              <span className="truncate">{ar ? 'مشاريعي' : 'My projects'}</span>
               <span className="text-slate-600 normal-case font-medium truncate shrink-0">
-                {ar ? '┘à╪¡┘ü┘ê╪╕╪⌐ ╪╣┘ä┘ë ┘ç╪░╪º ╪º┘ä╪¼┘ç╪º╪▓' : 'saved on this device'}
+                {ar ? 'محفوظة على هذا الجهاز' : 'saved on this device'}
               </span>
             </div>
 
@@ -357,7 +357,7 @@ export const StudioSidebar = ({
                 </div>
                 <p className="text-[11px] text-slate-400 leading-5">
                   {ar
-                    ? '┘ä╪│┘ç ┘à┘ü┘è╪┤ ┘à╪┤╪º╪▒┘è╪╣ ┘à╪¡┘ü┘ê╪╕╪⌐. ╪ú┘ê┘ä ┘à╪º ╪¬┘ê┘ä┘æ╪» ┘à┘ê┘é╪╣ ┘ç┘è╪¬╪¡┘ü╪╕ ┘ç┘å╪º ╪¬┘ä┘é╪º╪ª┘è╪º┘ï.'
+                    ? 'لسه مفيش مشاريع محفوظة. أول ما تولّد موقع هيتحفظ هنا تلقائياً.'
                     : 'No saved projects yet. Your first generated site is saved here automatically.'}
                 </p>
               </div>
@@ -384,10 +384,10 @@ export const StudioSidebar = ({
                           <span className={`text-xs font-bold truncate min-w-0 ${isActive ? 'text-rose-300' : 'text-slate-200'}`}>
                             {p.name}
                           </span>
-                          {isActive && <span className="text-rose-400 text-[10px] shrink-0">{ar ? '┘à┘ü╪¬┘ê╪¡' : 'open'}</span>}
+                          {isActive && <span className="text-rose-400 text-[10px] shrink-0">{ar ? 'مفتوح' : 'open'}</span>}
                         </span>
                         <span className="block text-[10px] text-slate-500 truncate">
-                          {p.versionCount ?? 0} {ar ? '╪Ñ╪╡╪»╪º╪▒╪º╪¬' : 'versions'} ┬╖ {formatRelative(p.updatedAt, language)}
+                          {p.versionCount ?? 0} {ar ? 'إصدارات' : 'versions'} · {formatRelative(p.updatedAt, language)}
                         </span>
                       </button>
 
@@ -395,11 +395,11 @@ export const StudioSidebar = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const next = window.prompt(ar ? '╪º╪│┘à ╪º┘ä┘à╪┤╪▒┘ê╪╣ ╪º┘ä╪¼╪»┘è╪»' : 'New project name', p.name);
+                            const next = window.prompt(ar ? 'اسم المشروع الجديد' : 'New project name', p.name);
                             if (next && next.trim()) onRenameStoredProject(p.id, next.trim());
                           }}
                           className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 transition shrink-0"
-                          title={ar ? '╪Ñ╪╣╪º╪»╪⌐ ╪¬╪│┘à┘è╪⌐' : 'Rename'}
+                          title={ar ? 'إعادة تسمية' : 'Rename'}
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
@@ -411,13 +411,13 @@ export const StudioSidebar = ({
                           onClick={() => {
                             const ok = window.confirm(
                               ar
-                                ? `╪¡╪░┘ü ╪º┘ä┘à╪┤╪▒┘ê╪╣ "${p.name}" ┘å┘ç╪º╪ª┘è╪º┘ï╪ƒ ┘ä╪º ┘è┘à┘â┘å ╪º┘ä╪¬╪▒╪º╪¼╪╣.`
+                                ? `حذف المشروع "${p.name}" نهائياً؟ لا يمكن التراجع.`
                                 : `Permanently delete "${p.name}"? This cannot be undone.`,
                             );
                             if (ok) onDeleteProject(p.id);
                           }}
                           className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition shrink-0"
-                          title={ar ? '╪¡╪░┘ü' : 'Delete'}
+                          title={ar ? 'حذف' : 'Delete'}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -438,7 +438,7 @@ export const StudioSidebar = ({
                 className="w-full text-start px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-1.5 transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">{ar ? '┘à╪┤╪▒┘ê╪╣ ╪¼╪»┘è╪»' : 'New project'}</span>
+                <span className="truncate">{ar ? 'مشروع جديد' : 'New project'}</span>
               </button>
             </div>
           </div>
@@ -446,38 +446,38 @@ export const StudioSidebar = ({
       </div>
 
 
-      {/* ΓöÇΓöÇ The rail ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
+      {/* ── The rail ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2 space-y-0.5">
-        <Row icon={Plus} label={ar ? '┘à╪┤╪▒┘ê╪╣ ╪¼╪»┘è╪»' : 'New project'} onClick={onNewProject} iconClass="text-rose-400" />
+        <Row icon={Plus} label={ar ? 'مشروع جديد' : 'New project'} onClick={onNewProject} iconClass="text-rose-400" />
 
-        <SectionLabel>{ar ? '╪╖╪▒┘è┘é╪⌐ ╪º┘ä╪╣╪▒╪╢' : 'View'}</SectionLabel>
-        <Row icon={Eye} label={ar ? '┘à╪╣╪º┘è┘å╪⌐' : 'Preview'} onClick={() => onViewModeChange('preview')} active={viewMode === 'preview'} />
-        <Row icon={Columns2} label={ar ? '┘à┘é╪│┘æ┘à' : 'Split'} onClick={() => onViewModeChange('split')} active={viewMode === 'split'} />
-        <Row icon={Code2} label={ar ? '╪º┘ä┘â┘ê╪»' : 'Code'} onClick={() => onViewModeChange('code')} active={viewMode === 'code'} />
+        <SectionLabel>{ar ? 'طريقة العرض' : 'View'}</SectionLabel>
+        <Row icon={Eye} label={ar ? 'معاينة' : 'Preview'} onClick={() => onViewModeChange('preview')} active={viewMode === 'preview'} />
+        <Row icon={Columns2} label={ar ? 'مقسّم' : 'Split'} onClick={() => onViewModeChange('split')} active={viewMode === 'split'} />
+        <Row icon={Code2} label={ar ? 'الكود' : 'Code'} onClick={() => onViewModeChange('code')} active={viewMode === 'code'} />
 
-        <SectionLabel>{ar ? '┘à┘é╪º╪│ ╪º┘ä╪┤╪º╪┤╪⌐' : 'Screen size'}</SectionLabel>
-        <Row icon={Monitor} label={ar ? '╪│╪╖╪¡ ╪º┘ä┘à┘â╪¬╪¿' : 'Desktop'} hint="100%" onClick={() => onDeviceModeChange('desktop')} active={deviceMode === 'desktop'} />
-        <Row icon={Tablet} label={ar ? '╪¬╪º╪¿┘ä╪¬' : 'Tablet'} hint="768px" onClick={() => onDeviceModeChange('tablet')} active={deviceMode === 'tablet'} />
-        <Row icon={Smartphone} label={ar ? '┘ç╪º╪¬┘ü' : 'Mobile'} hint="375px" onClick={() => onDeviceModeChange('mobile')} active={deviceMode === 'mobile'} />
+        <SectionLabel>{ar ? 'مقاس الشاشة' : 'Screen size'}</SectionLabel>
+        <Row icon={Monitor} label={ar ? 'سطح المكتب' : 'Desktop'} hint="100%" onClick={() => onDeviceModeChange('desktop')} active={deviceMode === 'desktop'} />
+        <Row icon={Tablet} label={ar ? 'تابلت' : 'Tablet'} hint="768px" onClick={() => onDeviceModeChange('tablet')} active={deviceMode === 'tablet'} />
+        <Row icon={Smartphone} label={ar ? 'هاتف' : 'Mobile'} hint="375px" onClick={() => onDeviceModeChange('mobile')} active={deviceMode === 'mobile'} />
 
-        <SectionLabel>{ar ? '╪º┘ä╪¬╪╣╪»┘è┘ä' : 'Edit'}</SectionLabel>
+        <SectionLabel>{ar ? 'التعديل' : 'Edit'}</SectionLabel>
         <Row
           icon={MousePointerClick}
-          label={ar ? '╪¬╪╣╪»┘è┘ä ╪¿╪╡╪▒┘è' : 'Visual edit'}
+          label={ar ? 'تعديل بصري' : 'Visual edit'}
           onClick={onToggleInspectMode}
           active={isInspectMode}
           iconClass="text-rose-400"
-          title={ar ? '╪º┘å┘é╪▒ ╪ú┘è ╪╣┘å╪╡╪▒ ┘ü┘è ╪º┘ä┘à╪╣╪º┘è┘å╪⌐ ┘ä╪¬╪╣╪»┘è┘ä┘ç' : 'Click any element in the preview to edit it'}
+          title={ar ? 'انقر أي عنصر في المعاينة لتعديله' : 'Click any element in the preview to edit it'}
         />
 
-        <SectionLabel>{ar ? '╪º┘ä╪Ñ╪¼╪▒╪º╪í╪º╪¬' : 'Actions'}</SectionLabel>
-        <Row icon={Share2} label={ar ? '┘å╪┤╪▒ ┘ê┘à╪┤╪º╪▒┘â╪⌐' : 'Publish'} onClick={onOpenDeploy} iconClass="text-rose-400" />
-        <Row icon={Download} label={ar ? '╪¬╪╡╪»┘è╪▒ ZIP' : 'Export ZIP'} onClick={onOpenExport} iconClass="text-emerald-400" />
+        <SectionLabel>{ar ? 'الإجراءات' : 'Actions'}</SectionLabel>
+        <Row icon={Share2} label={ar ? 'نشر ومشاركة' : 'Publish'} onClick={onOpenDeploy} iconClass="text-rose-400" />
+        <Row icon={Download} label={ar ? 'تصدير ZIP' : 'Export ZIP'} onClick={onOpenExport} iconClass="text-emerald-400" />
         {onOpenInNewTab && (
-          <Row icon={ExternalLink} label={ar ? '┘ü╪¬╪¡ ┘ü┘è ╪¬╪¿┘ê┘è╪¿' : 'Open in tab'} onClick={onOpenInNewTab} iconClass="text-cyan-400" />
+          <Row icon={ExternalLink} label={ar ? 'فتح في تبويب' : 'Open in tab'} onClick={onOpenInNewTab} iconClass="text-cyan-400" />
         )}
         {onOpenGeminiStudio && (
-          <Row icon={Sparkles} label={ar ? '╪º╪│╪¬┘ê╪»┘è┘ê ╪Ñ╪¿┘å┘è┘ä┘è' : 'Ebnili Studio'} onClick={onOpenGeminiStudio} iconClass="text-amber-400" />
+          <Row icon={Sparkles} label={ar ? 'استوديو إبنيلي' : 'Ebnili Studio'} onClick={onOpenGeminiStudio} iconClass="text-amber-400" />
         )}
         {/* «لوحة المستخدم» — the customer's OWN dashboard. Gated on the session:
             a guest has no account to show, so the row simply does not exist. */}
@@ -493,28 +493,28 @@ export const StudioSidebar = ({
         {onOpenSubscription && (
           <Row
             icon={Crown}
-            label={subscription && subscription.tier !== 'free' ? `${subscription.tier.toUpperCase()} Γ£ô` : ar ? '╪¬╪▒┘é┘è╪⌐ ╪º┘ä╪¿╪º┘é╪⌐' : 'Upgrade plan'}
+            label={subscription && subscription.tier !== 'free' ? `${subscription.tier.toUpperCase()} ✓` : ar ? 'ترقية الباقة' : 'Upgrade plan'}
             onClick={onOpenSubscription}
             iconClass="text-orange-400"
           />
         )}
 
-        {/* ΓöÇΓöÇ Legal & support ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        {/* ── Legal & support ──────────────────────────────────────────────
             These four documents used to exist ONLY inside the account
             dropdown, behind a toggle. A privacy policy, terms of service and
             contact page that a visitor has to find and open a menu to reach
-            are, in practice, not published at all ΓÇö and this is exactly what
+            are, in practice, not published at all — and this is exactly what
             the owner asked to be fixed. They now have their own always-
             visible section here, in the footer of the marketing hero, and at
             the bottom of the sign-in gate. */}
         {onOpenInfoPage && (
           <>
-            <SectionLabel>{ar ? '╪º┘ä┘à┘å╪╡╪⌐ ┘ê╪º┘ä┘é╪º┘å┘ê┘å' : 'Platform & legal'}</SectionLabel>
+            <SectionLabel>{ar ? 'المنصة والقانون' : 'Platform & legal'}</SectionLabel>
             {[
-              { key: 'about' as const, ar: '┘à┘å ┘å╪¡┘å', en: 'About', icon: Info },
-              { key: 'contact' as const, ar: '╪º╪¬╪╡┘ä ╪¿┘å╪º', en: 'Contact', icon: Phone },
-              { key: 'privacy' as const, ar: '╪│┘è╪º╪│╪⌐ ╪º┘ä╪«╪╡┘ê╪╡┘è╪⌐', en: 'Privacy', icon: ShieldCheck },
-              { key: 'terms' as const, ar: '╪º┘ä╪┤╪▒┘ê╪╖ ┘ê╪º┘ä╪ú╪¡┘â╪º┘à', en: 'Terms', icon: Scale },
+              { key: 'about' as const, ar: 'من نحن', en: 'About', icon: Info },
+              { key: 'contact' as const, ar: 'اتصل بنا', en: 'Contact', icon: Phone },
+              { key: 'privacy' as const, ar: 'سياسة الخصوصية', en: 'Privacy', icon: ShieldCheck },
+              { key: 'terms' as const, ar: 'الشروط والأحكام', en: 'Terms', icon: Scale },
             ].map((item) => {
               const Icon = item.icon;
               return (
@@ -535,7 +535,7 @@ export const StudioSidebar = ({
               href="tel:+201207782741"
               dir="ltr"
               className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/10 transition min-w-0"
-              title={ar ? '╪º╪¬╪╡┘ä ╪¿╪º┘ä╪»╪╣┘à ╪º┘ä┘ü┘å┘è' : 'Call support'}
+              title={ar ? 'اتصل بالدعم الفني' : 'Call support'}
             >
               <Phone className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">01207782741</span>
@@ -544,7 +544,7 @@ export const StudioSidebar = ({
         )}
       </div>
 
-      {/* ΓöÇΓöÇ Account block, pinned to the bottom ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+      {/* ── Account block, pinned to the bottom ──────────────────────────
           `relative` here is load-bearing: it is the positioning context for
           the account panel rendered at the end of this block. See the note on
           that panel for the bug this fixes. */}
@@ -575,21 +575,21 @@ export const StudioSidebar = ({
         ) : (
           /* A guest still needs this row to be a REAL button, so it is rendered
              unconditionally and the prop decides only whether the click does
-             something. It used to be `onOpenAuth && <Row ΓÇª/>`, which rendered
-             NOTHING whenever the callback was absent ΓÇö and that is exactly the
+             something. It used to be `onOpenAuth && <Row …/>`, which rendered
+             NOTHING whenever the callback was absent — and that is exactly the
              guest's case, so the rail showed an empty strip where the sign-in
              control belonged and tapping it did nothing on any screen size. */
           <Row
             icon={LogIn}
-            label={ar ? '╪¬╪│╪¼┘è┘ä ╪º┘ä╪»╪«┘ê┘ä' : 'Sign in'}
+            label={ar ? 'تسجيل الدخول' : 'Sign in'}
             onClick={() => onOpenAuth?.()}
             iconClass="text-indigo-400"
           />
         )}
 
-        <Row icon={Globe} label={ar ? 'English' : '╪º┘ä╪╣╪▒╪¿┘è╪⌐'} onClick={onToggleLanguage} />
+        <Row icon={Globe} label={ar ? 'English' : 'العربية'} onClick={onToggleLanguage} />
 
-        {/* Switch account ΓÇö the action that was impossible to reach.
+        {/* Switch account — the action that was impossible to reach.
             Signing in with a second Google/GitHub identity means replacing the
             session cookie, and the only path to that used to be: sign out
             (losing the session), reload, and hunt for the sign-in button again.
@@ -603,14 +603,14 @@ export const StudioSidebar = ({
               onOpenAuth();
             }}
             className="w-full text-start px-2.5 py-2 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2 transition cursor-pointer min-w-0"
-            title={ar ? '╪º╪│╪¬╪«╪»┘à ╪¡╪│╪º╪¿ ╪ó╪«╪▒' : 'Use a different account'}
+            title={ar ? 'استخدم حساب آخر' : 'Use a different account'}
           >
             <UserIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <span className="truncate">{ar ? '╪¬╪║┘è┘è╪▒ ╪º┘ä╪¡╪│╪º╪¿' : 'Switch account'}</span>
+            <span className="truncate">{ar ? 'تغيير الحساب' : 'Switch account'}</span>
           </button>
         )}
 
-        {/* Account panel ΓÇö anchored to THIS account block, not to the rail.
+        {/* Account panel — anchored to THIS account block, not to the rail.
             This is the root cause of "the sign-in button opens no window": as a
             sibling of the scroll area, `bottom-full` resolved against the
             full-height `<aside>`, so the panel was laid out entirely ABOVE the
@@ -651,14 +651,14 @@ export const StudioSidebar = ({
           {onOpenInfoPage && (
             <div className="mt-1 pt-1 border-t border-slate-800">
               <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
-                {ar ? '╪╣┘å ╪º┘ä┘à┘å╪╡╪⌐' : 'About Ebnili'}
+                {ar ? 'عن المنصة' : 'About Ebnili'}
               </div>
               {(
                 [
-                  { key: 'about', ar: '┘à┘å ┘å╪¡┘å', en: 'About', icon: Info },
-                  { key: 'contact', ar: '╪º╪¬╪╡┘ä ╪¿┘å╪º', en: 'Contact', icon: Phone },
-                  { key: 'privacy', ar: '╪º┘ä╪«╪╡┘ê╪╡┘è╪⌐', en: 'Privacy', icon: ShieldCheck },
-                  { key: 'terms', ar: '╪º┘ä╪┤╪▒┘ê╪╖', en: 'Terms', icon: Scale },
+                  { key: 'about', ar: 'من نحن', en: 'About', icon: Info },
+                  { key: 'contact', ar: 'اتصل بنا', en: 'Contact', icon: Phone },
+                  { key: 'privacy', ar: 'الخصوصية', en: 'Privacy', icon: ShieldCheck },
+                  { key: 'terms', ar: 'الشروط', en: 'Terms', icon: Scale },
                 ] as const
               ).map((item) => {
                 const Icon = item.icon;
@@ -680,9 +680,9 @@ export const StudioSidebar = ({
             </div>
           )}
 
-          {/* ΓöÇΓöÇ Owner-only tools ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+          {/* ── Owner-only tools ──────────────────────────────────────────
               Owner surfaces live HERE, inside the account panel, and only for
-              the site owner. `isOwner` is the server-issued flag ΓÇö see
+              the site owner. `isOwner` is the server-issued flag — see
               `isOwnerAccount`; server-side `requireAdmin` is the real boundary. */}
           {canOpenAdmin && onOpenAdmin && (
                     <button
@@ -692,21 +692,21 @@ export const StudioSidebar = ({
                         onOpenAdmin();
                       }}
                       className="w-full text-start px-2.5 py-2 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/10 flex items-center gap-2 transition cursor-pointer min-w-0"
-                      title={ar ? '┘ä┘ê╪¡╪⌐ ╪¬╪¡┘â┘à ╪º┘ä┘à┘ê┘é╪╣' : 'Admin dashboard'}
+                      title={ar ? 'لوحة تحكم الموقع' : 'Admin dashboard'}
                     >
                       <Shield className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                      <span className="truncate">{ar ? '┘ä┘ê╪¡╪⌐ ╪º┘ä╪¬╪¡┘â┘à' : 'Admin dashboard'}</span>
+                      <span className="truncate">{ar ? 'لوحة التحكم' : 'Admin dashboard'}</span>
                     </button>
                   )}
 
-          {/* ΓöÇΓöÇ Owner-only tools ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+          {/* ── Owner-only tools ──────────────────────────────────────────
               Owner surfaces live HERE, inside the account panel, and only for
-              the site owner. `isOwner` is the server-issued flag ΓÇö see
+              the site owner. `isOwner` is the server-issued flag — see
               `isOwnerAccount`; server-side `requireOwner` is the real boundary. */}
           {isOwner && onOpenIntegrations && (
             <div className="mt-1 pt-1 border-t border-slate-800">
               <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
-                {ar ? '╪ú╪»┘ê╪º╪¬ ╪º┘ä┘à╪º┘ä┘â ┘ü┘é╪╖' : 'Owner tools only'}
+                {ar ? 'أدوات المالك فقط' : 'Owner tools only'}
               </div>
 
               {onOpenIntegrations && (
@@ -717,10 +717,10 @@ export const StudioSidebar = ({
                     onOpenIntegrations();
                   }}
                   className="w-full text-start px-2.5 py-2 rounded-lg text-xs font-bold text-slate-200 hover:bg-slate-800 flex items-center gap-2 transition cursor-pointer min-w-0"
-                  title={ar ? '┘é┘ê╪º╪╣╪» ╪º┘ä╪¿┘è╪º┘å╪º╪¬ ┘ê╪º┘ä╪¬┘â╪º┘à┘ä╪º╪¬' : 'Database & integrations'}
+                  title={ar ? 'قواعد البيانات والتكاملات' : 'Database & integrations'}
                 >
                   <Database className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                  <span className="truncate">{ar ? '┘é╪º╪╣╪»╪⌐ ╪º┘ä╪¿┘è╪º┘å╪º╪¬' : 'Database & integrations'}</span>
+                  <span className="truncate">{ar ? 'قاعدة البيانات' : 'Database & integrations'}</span>
                 </button>
               )}
             </div>
@@ -735,7 +735,7 @@ export const StudioSidebar = ({
             className="w-full text-start px-2.5 py-2 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 transition mt-1 cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{ar ? '╪¬╪│╪¼┘è┘ä ╪º┘ä╪«╪▒┘ê╪¼' : 'Sign out'}</span>
+            <span className="truncate">{ar ? 'تسجيل الخروج' : 'Sign out'}</span>
           </button>
         </div>
         )}
