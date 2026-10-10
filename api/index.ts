@@ -3506,6 +3506,7 @@ interface DbAccount {
   tier: string;
   is_blocked: boolean;
   block_reason: string | null;
+  referral_code?: string | null;
   /**
    * Daily AI-usage counter, persisted so the allowance survives a cold start.
    * Both are added by `supabase/projects.sql` PHASE 2 (column repair) — an
@@ -5262,6 +5263,601 @@ app.post("/api/ai/gemini-code-doctor", requireAiSession, requireAiAllowance, asy
     return res.status(502).json({ success: false, message: "فشل فحص الكود، حاول مرة أخرى" });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 2 · Publish + Jobs   |   Phase 5 · Teams   |   Phase 6 · Referral
+// ═══════════════════════════════════════════════════════════════════════════
+// Every route below follows the SAME contract as the projects store: the owner
+// is derived from the signed session cookie (never the request body), every
+// read/write is scoped by owner_id, ids and slugs are minted server-side, and a
+// stranger's id returns 404 — never their content. The SQL for these tables is
+// `supabase/phase2_6_publish_jobs_teams_referral.sql` (idempotent, re-runnable).
+
+/** The HTML a published page should serve: the draft `code`, else a real file. */
+function primaryHtml(row: DbProject): string {
+  if (typeof row.code === "string" && row.code.trim()) return row.code;
+  const files = (row.files ?? {}) as Record<string, string>;
+  for (const name of ["index.html", "src/App.tsx", "App.tsx", "app.tsx"]) {
+    if (files[name] && String(files[name]).trim()) return String(files[name]);
+  }
+  const html = Object.keys(files).find((n) => /\.html?$/i.test(n));
+  return html ? String(files[html]) : "";
+}
+
+/** A url-safe public slug, checked against the unique index so it never collides. */
+async function mintPublishSlug(): Promise<string> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const slug = crypto.randomBytes(6).toString("hex");
+    const probe = await dbRequest<{ id: string }[]>(PROJECTS_TABLE, {
+      query: { slug: `eq.${slug}`, select: "id", limit: "1" },
+    });
+    if (probe.ok && (!probe.data || probe.data.length === 0)) return slug;
+  }
+  // 18 hex chars is astronomically unique; a belt-and-braces fallback.
+  return crypto.randomBytes(9).toString("hex");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 2 & 5 & 6  ·  Publish · Jobs · Teams · Referral
+// ═══════════════════════════════════════════════════════════════════════════
+// The SQL schema for these four lives in
+// `supabase/phase2_6_publish_jobs_teams_referral.sql` (run once). This block is
+// the HTTP surface. It reuses every primitive above — `currentOwner`,
+// `dbRequest`, `consumeAiAllowance`, `aiQuotaRefusal`, `generateWithGemini` — so
+// the security posture (owner-from-cookie, fail-closed quota, server-minted ids)
+// is identical to the rest of the API. Nothing here trusts a tier or an owner id
+// from the request body.
+
+const JOBS_TABLE = "ebnily_jobs";
+const TEAMS_TABLE = "ebnily_teams";
+const TEAM_MEMBERS_TABLE = "ebnily_team_members";
+const REFERRALS_TABLE = "ebnily_referrals";
+
+/** Bonus credits granted to a referrer when someone signs up with their code. */
+const REFERRAL_BONUS_CREDITS = 3;
+
+/** A project row plus the publish columns added by the Phase 2 migration. */
+type PublishRow = DbProject & {
+  published?: boolean;
+  slug?: string | null;
+  published_html?: string | null;
+  published_at?: string | null;
+};
+
+interface DbJob {
+  id: string;
+  owner_id: string;
+  kind: string;
+  status: string;
+  prompt: string;
+  result: unknown;
+  error: string | null;
+  progress: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface DbTeam {
+  id: string;
+  owner_id: string;
+  name_ar: string;
+  name_en: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface DbTeamMember {
+  id: string;
+  team_id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  role: "owner" | "member" | "guest";
+  joined_at: string;
+  active: boolean;
+}
+
+/** Team roles, ordered by privilege. Enforced server-side on every mutation. */
+const TEAM_ROLES = ["owner", "member", "guest"] as const;
+type TeamRole = (typeof TEAM_ROLES)[number];
+function isTeamRole(v: unknown): v is TeamRole {
+  return typeof v === "string" && (TEAM_ROLES as readonly string[]).includes(v);
+}
+
+/** Server-minted, human-safe id with a readable prefix. */
+function mintId(prefix: string): string {
+  return `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
+}
+
+/** An 8-char referral code with ambiguous characters removed. */
+function randomReferralCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.randomBytes(8);
+  let out = "";
+  for (let i = 0; i < 8; i++) out += alphabet[bytes[i] % alphabet.length];
+  return out;
+}
+
+// ── 2.1  PUBLISH  ───────────────────────────────────────────────────────────
+// A published project is served at GET /api/s/:slug with NO session. The slug
+// is minted server-side (never taken from the body) and `published_html` is a
+// FROZEN snapshot taken at publish time, so later edits to the draft do not
+// change the public link until an explicit re-publish.
+
+app.post("/api/projects/:id/publish", limitWrites, (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const id = String(req.params.id ?? "");
+  void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
+  })
+    .then(async (existing) => {
+      const row = existing.ok ? existing.data?.[0] : undefined;
+      if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+
+      // Keep an existing slug across re-publishes so old links stay alive; mint
+      // one only the first time.
+      const slug =
+        row.slug && String(row.slug).trim() ? String(row.slug) : await mintPublishSlug();
+      const html = primaryHtml(row);
+      if (!html.trim()) {
+        return res.status(400).json({
+          success: false,
+          code: "NOTHING_TO_PUBLISH",
+          message: "لا يوجد محتوى HTML للنشر في هذا المشروع.",
+        });
+      }
+
+      const updated = await dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+        method: "PATCH",
+        query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+        body: JSON.stringify({
+          published: true,
+          slug,
+          published_html: html,
+          published_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      const fresh = updated.ok ? updated.data?.[0] : undefined;
+      if (!fresh) return dbUnavailable(res);
+      res.json({ success: true, slug: fresh.slug, publishedAt: fresh.published_at });
+    })
+    .catch(() => dbUnavailable(res));
+});
+
+app.post("/api/projects/:id/unpublish", limitWrites, (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const id = String(req.params.id ?? "");
+  // The slug is RETAINED (only `published` flips), so re-publishing returns the
+  // same public link instead of issuing a new one.
+  void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+    method: "PATCH",
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+    body: JSON.stringify({ published: false, updated_at: new Date().toISOString() }),
+  }).then((result) => {
+    if (!result.ok) return dbUnavailable(res);
+    if (!result.data?.[0]) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+    res.json({ success: true, published: false });
+  });
+});
+
+// Public, sessionless read of a published page. Registered before the /api 404
+// catch-all so it is actually reachable. Serves the frozen snapshot only — never
+// the live draft — and a stranger's slug is indistinguishable from a missing one.
+app.get("/api/s/:slug", (req: Request, res: Response) => {
+  const slug = String(req.params.slug ?? "");
+  if (!slug) return res.status(404).send("Not found");
+  if (!supabaseConfig().dbConfigured) return res.status(503).send("Publishing is not configured");
+
+  void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+    query: { slug: `eq.${slug}`, published: `eq.true`, select: "published_html", limit: "1" },
+  }).then((result) => {
+    const row = result.ok ? result.data?.[0] : undefined;
+    if (!row || !row.published_html) return res.status(404).send("Not found");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.status(200).send(row.published_html);
+  });
+});
+
+// ── 2.2  JOBS  ───────────────────────────────────────────────────────────────
+// A job is a durable, idempotent record of an async AI task ("generate an app
+// from this prompt"). The client enqueues, then polls, then fetches the result.
+// WHY rather than one request: generation takes 40–110s, past most serverless
+// response windows, so the work must be resumable and the UI able to leave and
+// come back. Every job spends ONE allowance — checked and taken at enqueue time
+// with the exact same `consumeAiAllowance` primitive as the synchronous routes —
+// so a refresh or double-submit cannot mint a free second generation.
+
+function toPublicJob(row: DbJob) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    status: row.status,
+    prompt: row.prompt,
+    result: row.result,
+    error: row.error,
+    progress: row.progress,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+app.post("/api/jobs", limitWrites, async (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const body = (req.body as Record<string, unknown>) ?? {};
+  const kind = body.kind === "generate-app" ? "generate-app" : "generate-app";
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 8000) : "";
+  if (!prompt) return res.status(400).json({ success: false, code: "PROMPT_REQUIRED" });
+
+  // Spend the allowance HERE, synchronously, before any work is queued. This is
+  // the single chokepoint: the worker never re-checks the quota, so a job cannot
+  // be enqueued for free and then executed by a later poll.
+  const quota = await consumeAiAllowance(req);
+  if (!quota.allowed) return aiQuotaRefusal(res, quota);
+
+  const now = new Date().toISOString();
+  const row: DbJob = {
+    id: mintId("job"),
+    owner_id: owner.id,
+    kind,
+    status: "queued",
+    prompt,
+    result: null,
+    error: null,
+    progress: 0,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const created = await dbRequest<DbJob[]>(JOBS_TABLE, { method: "POST", body: JSON.stringify(row) });
+  if (!created.ok || !created.data?.[0]) {
+    console.error("job create failed:", created.error);
+    return dbUnavailable(res);
+  }
+  res.status(201).json({ success: true, job: toPublicJob(created.data[0]) });
+});
+
+app.get("/api/jobs", async (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const id = String(req.query.id ?? "");
+  if (id) {
+    const one = await dbRequest<DbJob[]>(JOBS_TABLE, {
+      query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
+    });
+    if (!one.ok) return dbUnavailable(res);
+    const row = one.data?.[0];
+    // 404 for a stranger's job, same as projects.
+    if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+    return res.json({ success: true, job: toPublicJob(row) });
+  }
+
+  const list = await dbRequest<DbJob[]>(JOBS_TABLE, {
+    query: { owner_id: `eq.${owner.id}`, order: "created_at.desc", limit: "30" },
+  });
+  if (!list.ok) return dbUnavailable(res);
+  res.json({ success: true, jobs: (list.data ?? []).map(toPublicJob) });
+});
+
+// Claim and execute the next queued job for this owner.
+//
+// WHY a "run" step the client calls, instead of running inline at enqueue: the
+// enqueue response must return immediately (that is the whole point of a job),
+// and a serverless function cannot outlive its request. So the FIRST poll (or an
+// explicit "start") advances the job; subsequent polls just read state. The claim
+// is a conditional PATCH — only a row still `queued` moves to `running` — so two
+// concurrent polls can never both start the same generation.
+app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const id = String((req.body as { id?: string })?.id ?? "");
+  if (!id) return res.status(400).json({ success: false, code: "ID_REQUIRED" });
+
+  const read = await dbRequest<DbJob[]>(JOBS_TABLE, {
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
+  });
+  if (!read.ok) return dbUnavailable(res);
+  const job = read.data?.[0];
+  if (!job) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+  if (job.status === "done" || job.status === "failed") {
+    return res.json({ success: true, job: toPublicJob(job) });
+  }
+
+  const ai = getGeminiClient();
+  if (!ai) return res.status(503).json({ success: false, code: "AI_NOT_CONFIGURED" });
+
+  // Claim: queued → running. The `status=eq.queued` filter is the idempotency
+  // guard; if another poll already claimed it, this PATCH touches 0 rows and we
+  // re-read instead of duplicating the model call.
+  const claim = await dbRequest<DbJob[]>(JOBS_TABLE, {
+    method: "PATCH",
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, status: "eq.queued" },
+    body: JSON.stringify({ status: "running", progress: 10, updated_at: new Date().toISOString() }),
+  });
+  if (claim.ok && (!claim.data || claim.data.length === 0)) {
+    const reloaded = await dbRequest<DbJob[]>(JOBS_TABLE, {
+      query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
+    });
+    return res.json({ success: true, job: toPublicJob(reloaded.data?.[0] ?? job) });
+  }
+
+  // Execute with the SAME generation primitive the synchronous routes use.
+  try {
+    const raw = await generateWithGemini(ai, job.prompt, GENERATE_SYSTEM);
+    const html = repairDocument(extractText(raw));
+    const failPatch = async (error: string) => {
+      const failed = await dbRequest<DbJob[]>(JOBS_TABLE, {
+        method: "PATCH",
+        query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+        body: JSON.stringify({ status: "failed", error, progress: 100, updated_at: new Date().toISOString() }),
+      });
+      return res.json({ success: true, job: toPublicJob(failed.data?.[0] ?? { ...job, status: "failed", error, progress: 100 }) });
+    };
+    if (!html) return failPatch("no-usable-output");
+    const done = await dbRequest<DbJob[]>(JOBS_TABLE, {
+      method: "PATCH",
+      query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+      body: JSON.stringify({ status: "done", result: { html }, progress: 100, updated_at: new Date().toISOString() }),
+    });
+    if (!done.ok) return dbUnavailable(res);
+    res.json({ success: true, job: toPublicJob(done.data?.[0]) });
+  } catch (e) {
+    const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+    const failed = await dbRequest<DbJob[]>(JOBS_TABLE, {
+      method: "PATCH",
+      query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+      body: JSON.stringify({ status: "failed", error: msg, progress: 100, updated_at: new Date().toISOString() }),
+    });
+    res.json({ success: true, job: toPublicJob(failed.data?.[0] ?? { ...job, status: "failed", error: msg, progress: 100 }) });
+  }
+});
+
+
+
+// ── 5  TEAMS + PERMISSIONS  ───────────────────────────────────────────────
+// Roles are the permission boundary and are enforced HERE, server-side, on every
+// mutation — never trusted from the client. The creator is the owner; invite /
+// change-role / remove refuse any caller who is not the owning account. Columns
+// and roles mirror UserTeam / UserTeamMember in src/types.ts (name_ar/name_en,
+// owner|member|guest), so no client type is duplicated.
+
+function toPublicMember(m: DbTeamMember) {
+  return {
+    id: m.id,
+    userId: m.user_id,
+    userEmail: m.user_email,
+    userName: m.user_name,
+    role: m.role,
+    joinedAt: m.joined_at,
+    active: m.active,
+  };
+}
+
+function toPublicTeam(team: DbTeam, members: DbTeamMember[] = []) {
+  return {
+    id: team.id,
+    nameAr: team.name_ar,
+    nameEn: team.name_en,
+    createdBy: team.owner_id,
+    memberCount: members.length,
+    createdAt: team.created_at,
+    updatedAt: team.updated_at,
+    members: members.map(toPublicMember),
+  };
+}
+
+async function teamRow(teamId: string): Promise<DbTeam | null> {
+  const res = await dbRequest<DbTeam[]>(TEAMS_TABLE, { query: { id: `eq.${teamId}`, limit: "1" } });
+  return res.ok ? res.data?.[0] ?? null : null;
+}
+
+/** The caller's role in a team — "owner" (creator) or a member role, or null. */
+async function teamRoleOf(ownerId: string, teamId: string): Promise<TeamRole | null> {
+  const team = await teamRow(teamId);
+  if (!team) return null;
+  if (team.owner_id === ownerId) return "owner";
+  const mem = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, {
+    query: { team_id: `eq.${teamId}`, user_id: `eq.${ownerId}`, active: "eq.true", limit: "1" },
+  });
+  const row = mem.ok ? mem.data?.[0] : undefined;
+  return row ? row.role : null;
+}
+
+app.post("/api/teams", limitWrites, async (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const body = (req.body as Record<string, unknown>) ?? {};
+  const nameAr = typeof body.nameAr === "string" ? body.nameAr.trim().slice(0, 120) : "";
+  const nameEn = typeof body.nameEn === "string" ? body.nameEn.trim().slice(0, 120) : "";
+  if (!nameAr && !nameEn) return res.status(400).json({ success: false, code: "NAME_REQUIRED" });
+
+  const now = new Date().toISOString();
+  const team: DbTeam = { id: mintId("team"), owner_id: owner.id, name_ar: nameAr, name_en: nameEn, created_at: now, updated_at: now };
+  const created = await dbRequest<DbTeam[]>(TEAMS_TABLE, { method: "POST", body: JSON.stringify(team) });
+  if (!created.ok || !created.data?.[0]) { console.error("team create failed:", created.error); return dbUnavailable(res); }
+  const row = created.data[0];
+
+  // Seed the creator as the first member so the detail view and memberCount are
+  // consistent from the first render. A failure here is non-fatal: teamRoleOf
+  // still resolves the owner from owner_id.
+  const seed: DbTeamMember = { id: mintId("mem"), team_id: row.id, user_id: owner.id, user_email: owner.email ?? "", user_name: "", role: "owner", joined_at: now, active: true };
+  await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "POST", body: JSON.stringify(seed) }).catch(() => undefined);
+
+  res.status(201).json({ success: true, team: toPublicTeam(row, [seed]) });
+});
+
+
+// ── 5.1 TEAMS helpers ─────────────────────────────────────────────────────────
+
+async function listTeams(owner: { id: string }): Promise<DbTeam[]> {
+  const res = await dbRequest<DbTeam[]>(TEAMS_TABLE, { query: { owner_id: `eq.${owner.id}`, order: "created_at.desc" } });
+  return res.ok ? (res.data ?? []) : [];
+}
+
+async function teamMembers(teamId: string): Promise<DbTeamMember[]> {
+  const res = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { query: { team_id: `eq.${teamId}`, order: "role.asc" } });
+  return res.ok ? (res.data ?? []) : [];
+}
+
+async function teamRow(teamId: string): Promise<DbTeam | null> {
+  const res = await dbRequest<DbTeam[]>(TEAMS_TABLE, { query: { id: `eq.${teamId}`, limit: "1" } });
+  return res.ok ? res.data?.[0] ?? null : null;
+}
+
+/** The caller's role in a team — "owner" (creator) or a member role, or null. */
+async function teamRoleOf(ownerId: string, teamId: string): Promise<TeamRole | null> {
+  const team = await teamRow(teamId);
+  if (!team) return null;
+  if (team.owner_id === ownerId) return "owner";
+  const mem = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, {
+    query: { team_id: `eq.${teamId}`, user_id: `eq.${ownerId}`, active: "eq.true", limit: "1" },
+  });
+  const row = mem.ok ? mem.data?.[0] : undefined;
+  return row ? row.role : null;
+}
+app.get("/api/teams", limitWrites, async (req, res) => {
+  const o = currentOwner(req);
+  if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const teams = await listTeams({ id: o.id });
+  const byTeam = new Map<string, DbTeamMember[]>();
+  for (const t of teams) byTeam.set(t.id, []);
+  const all = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { query: { active: "eq.true" } });
+  if (all.ok) for (const m of all.data ?? []) { const s = byTeam.get(m.team_id) ?? []; s.push(m); byTeam.set(m.team_id, s); }
+  res.json({ success: true, teams: teams.map((t) => toPublicTeam(t, byTeam.get(t.id) ?? [])) });
+});
+app.get("/api/teams/:id", limitWrites, async (req, res) => {
+  const o = currentOwner(req);
+  if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const t = await teamRow(String(req.params.id ?? ""));
+  if (!t) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+  if (t.owner_id !== o.id && !(await teamRoleOf(o.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية للوصول إلى هذه الفريق." });
+  res.json({ success: true, team: toPublicTeam(t, await teamMembers(t.id)) });
+});
+app.post("/api/teams/:id/invite", limitWrites, async (req, res) => {
+  const c = currentOwner(req);
+  if (!c) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const t = await teamRow(String(req.params.id ?? ""));
+  if (!t) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+  if (t.owner_id !== c.id && !(await teamRoleOf(c.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية إضافة أعضاء." });
+  const b = (req.body as Record<string, unknown>) ?? {};
+  const em = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
+  if (!em) return res.status(400).json({ success: false, code: "EMAIL_REQUIRED" });
+  const a = await findAccountByEmail(em);
+  if (!a) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND", message: "المستخدم ليس لديه حساب في المنصة." });
+  const r: TeamRole = typeof b.role === "string" && isTeamRole(b.role) ? b.role : "member";
+  if (r === "owner") return res.status(400).json({ success: false, code: "OWNER_NOT_ALLOWED", message: "لا يمكن تعيين مالك بهذا الطريق." });
+  const now = new Date().toISOString();
+  const m: DbTeamMember = { id: mintId("mem"), team_id: t.id, user_id: a.account_id, user_email: a.email, user_name: a.display_name ?? "", role: r, joined_at: now, active: true };
+  const created = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "POST", body: JSON.stringify(m) });
+  if (!created.ok || !created.data?.[0]) { console.error("team invite failed:", created.error); return dbUnavailable(res); }
+  res.json({ success: true, member: toPublicMember(created.data[0]) });
+});
+
+
+app.post("/api/teams/:id/change-role", limitWrites, async (req, res) => {
+  const c = currentOwner(req);
+  if (!c) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const t = await teamRow(String(req.params.id ?? ""));
+  if (!t) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+  if (t.owner_id !== c.id && !(await teamRoleOf(c.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية تغيير الصلاحيات." });
+  const b = (req.body as Record<string, unknown>) ?? {};
+  const uid = typeof b.userId === "string" ? b.userId.trim() : "";
+  const role: TeamRole = b.role === "owner" ? "owner" : (b.role === "member" ? "member" : (b.role === "guest" ? "guest" : ""));
+  if (!uid || !isTeamRole(role)) return res.status(400).json({ success: false, code: "BAD_REQUEST" });
+  const m = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}`, active: "eq.true", limit: "1" } });
+  if (!m.ok || !m.data?.[0]) return res.status(404).json({ success: false, code: "NOT_MEMBER" });
+  if (t.owner_id !== c.id && role === "owner") return res.status(400).json({ success: false, code: "ROLE_TOO_HIGH", message: "فقط المالك يمكنه تعيين مالك." });
+  const patched = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "PATCH", query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}` }, body: JSON.stringify({ role, updated_at: new Date().toISOString() }) });
+  if (!patched.ok || !patched.data?.[0]) { console.error("team role change failed:", patched.error); return dbUnavailable(res); }
+  res.json({ success: true, member: toPublicMember(patched.data[0]) });
+});
+app.post("/api/teams/:id/remove", limitWrites, async (req, res) => {
+  const c = currentOwner(req);
+  if (!c) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const t = await teamRow(String(req.params.id ?? ""));
+  if (!t) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+  if (t.owner_id !== c.id && !(await teamRoleOf(c.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية إزالة أعضاء." });
+  const b = (req.body as Record<string, unknown>) ?? {};
+  const uid = typeof b.userId === "string" ? b.userId.trim() : "";
+  if (!uid) return res.status(400).json({ success: false, code: "USER_ID_REQUIRED" });
+  if (uid === t.owner_id) return res.status(400).json({ success: false, code: "OWNER_CANNOT_BE_REMOVED", message: "لا يمكن إزالة المالك؛ نقل الصلاحيات أو اترك الفريق يدويّاً." });
+  const patched = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "PATCH", query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}` }, body: JSON.stringify({ active: false, updated_at: new Date().toISOString() }) });
+  if (!patched.ok) { console.error("team remove failed:", patched.error); return dbUnavailable(res); }
+  res.json({ success: true, removed: uid });
+});
+
+
+interface DbReferral {
+  id: string;
+  referrer_email: string;
+  referrer_code: string;
+  referred_email: string;
+  referred_at: string;
+  rewarded: boolean;
+}
+
+// ── 6 REFERRAL ─────────────────────────────────────────────────────────────
+// One invite code per account, minted server-side on first access.
+
+app.get("/api/referral", limitWrites, async (req, res) => {
+  const o = currentOwner(req);
+  if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const acct = await findAccountByEmail(o.email);
+  if (!acct) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
+  if (!acct.referral_code) {
+    const code = randomReferralCode();
+    const up: Record<string, unknown> = { referral_code: code, updated_at: new Date().toISOString() };
+    const minted = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, { method: "UPDATE", query: { account_id: `eq.${acct.account_id}` }, body: JSON.stringify(up) });
+    if (!minted.ok || !minted.data?.[0]) { console.error("referral code mint failed:", minted.error); return dbUnavailable(res); }
+    acct = minted.data[0];
+  }
+  res.json({ success: true, code: acct.referral_code });
+});
+
+app.post("/api/referral/apply", limitWrites, async (req, res) => {
+  const o = currentOwner(req);
+  if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+  const b = (req.body as Record<string, unknown>) ?? {};
+  const code = typeof b.code === "string" ? b.code.trim() : "";
+  if (!code) return res.status(400).json({ success: false, code: "CODE_REQUIRED" });
+  const referrer = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, { query: { referral_code: `eq.${code}`, limit: "1" } });
+  if (!referrer.ok || !referrer.data?.[0]) return res.status(404).json({ success: false, code: "CODE_NOT_FOUND", message: "كود الإحالة غير صحيح أو لا ينتمي إليك." });
+  const ref = referrer.data[0];
+  if (ref.email.toLowerCase() === o.email.toLowerCase()) return res.status(400).json({ success: false, code: "SELF_REFERRAL_NOT_ALLOWED", message: "لا يمكنك إحالة نفسك." });
+  const already = await dbRequest<DbReferral[]>(REFERRALS_TABLE, { query: { referrer_code: `eq.${code}`, referred_email: `eq.${o.email}`, limit: "1" } });
+  if (already.ok && already.data?.[0]) return res.status(429).json({ success: false, code: "ALREADY_REFERRED", message: "هذا الحساب مسجل بالفعل كإحالة لهذا الرمز." });
+  const now = new Date().toISOString();
+  const row: DbReferral = { id: mintId("ref"), referrer_email: ref.email, referrer_code: code, referred_email: o.email, referred_at: now, rewarded: false };
+  const created = await dbRequest<DbReferral[]>(REFERRALS_TABLE, { method: "POST", body: JSON.stringify(row) });
+  if (!created.ok || !created.data?.[0]) { console.error("referral record failed:", created.error); return dbUnavailable(res); }
+  try { await dbRequest("rpc/ebnily_grant_ai_credit", { method: "POST", body: JSON.stringify({ p_account_id: ref.account_id, p_amount: REFERRAL_BONUS_CREDITS }) }).catch(() => undefined); } catch { /* لا تعيق الإحالة صلاحية الرصيد */ }
+  res.json({ success: true, referred: true, bonus: REFERRAL_BONUS_CREDITS });
+});
+
+// __EBNILY_P2_ANCHOR__
 
 // ── Unknown /api paths → JSON 404 (never HTML, never crash) ─────────────────
 app.use("/api", (_req: Request, res: Response) => {
