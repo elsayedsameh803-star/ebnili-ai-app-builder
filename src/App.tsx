@@ -572,7 +572,7 @@ export default function App() {
   useEffect(() => {
     if (!projectId || isGenerating) return;
     if (!hasRealContent(project.code)) return;
-    const timer = setTimeout(() => {
+            const timer = setTimeout(() => {
       // The id is re-read here, at write time, not captured at schedule time.
       const id = projectIdRef.current ?? projectId;
       if (authUser) {

@@ -4266,7 +4266,17 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
     url.searchParams.set("redirect_to", `${home}/api/auth/callback/supabase`);
     url.searchParams.set("code_challenge", challenge);
     url.searchParams.set("code_challenge_method", "s256");
-    url.searchParams.set("skip_http_redirect", "true");
+    // SECURITY-FLOW FIX — `skip_http_redirect` must NOT be sent here.
+    //
+    // That flag exists for SPA clients that FETCH /authorize themselves, read
+    // the JSON body (`{ url }` / `{ code }`) and exchange the code in JS.
+    // The browser, however, navigates to this URL as a top-level redirect, and
+    // with skip_http_redirect set, GoTrue answers the final leg with a JSON
+    // body instead of a 302 to `redirect_to` — so after a successful Google
+    // consent the visitor was left staring at raw JSON and the session was
+    // never minted. Removing it restores the normal browser round trip:
+    // GoTrue 302-redirects to `${home}/api/auth/callback/supabase?code=…`,
+    // which is exactly the shape the callback route below expects.
     // The anon key is public by design. Sending it as a query param keeps the
     // authorize call valid even when Supabase's gateway is configured to demand
     // an API key on this route.
@@ -4348,8 +4358,10 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
   const verifier = stored.slice(sep + 1);
   if (provider !== "google" && provider !== "github") return fail("pkce_invalid");
 
-  // The code comes back in the query string (skip_http_redirect) or, for some
-  // providers, in the URL fragment — which never reaches the server.
+  // The code comes back in the query string: without `skip_http_redirect`
+  // GoTrue performs a plain 302 to `redirect_to?code=…` (PKCE flow), so the
+  // code reliably reaches the server here. The old `skip_http_redirect=true`
+  // variant never redirected at all — it returned JSON to the browser.
   const code = typeof req.query.code === "string" ? req.query.code : "";
   if (!code) return fail("missing_code");
 
@@ -5715,22 +5727,6 @@ async function teamMembers(teamId: string): Promise<DbTeamMember[]> {
   return res.ok ? (res.data ?? []) : [];
 }
 
-async function teamRow(teamId: string): Promise<DbTeam | null> {
-  const res = await dbRequest<DbTeam[]>(TEAMS_TABLE, { query: { id: `eq.${teamId}`, limit: "1" } });
-  return res.ok ? res.data?.[0] ?? null : null;
-}
-
-/** The caller's role in a team — "owner" (creator) or a member role, or null. */
-async function teamRoleOf(ownerId: string, teamId: string): Promise<TeamRole | null> {
-  const team = await teamRow(teamId);
-  if (!team) return null;
-  if (team.owner_id === ownerId) return "owner";
-  const mem = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, {
-    query: { team_id: `eq.${teamId}`, user_id: `eq.${ownerId}`, active: "eq.true", limit: "1" },
-  });
-  const row = mem.ok ? mem.data?.[0] : undefined;
-  return row ? row.role : null;
-}
 app.get("/api/teams", limitWrites, async (req, res) => {
   const o = currentOwner(req);
   if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
@@ -5782,7 +5778,7 @@ app.post("/api/teams/:id/change-role", limitWrites, async (req, res) => {
   if (t.owner_id !== c.id && !(await teamRoleOf(c.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية تغيير الصلاحيات." });
   const b = (req.body as Record<string, unknown>) ?? {};
   const uid = typeof b.userId === "string" ? b.userId.trim() : "";
-  const role: TeamRole = b.role === "owner" ? "owner" : (b.role === "member" ? "member" : (b.role === "guest" ? "guest" : ""));
+  const role: TeamRole = typeof b.role === "string" && isTeamRole(b.role) ? b.role : "member";
   if (!uid || !isTeamRole(role)) return res.status(400).json({ success: false, code: "BAD_REQUEST" });
   const m = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}`, active: "eq.true", limit: "1" } });
   if (!m.ok || !m.data?.[0]) return res.status(404).json({ success: false, code: "NOT_MEMBER" });
@@ -5824,7 +5820,7 @@ app.get("/api/referral", limitWrites, async (req, res) => {
   const o = currentOwner(req);
   if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
-  const acct = await findAccountByEmail(o.email);
+  let acct = await findAccountByEmail(o.email);
   if (!acct) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
   if (!acct.referral_code) {
     const code = randomReferralCode();
