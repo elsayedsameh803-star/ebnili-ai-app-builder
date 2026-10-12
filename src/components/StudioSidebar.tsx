@@ -499,49 +499,7 @@ export const StudioSidebar = ({
           />
         )}
 
-        {/* ── Legal & support ──────────────────────────────────────────────
-            These four documents used to exist ONLY inside the account
-            dropdown, behind a toggle. A privacy policy, terms of service and
-            contact page that a visitor has to find and open a menu to reach
-            are, in practice, not published at all — and this is exactly what
-            the owner asked to be fixed. They now have their own always-
-            visible section here, in the footer of the marketing hero, and at
-            the bottom of the sign-in gate. */}
-        {onOpenInfoPage && (
-          <>
-            <SectionLabel>{ar ? 'المنصة والقانون' : 'Platform & legal'}</SectionLabel>
-            {[
-              { key: 'about' as const, ar: 'من نحن', en: 'About', icon: Info },
-              { key: 'contact' as const, ar: 'اتصل بنا', en: 'Contact', icon: Phone },
-              { key: 'privacy' as const, ar: 'سياسة الخصوصية', en: 'Privacy', icon: ShieldCheck },
-              { key: 'terms' as const, ar: 'الشروط والأحكام', en: 'Terms', icon: Scale },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <Row
-                  key={item.key}
-                  icon={Icon}
-                  label={ar ? item.ar : item.en}
-                  onClick={() => onOpenInfoPage(item.key)}
-                  iconClass="text-slate-400"
-                />
-              );
-            })}
 
-            {/* The support number is also a tap target. A phone number printed
-                as plain digits is unusable on a phone, which is the one device
-                a support link is most likely to be read on. */}
-            <a
-              href="tel:+201207782741"
-              dir="ltr"
-              className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/10 transition min-w-0"
-              title={ar ? 'اتصل بالدعم الفني' : 'Call support'}
-            >
-              <Phone className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">01207782741</span>
-            </a>
-          </>
-        )}
       </div>
 
       {/* ── Account block, pinned to the bottom ──────────────────────────

@@ -241,11 +241,33 @@ function isOwnerAccount(session: AuthUser | null): boolean {
  * customers keep being told to transfer to a number that is no longer active.
  * Read lazily and fail soft: a storage hiccup must never block a page render.
  */
-function contactDefaults(): { orangeWalletNumber: string; supportWhatsappNumber: string } {
-  return { orangeWalletNumber: "01207782741", supportWhatsappNumber: "01207782741" };
+/**
+ * The wallet / WhatsApp numbers the pay screens show.
+ *
+ * CORRECTNESS: these used to be hard-coded, which contradicted the comment
+ * above — the owner CAN change the wallet from the dashboard and the settings
+ * row is written there, so customers were told to transfer to a number the
+ * owner had already replaced. The stored value is now served, with the
+ * hard-coded pair only as a fail-soft fallback when the row is unreadable.
+ */
+async function contactDefaults(): Promise<{ orangeWalletNumber: string; supportWhatsappNumber: string }> {
+  const fallback = { orangeWalletNumber: "01207782741", supportWhatsappNumber: "01207782741" };
+  try {
+    const stored = await readRawSettings();
+    const pick = (key: keyof typeof fallback): string => {
+      const raw = stored[key];
+      return typeof raw === "string" && raw.trim() ? raw.trim() : fallback[key];
+    };
+    return { orangeWalletNumber: pick("orangeWalletNumber"), supportWhatsappNumber: pick("supportWhatsappNumber") };
+  } catch {
+    return fallback;
+  }
 }
 
-function subscriptionPayload(grant: { email: string; tier: "pro" | "business"; expiresAt: string } | null) {
+function subscriptionPayload(
+  grant: { email: string; tier: "pro" | "business"; expiresAt: string } | null,
+  contact: { orangeWalletNumber: string; supportWhatsappNumber: string },
+) {
   const paid = grant
     ? {
         ...DEFAULT_SUBSCRIPTION,
@@ -266,8 +288,7 @@ function subscriptionPayload(grant: { email: string; tier: "pro" | "business"; e
   return {
     success: true,
     subscription: { ...paid, activatedAt: new Date().toISOString() },
-    orangeWalletNumber: "01207782741",
-    supportWhatsappNumber: "01207782741",
+    ...contact,
   };
 }
 
@@ -305,7 +326,7 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
     res.json({
       success: true,
       subscription: ownerSubscription(),
-      ...contactDefaults(),
+      ...(await contactDefaults()),
     });
     return;
   }
@@ -321,7 +342,7 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
     res.json({
       success: true,
       subscription: ownerSubscription(),
-      ...contactDefaults(),
+      ...(await contactDefaults()),
     });
     return;
   }
@@ -362,7 +383,7 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
     entitled = grant;
   }
 
-  res.json(subscriptionPayload(entitled));
+  res.json(subscriptionPayload(entitled, await contactDefaults()));
 });
 
 /** Only a logged-in (Google/GitHub) user may open a payment review request. */
@@ -433,7 +454,13 @@ async function queuePaymentReview(req: Request, res: Response) {
 
   const write = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
     method: "POST",
-    query: { on_conflict: "ignore" },
+    // CORRECTNESS: `on_conflict` must NAME the conflict target (the `id`
+    // primary key). Passing the bare resolution keyword here made PostgREST
+    // search for a column literally called "ignore", so EVERY payment submit
+    // answered 400 and the row was never written — the dashboard's pending
+    // list stayed empty and a paying customer's transfer was never recorded.
+    query: { on_conflict: "id" },
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
     body: JSON.stringify({
       id,
       account_email: session?.email ?? "",
@@ -1383,7 +1410,11 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
   if (supabaseConfig().dbConfigured) {
     const write = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
       method: "POST",
-      query: { on_conflict: "ignore" },
+      // Same fix as `queuePaymentReview`: name the conflict target (`id`) and
+      // put the resolution in `Prefer` — `on_conflict=ignore` alone is read as
+      // a COLUMN name and answers 400, so receipt uploads were never recorded.
+      query: { on_conflict: "id" },
+      headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
       body: JSON.stringify({
         id: record.id,
         account_email: session?.email ?? "",
@@ -1665,7 +1696,20 @@ async function findAccountByEmail(email: string): Promise<DbAccount | null> {
   const rows = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
     query: { select: ACCOUNT_QUOTA_COLUMNS, account_email: `eq.${normalized}`, limit: "1" },
   });
-  return rows.ok && Array.isArray(rows.data) && rows.data[0] ? rows.data[0] : null;
+  if (rows.ok && Array.isArray(rows.data) && rows.data[0]) return rows.data[0];
+
+  // A database created before the Phase 6 migration has no `referral_code`
+  // column, and PostgREST rejects the WHOLE select with a 400 — which would
+  // make every account look missing and silently downgrade paying customers to
+  // the free allowance. Retry with the columns the quota path actually needs.
+  const basic = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+    query: {
+      select: "account_id,email,tier,ai_used,ai_day",
+      account_email: `eq.${normalized}`,
+      limit: "1",
+    },
+  });
+  return basic.ok && Array.isArray(basic.data) && basic.data[0] ? basic.data[0] : null;
 }
 
 /**
@@ -2444,8 +2488,8 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
 async function notifyNewAdmin(email: string): Promise<boolean> {
   const apiKey = (process.env.RESEND_API_KEY ?? "").trim();
   // `SITE_URL` keeps the button correct on preview deployments; the production
-  // domain is the fallback so the mail is never sent with a dead link.
-  const siteUrl = (process.env.SITE_URL ?? "https://ebnily.vercel.app").trim().replace(/\/+$/, "");
+  // domain (ebnily.app) is the fallback so the mail is never sent with a dead link.
+  const siteUrl = (process.env.SITE_URL ?? "https://ebnily.app").trim().replace(/\/+$/, "");
   const from = (process.env.MAIL_FROM ?? "Ebnili <onboarding@resend.dev>").trim();
 
   if (!apiKey) {
@@ -3518,10 +3562,12 @@ interface DbAccount {
 }
 
 /**
- * The columns the quota read needs. Kept as one constant so the (cheap) counter
- * read never pulls the whole account row, avatar URLs and all.
+ * The columns the quota read needs, plus `referral_code` so `/api/referral`
+ * can read the stored code from the same cheap lookup. `findAccountByEmail`
+ * retries WITHOUT the last column when an older database predates the Phase 6
+ * migration, so one missing column can never break the quota path.
  */
-const ACCOUNT_QUOTA_COLUMNS = "account_id,email,tier,ai_used,ai_day";
+const ACCOUNT_QUOTA_COLUMNS = "account_id,email,tier,ai_used,ai_day,referral_code";
 
 /** The single settings row key. */
 const SETTINGS_ROW_KEY = "platform";
@@ -5793,11 +5839,18 @@ app.post("/api/teams/:id/remove", limitWrites, async (req, res) => {
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
   const t = await teamRow(String(req.params.id ?? ""));
   if (!t) return res.status(404).json({ success: false, code: "NOT_FOUND" });
-  if (t.owner_id !== c.id && !(await teamRoleOf(c.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية إزالة أعضاء." });
+  const callerRole = t.owner_id === c.id ? "owner" : await teamRoleOf(c.id, t.id);
+  if (!callerRole) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية إزالة أعضاء." });
   const b = (req.body as Record<string, unknown>) ?? {};
   const uid = typeof b.userId === "string" ? b.userId.trim() : "";
   if (!uid) return res.status(400).json({ success: false, code: "USER_ID_REQUIRED" });
   if (uid === t.owner_id) return res.status(400).json({ success: false, code: "OWNER_CANNOT_BE_REMOVED", message: "لا يمكن إزالة المالك؛ نقل الصلاحيات أو اترك الفريق يدويّاً." });
+  // Only the team owner may remove OTHER people. A member or guest can still
+  // remove THEMSELVES (leave the team) — the old check let any active member
+  // eject anybody else, including other members.
+  if (callerRole !== "owner" && uid !== c.id) {
+    return res.status(403).json({ success: false, code: "FORBIDDEN", message: "فقط مالك الفريق يمكنه إزالة أعضاء آخرين." });
+  }
   const patched = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "PATCH", query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}` }, body: JSON.stringify({ active: false, updated_at: new Date().toISOString() }) });
   if (!patched.ok) { console.error("team remove failed:", patched.error); return dbUnavailable(res); }
   res.json({ success: true, removed: uid });
@@ -5824,8 +5877,16 @@ app.get("/api/referral", limitWrites, async (req, res) => {
   if (!acct) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
   if (!acct.referral_code) {
     const code = randomReferralCode();
-    const up: Record<string, unknown> = { referral_code: code, updated_at: new Date().toISOString() };
-    const minted = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, { method: "UPDATE", query: { account_id: `eq.${acct.account_id}` }, body: JSON.stringify(up) });
+    // CORRECTNESS (two bugs, either one alone made the mint fail 100%):
+    //  • PostgREST has no `UPDATE` HTTP method — the method is `PATCH`.
+    //  • `ebnily_accounts` has no `updated_at` column, so including it made
+    //    the write answer 400 "column does not exist".
+    const minted = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+      method: "PATCH",
+      query: { account_id: `eq.${acct.account_id}` },
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ referral_code: code }),
+    });
     if (!minted.ok || !minted.data?.[0]) { console.error("referral code mint failed:", minted.error); return dbUnavailable(res); }
     acct = minted.data[0];
   }

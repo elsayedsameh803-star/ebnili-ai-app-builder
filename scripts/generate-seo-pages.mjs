@@ -33,7 +33,7 @@ const DIST = join(__dirname, '..', 'dist');
  * Read from the environment so a staging deployment never emits canonical tags
  * pointing at production — a wrong canonical is how a site gets de-indexed.
  */
-const ORIGIN = (process.env.APP_URL || 'https://ebnily.vercel.app').replace(/\/+$/, '');
+const ORIGIN = (process.env.APP_URL || 'https://ebnily.app').replace(/\/+$/, '');
 
 /** Escape for use inside a double-quoted HTML attribute. */
 const esc = (s) =>

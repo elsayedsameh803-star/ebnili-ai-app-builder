@@ -184,7 +184,7 @@ this server always fails with `redirect_uri_mismatch`.
 | `NEXT_PUBLIC_SUPABASE_URL`          | Supabase project URL                        | Yes, for sign-in                           |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY`     | Supabase anon key                           | Yes, for sign-in                           |
 | `AUTH_SESSION_SECRET`               | HMAC secret signing the session cookie      | Yes, for sign-in                           |
-| `APP_URL`                           | Public origin, e.g. `https://ebnily.vercel.app` | Yes, for sign-in                      |
+| `APP_URL`                           | Public origin, e.g. `https://ebnily.app` | Yes, for sign-in                         |
 | `GOOGLE_CLIENT_ID` / `_SECRET`      | Only for a **directly owned** Google app    | No — Supabase route is used when present   |
 | `GITHUB_CLIENT_ID` / `_SECRET`      | Only for a **directly owned** GitHub app    | No — Supabase route is used when present   |
 
@@ -233,10 +233,10 @@ signed session cookie. The Supabase tokens never reach the browser.
 **Redirect URLs** must include:
 
 ```
-https://ebnily.vercel.app/api/auth/callback/supabase
+https://ebnily.app/api/auth/callback/supabase
 ```
 
-and the **Site URL** should be `https://ebnily.vercel.app`. Supabase silently
+and the **Site URL** should be `https://ebnily.app`. Supabase silently
 refuses to redirect to any host that is not on that allowlist.
 
 ### GitHub repository import (separate from sign-in)
@@ -249,7 +249,7 @@ directly, so **your own** GitHub OAuth App must have this callback registered:
 2. **Authorization callback URL** must be exactly:
 
    ```
-   https://ebnily.vercel.app/api/github/callback
+   https://ebnily.app/api/github/callback
    ```
 
    Note the path: `/api/github/callback` — **not** `/api/auth/callback/github`,
@@ -261,7 +261,7 @@ directly, so **your own** GitHub OAuth App must have this callback registered:
 The import dialog shows the exact URL the server sends, with a copy button, so
 there is nothing to guess. You can also read it from
 `GET /api/github/config`. If `APP_URL` is not set, the host follows whichever
-domain you opened the app from — set `APP_URL=https://ebnily.vercel.app` so the
+domain you opened the app from — set `APP_URL=https://ebnily.app` so the
 callback stays stable.
 
 ## Project Structure

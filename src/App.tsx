@@ -5,7 +5,7 @@ import { ChatSidebar } from './components/ChatSidebar';
 import { PreviewFrame } from './components/PreviewFrame';
 import { CodeEditor } from './components/CodeEditor';
 import { NewProjectHero } from './components/NewProjectHero';
-import { AuthGate } from './components/AuthGate';
+import { LandingPage } from './components/LandingPage';
 import { InfoPagesModal, type PageKey } from './components/InfoPagesModal';
 import { getDeviceFingerprint } from './utils/fingerprint';
 import { fetchCurrentUser, logout as authLogout, isOwnerAccount, isAdminAccount, fetchWithTimeout } from './lib/auth';
@@ -275,7 +275,8 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const error = params.get('auth_error');
     const success = params.get('auth');
-    if (!error && !success) return;
+    const code = params.get('code');
+    if (!error && !success && !code) return;
 
     if (error) setAuthError(error);
     if (success) {
@@ -297,7 +298,11 @@ export default function App() {
     }
     setShowAuthModal(Boolean(error));
 
-    window.history.replaceState({}, '', window.location.pathname);
+    // Remove any leftover OAuth signal (auth=, auth_error=, code=) so the
+    // browser lands on a clean URL after sign-in.
+    if (error || success || code) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   // Returning from the GitHub link: `/?github=linked` or `/?github_error=<code>`.
@@ -1555,7 +1560,7 @@ export default function App() {
   // the sidebar, and the sidebar only renders inside the branch below, which is
   // guarded by `authUser`. A signed-out visitor therefore never saw that row —
   // the sign-in affordance existed only in the markup, which is why clicking it
-  // did nothing on any screen size. Guests get AuthGate below, which owns the
+  // did nothing on any screen size. The landing page below owns the
   // same action, so this early return is correct; the sidebar copy is a
   // convenience for a session that expired mid-session.
   // While /api/auth/me is in flight we show a neutral splash rather than the
@@ -1574,15 +1579,37 @@ export default function App() {
     );
   }
 
-  // The sign-in wall is the FIRST thing a guest ever sees, so it is the screen
-  // that most needed a visible route to the privacy policy and the terms —
-  // and it had none. `InfoPagesModal` must be mounted HERE, not only in the
+  // The landing page is the FIRST thing a guest ever sees, so it is the screen
+  // that must carry a visible route to the privacy policy and the terms.
+  // `InfoPagesModal` must be mounted HERE, not only in the
   // studio tree below: this branch returns before that tree exists, so a guest
   // clicking a footer link would flip state and see nothing.
   if (!authUser) {
     return (
       <>
-        <AuthGate language={language} errorCode={authError} onOpenInfoPage={setInfoPage} />
+        <LandingPage
+          initialLanguage={language}
+          onNavigateToLogin={() => setShowAuthModal(true)}
+          onNavigateToPricing={() => navigate('/pricing')}
+          onOpenInfoPage={setInfoPage}
+          onNavigate={navigate}
+        />
+
+        {/* The sign-in dialog must be mounted HERE: this branch returns before
+            the studio tree, so the copy further down never renders for a guest.
+            Opening it is the landing page's only route into the OAuth flow. */}
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={showAuthModal || authError !== null}
+            onClose={() => {
+              setShowAuthModal(false);
+              setAuthError(null);
+            }}
+            language={language}
+            errorCode={authError}
+          />
+        </Suspense>
+
         {infoPage && (
           <InfoPagesModal
             language={language}

@@ -139,10 +139,10 @@ describe("CORS allowlist", () => {
   });
 
   test("falls back to APP_URL when no allowlist is set", () => {
-    const list = withEnv({ ALLOWED_ORIGINS: undefined, APP_URL: "https://ebnily.vercel.app/" }, () =>
+    const list = withEnv({ ALLOWED_ORIGINS: undefined, APP_URL: "https://ebnily.app/" }, () =>
       resolveAllowedOrigins(makeReq({ host: "h" })),
     );
-    assert.deepEqual(list, ["https://ebnily.vercel.app"]);
+    assert.deepEqual(list, ["https://ebnily.app"]);
   });
 
   test("grants the header ONLY to an allowlisted origin", () => {
@@ -171,7 +171,7 @@ describe("CORS allowlist", () => {
 // ── 3. CSRF origin guard ─────────────────────────────────────────────────────
 
 describe("sameOriginGuard", () => {
-  const ORIGIN = "https://ebnily.vercel.app";
+  const ORIGIN = "https://ebnily.app";
   const env = { ALLOWED_ORIGINS: ORIGIN, APP_URL: undefined };
 
   test("blocks a state-changing request from a foreign origin", () => {

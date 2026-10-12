@@ -127,7 +127,7 @@ export function buildProjectExport(
   const readme = [
     `# ${projectName}`,
     '',
-    'Generated with [Ebnili AI App Builder](https://ebnily.vercel.app).',
+    'Generated with [Ebnili AI App Builder](https://ebnily.app).',
     '',
     '## Project structure',
     '',
