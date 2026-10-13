@@ -413,11 +413,22 @@ export const AUTH_ERROR_MESSAGES: Record<string, { ar: string; en: string }> = {
 };
 
 export function getAuthErrorMessage(code: string, language: 'ar' | 'en'): string {
-  const entry = AUTH_ERROR_MESSAGES[code];
-  if (entry) return entry[language];
-  return language === 'ar'
+  // The server may append the real provider error after a `::` separator
+  // (e.g. `oauth_denied::redirect_uri_mismatch`). Show the friendly message for
+  // the known code AND the raw detail so the exact cause is never hidden.
+  const sep = code.indexOf('::');
+  const base = sep >= 0 ? code.slice(0, sep) : code;
+  const detail = sep >= 0 ? code.slice(sep + 2) : '';
+  const entry = AUTH_ERROR_MESSAGES[base];
+  const friendly = entry ? entry[language] : (language === 'ar'
     ? 'تعذّر تسجيل الدخول. حاول مرة أخرى.'
-    : 'Sign-in failed. Please try again.';
+    : 'Sign-in failed. Please try again.');
+  if (detail) {
+    return language === 'ar'
+      ? `${friendly}\nالسبب من المزوّد: ${detail}`
+      : `${friendly}\nProvider detail: ${detail}`;
+  }
+  return friendly;
 }
 
 /**

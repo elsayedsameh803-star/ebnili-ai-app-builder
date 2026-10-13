@@ -278,7 +278,11 @@ export default function App() {
     const code = params.get('code');
     if (!error && !success && !code) return;
 
-    if (error) setAuthError(error);
+    // If the server forwarded a `auth_detail` (the real provider error), append
+    // it with a `::` separator so getAuthErrorMessage can show it alongside the
+    // friendly message. This turns an opaque "denied" into an actionable cause.
+    const detail = params.get('auth_detail');
+    if (error) setAuthError(detail ? `${error}::${detail}` : error);
     if (success) {
       setAuthError(null);
       // Record this device against the account the moment sign-in succeeds.

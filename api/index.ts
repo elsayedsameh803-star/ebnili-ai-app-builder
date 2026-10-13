@@ -4388,11 +4388,18 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
   const sb = supabaseConfig();
   if (!sb.configured) return fail("supabase_not_configured");
 
-  // Supabase reports its own errors (e.g. a user denied consent) in the query.
+  // Supabase reports its own errors (e.g. a user denied consent, a redirect-URI
+  // mismatch, or a provider that is not enabled) in the query. Log the REAL
+  // description so it surfaces in the Vercel Runtime Logs, and forward it to the
+  // browser as `auth_detail` so the generic "denied" toast never hides the true
+  // cause again.
   const errDesc = typeof req.query.error_description === "string" ? req.query.error_description : "";
-  if (errDesc) return fail("oauth_denied");
   const errCode = typeof req.query.error === "string" ? req.query.error : "";
-  if (errCode) return fail("oauth_denied");
+  if (errDesc || errCode) {
+    console.error("supabase auth callback error:", JSON.stringify({ errCode, errDesc }));
+    const detail = (errDesc || errCode).slice(0, 200);
+    return res.redirect(`${home}/?auth_error=oauth_denied&auth_detail=${encodeURIComponent(detail)}`);
+  }
 
   // Single-use: clear the verifier cookie on read so a replayed callback fails.
   const stored = readCookie(req, AUTH_PKCE_COOKIE);
