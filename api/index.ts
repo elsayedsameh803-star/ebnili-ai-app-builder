@@ -4550,21 +4550,48 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
 
 // ── Gemini AI proxy ─────────────────────────────────────────────────────────
 // Accepts GEMINI_API_KEY plus common aliases so the function works no matter
-// which exact variable name was configured in the Vercel dashboard.
-function getApiKey(): string {
-  return (
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
-    ""
-  ).trim();
+// which exact variable name was configured in the Vercel dashboard. ANY of them
+// may hold SEVERAL keys separated by commas — a free-tier key next to a
+// paid-tier key — so this returns the whole set, de-duplicated and in order.
+//
+// PAID_GEMINI_API_KEY is also read as its own source: the owner keeps the free
+// key in GEMINI_API_KEY and the paid key in PAID_GEMINI_API_KEY, and the
+// rotation below tries the free one first and falls through to the paid one the
+// moment the free quota is spent — no comma-splicing the owner has to remember.
+function getApiKeys(): string[] {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  const sources = [
+    process.env.GEMINI_API_KEY,
+    process.env.GOOGLE_API_KEY,
+    process.env.GOOGLE_GEMINI_API_KEY,
+    process.env.VITE_GEMINI_API_KEY,
+    process.env.PAID_GEMINI_API_KEY,
+  ];
+  for (const source of sources) {
+    if (!source) continue;
+    for (const part of source.split(",")) {
+      const key = part.trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        keys.push(key);
+      }
+    }
+  }
+  return keys;
 }
 
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = getApiKey();
-  if (!apiKey) return null;
-  return new GoogleGenAI({ apiKey });
+// One client per configured key. When the free key's quota is spent (429) the
+// next call uses the paid key instead of retrying the same dead one.
+function getGeminiClients(): GoogleGenAI[] {
+  return getApiKeys().map((apiKey) => new GoogleGenAI({ apiKey }));
+}
+
+// Whether any usable key is present. Kept as its own predicate so the health
+// route and the model-capability probe report the same truth the generator uses:
+// if `getApiKeys()` is empty, generation cannot possibly succeed.
+function getApiKey(): string | null {
+  return getApiKeys()[0] ?? null;
 }
 
 // Model priority is based on the official Gemini model catalogue and live
@@ -4659,6 +4686,20 @@ function classifyModelError(raw: string): "permanent" | "timeout" | "transient" 
   return "transient";
 }
 
+/**
+ * True when the failure is about the KEY, not the model: a spent daily quota, a
+ * rate limit, an invalid/unauthorised key. These are the errors key rotation
+ * exists to survive — when the free key is exhausted the very next key (the
+ * paid one) can still produce the answer, so retrying the same key is pointless
+ * and only burns the time budget (the reported "generation took forever then
+ * produced nothing" symptom).
+ */
+function isKeyLevelError(raw: string): boolean {
+  return /\b429\b|\b401\b|\b403\b|quota|exceeded your current|rate limit|rate-limit|resource_exhausted|resource has been exhausted|API key not valid|API_KEY_INVALID|permission|billing/i.test(
+    raw,
+  );
+}
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 interface GeminiCallOptions {
@@ -4671,30 +4712,45 @@ interface GeminiCallOptions {
 }
 
 async function generateWithGemini(
-  ai: GoogleGenAI,
+  clients: GoogleGenAI[],
   prompt: string,
   systemInstruction?: string,
   options: GeminiCallOptions = {},
 ) {
+  if (clients.length === 0) {
+    throw new Error("GEMINI_API_KEY غير مُعد على الخادم");
+  }
   const budgetMs = options.budgetMs ?? GENERATE_BUDGET_MS;
   const attemptTimeoutMs = options.attemptTimeoutMs ?? GENERATE_ATTEMPT_TIMEOUT_MS;
+  // ONE shared deadline across every key. Total time never grows just because
+  // there are several keys, so a Vercel function timeout is never reached by
+  // "try free key, then paid key" — the second key inherits whatever is left.
   const deadline = Date.now() + budgetMs;
   const failures: string[] = [];
-  const deadModels = new Set<string>();
-  const retryableModels = new Set<string>();
-  const attempts = new Map<string, number>();
   let lastError: unknown = null;
 
-  // Retry only short-lived quota/capacity failures. Repeating a 404 or a
+  // Retry only short-lived capacity failures WITHIN a key. Repeating a 404 or a
   // timed-out request cannot make this response arrive any faster.
   const MAX_PASSES = 2;
   const MAX_ATTEMPTS_PER_MODEL = 2;
 
-  for (let pass = 1; pass <= MAX_PASSES; pass++) {
-    let attempted = false;
+  // KEY is the OUTER loop. When a key is spent (429/quota/invalid) every model
+  // on it fails identically, so retrying models on a dead key only burns the
+  // budget — the reported "generation took forever then produced nothing"
+  // symptom. Drop straight to the next key (free → paid) instead.
+  for (let keyIndex = 0; keyIndex < clients.length; keyIndex++) {
+    const ai = clients[keyIndex];
+    const deadModels = new Set<string>();
+    const retryableModels = new Set<string>();
+    const attempts = new Map<string, number>();
+    let keyExhausted = false;
 
-    for (const model of CANDIDATE_MODELS) {
-      if (deadModels.has(model) || (attempts.get(model) ?? 0) >= MAX_ATTEMPTS_PER_MODEL) continue;
+    for (let pass = 1; pass <= MAX_PASSES; pass++) {
+      let attempted = false;
+
+      for (const model of CANDIDATE_MODELS) {
+        if (keyExhausted) break;
+        if (deadModels.has(model) || (attempts.get(model) ?? 0) >= MAX_ATTEMPTS_PER_MODEL) continue;
       if (pass > 1 && !retryableModels.has(model)) continue;
 
       const remaining = deadline - Date.now();
@@ -4745,13 +4801,21 @@ async function generateWithGemini(
       } catch (e) {
         lastError = e;
         const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ");
+        // A spent/invalid KEY must NOT be retried on the same key: abandon this
+        // key immediately so the next key (free → paid) gets the remaining time.
+        if (isKeyLevelError(raw)) {
+          keyExhausted = true;
+          failures.push(`k${keyIndex} key-level ${model}: ${raw.slice(0, 160)}`);
+          break;
+        }
         const errorKind = classifyModelError(raw);
         if (errorKind === "permanent") deadModels.add(model);
         if (errorKind === "transient") retryableModels.add(model);
-        failures.push(`p${pass} ${model}: ${raw.slice(0, 160)}`);
+        failures.push(`k${keyIndex} p${pass} ${model}: ${raw.slice(0, 160)}`);
       }
     }
 
+    if (keyExhausted) break;
     const canRetry = CANDIDATE_MODELS.some(
       (model) =>
         !deadModels.has(model) &&
@@ -4760,19 +4824,26 @@ async function generateWithGemini(
     );
     if (!attempted || !canRetry || deadline - Date.now() <= 2_000) break;
 
-    // A 429/503 "high demand" clears on its own within seconds. Rushing the
-    // second pass used to burn the whole budget and fail anyway; a short,
+    // A 503 "high demand" clears on its own within seconds. Rushing the second
+    // pass used to burn the whole budget and fail anyway; a short,
     // deadline-aware pause is what actually makes the retry worth taking.
     // Two seconds are always left for JSON serialization and the Vercel reply.
     const pause = Math.min(2_500 * pass, Math.max(0, deadline - Date.now() - 2_000));
     if (pause > 0) await sleep(pause);
+    }
+
+    // Out of time for the whole request? Stop trying further keys too.
+    if (deadline - Date.now() <= 2_000) break;
+    // Otherwise: this key could not produce an answer — try the next one. A
+    // per-model 404 on one key may be reachable on another, so rotation helps
+    // even for non-quota failures.
   }
 
   const detail = failures.join(" | ").slice(0, 1800);
-  console.error(`generateWithGemini: all models failed — ${detail}`);
+  console.error(`generateWithGemini: all keys/models failed — ${detail}`);
   throw lastError
     ? new Error(`${lastError instanceof Error ? lastError.message : String(lastError)} [per-model: ${detail}]`)
-    : new Error(`All candidate Gemini models are currently unavailable [per-model: ${detail}]`);
+    : new Error(`All candidate Gemini keys/models are currently unavailable [per-model: ${detail}]`);
 }
 
 // The @google/genai SDK returns `response.text` as a *getter property*, not a
@@ -4977,8 +5048,8 @@ function friendlyAiError(raw: string, language: string): string {
 
 app.post("/api/ai/generate-app", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const ai = getGeminiClient();
-    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const ai = getGeminiClients();
+    if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const { prompt, language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
     if (!prompt || !String(prompt).trim())
       return res.status(400).json({ success: false, message: "prompt مطلوب" });
@@ -5027,7 +5098,7 @@ app.post("/api/ai/generate-app", requireAiSession, requireAiAllowance, async (re
 app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   const language = String((req.body as { language?: string })?.language ?? "ar");
   const promptRaw = String((req.body as { prompt?: string })?.prompt ?? "");
-  const ai = getGeminiClient();
+  const clients = getGeminiClients();
 
   // SECURITY / COST: this route had NO quota check at all — it inherited only the
   // per-minute limiter from `requireAiSession`. A single signed-in account could
@@ -5039,8 +5110,8 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, as
   // on the wire the status code is already sent, and a refusal could no longer
   // be expressed as a 429 — the customer would just see a broken stream.
 
-  if (!ai || !promptRaw.trim()) {
-    return res.status(400).json({ success: false, message: !ai ? "GEMINI_API_KEY غير مُعد" : "prompt مطلوب" });
+  if (clients.length === 0 || !promptRaw.trim()) {
+    return res.status(400).json({ success: false, message: clients.length === 0 ? "GEMINI_API_KEY غير مُعد" : "prompt مطلوب" });
   }
 
   // SSE needs an unbuffered text/event-stream; Vercel otherwise holds the body
@@ -5063,7 +5134,16 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, as
   // after the first token.
   send("open", { ok: true });
 
+  // KEY is the outer loop here too. A spent free key (429/quota) makes every
+  // model on it fail identically, so retrying models on it only burns the
+  // budget — the "stream spun forever then produced nothing" symptom. Drop
+  // straight to the paid key instead.
+  for (let keyIndex = 0; keyIndex < clients.length; keyIndex++) {
+    const ai = clients[keyIndex];
+    let keyExhausted = false;
+
   for (const model of CANDIDATE_MODELS) {
+    if (keyExhausted) break;
     if (deadModels.has(model)) continue;
     const remaining = deadline - Date.now();
     if (remaining <= 2_000) break;
@@ -5100,8 +5180,14 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, as
       throw new Error(`Gemini model "${model}" produced no text`);
     } catch (e) {
       const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ");
-      failures.push(`${model}: ${raw.slice(0, 140)}`);
+      failures.push(`k${keyIndex} ${model}: ${raw.slice(0, 140)}`);
       console.error(`stream ${model} failed:`, raw);
+      // A spent/invalid key must not be retried on the same key — abandon it so
+      // the next key (free → paid) gets the remaining time.
+      if (isKeyLevelError(raw)) {
+        keyExhausted = true;
+        break;
+      }
       // A 404/invalid-key model is dead for this key; a 429/503 is transient
       // and simply moves to the next candidate.
       if (classifyModelError(raw) === "permanent") deadModels.add(model);
@@ -5109,6 +5195,10 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, as
       // mid-stream — stop and let the client fall back for a clean result.
       if (sentAny) break;
     }
+  }
+
+    if (sentAny) break;
+    if (deadline - Date.now() <= 2_000) break;
   }
 
   send("failed", { message: friendlyAiError(failures.join(" | "), language), debug: failures.join(" | ").slice(0, 800) });
@@ -5157,8 +5247,8 @@ app.post("/api/ai/refine-app", requireAiSession, requireAiAllowance, async (req:
   };
 
   try {
-    const ai = getGeminiClient();
-    if (!ai) return fallback("no-api-key");
+    const ai = getGeminiClients();
+    if (ai.length === 0) return fallback("no-api-key");
     // The visual inspector posts the element under the cursor — passing it to
     // the model is what makes "make this button green" edit the right node.
     const target = selectedElement
@@ -5199,8 +5289,8 @@ app.post("/api/ai/refine-app", requireAiSession, requireAiAllowance, async (req:
 // contract and maps the answer onto the exact keys the UI already reads.
 app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const ai = getGeminiClient();
-    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const ai = getGeminiClients();
+    if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { prompt?: string; category?: string; language?: string };
     const language = String(body.language ?? "ar");
     const original = String(body.prompt ?? "").trim();
@@ -5255,8 +5345,8 @@ app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireAiAllowance, 
 
 app.post("/api/ai/gemini-architect", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const ai = getGeminiClient();
-    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const ai = getGeminiClients();
+    if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { prompt?: string; language?: string };
     const language = String(body.language ?? "ar");
     const original = String(body.prompt ?? "").trim();
@@ -5317,8 +5407,8 @@ app.post("/api/ai/gemini-architect", requireAiSession, requireAiAllowance, async
 
 app.post("/api/ai/gemini-code-doctor", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const ai = getGeminiClient();
-    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const ai = getGeminiClients();
+    if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { code?: string; issueDescription?: string; language?: string };
     const language = String(body.language ?? "ar");
     const code = String(body.code ?? "");
@@ -5689,8 +5779,8 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
     return res.json({ success: true, job: toPublicJob(job) });
   }
 
-  const ai = getGeminiClient();
-  if (!ai) return res.status(503).json({ success: false, code: "AI_NOT_CONFIGURED" });
+  const ai = getGeminiClients();
+  if (ai.length === 0) return res.status(503).json({ success: false, code: "AI_NOT_CONFIGURED" });
 
   // Claim: queued → running. The `status=eq.queued` filter is the idempotency
   // guard; if another poll already claimed it, this PATCH touches 0 rows and we
