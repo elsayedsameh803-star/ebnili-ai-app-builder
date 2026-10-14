@@ -39,6 +39,30 @@ export const PreviewFrame = ({
   const [showConsole, setShowConsole] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // REACTIVE narrow flag.
+  //
+  // This used to be a plain `const isNarrow = window.innerWidth < 640`, evaluated
+  // once during render. That goes stale the moment the phone rotates or the
+  // window is resized, because nothing re-renders the component — the device
+  // frame kept its last width (e.g. a 375×720 mock) and left dead space beside
+  // it on a screen that had since changed shape. A resize listener keeps it in
+  // sync with the real viewport, and the initial value is read immediately so
+  // the first paint on a phone is already correct.
+  const [isNarrow, setIsNarrow] = useState<boolean>(
+    () => typeof window !== 'undefined' && window.innerWidth < 640,
+  );
+
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth < 640);
+    onResize();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+
   // Listen for messages from inside the preview iframe.
   //
   // SECURITY: this handler used to accept ANY message from ANY window. A
@@ -223,23 +247,26 @@ export const PreviewFrame = ({
   // squeezed into the left edge, with dead space beside it. That reads as "the
   // preview is broken", which is exactly what was reported.
   //
-  // The fix is to drop the mock frame on a phone and let the frame fill the
-  // space, because on a phone the phone IS the frame. `max-sm:` keeps the
-  // device mock for tablet/desktop widths, where it is still useful.
+  // The fix: on a narrow viewport the phone IS the frame, so NO device mock is
+  // drawn — whatever device mode is selected, the preview fills the space edge
+  // to edge. The mock (375px / 768px frames) only appears at `sm:` and up, where
+  // there is actually room to show a scaled-down device beside real margins.
   //
-  // `dvh` is used for the height because `100vh` on mobile browsers includes the
-  // collapsing URL bar, which is what pushed the bottom of the page off-screen.
-  const isNarrow = typeof window !== 'undefined' && window.innerWidth < 640;
+  // `dvh`-style height comes from the parent chain: the frame is `h-full` of a
+  // flex child that already fills the viewport, and the iframe is `h-full` of the
+  // frame — so the embedded document always gets the full available height and
+  // scrolls its own content internally instead of being clipped.
   const getDeviceStyles = () => {
+    if (isNarrow) {
+      // Phone (any device mode): fill the viewport completely, no mock chrome,
+      // no border, no rounding, no fixed 375/768px width that could overflow.
+      return 'w-full h-full rounded-none border-0 bg-white';
+    }
     switch (deviceMode) {
       case 'mobile':
-        return isNarrow
-          ? 'w-full h-full max-sm:rounded-none max-sm:border-0 bg-white'
-          : 'w-[375px] max-w-full h-[720px] max-h-full rounded-[24px] sm:rounded-[36px] border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
+        return 'w-[375px] max-w-full h-[720px] max-h-full rounded-[24px] sm:rounded-[36px] border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
       case 'tablet':
-        return isNarrow
-          ? 'w-full h-full max-sm:rounded-none max-sm:border-0 bg-white'
-          : 'w-[768px] max-w-full h-[86%] max-h-full rounded-xl sm:rounded-2xl border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
+        return 'w-[768px] max-w-full h-[86%] max-h-full rounded-xl sm:rounded-2xl border-4 sm:border-8 border-slate-800 shadow-2xl overflow-hidden';
       case 'desktop':
       default:
         return 'w-full h-full rounded-none border-0';
@@ -315,8 +342,12 @@ export const PreviewFrame = ({
         </div>
       </div>
 
-      {/* Main Device Viewport Container */}
-      <div className="flex-1 flex items-center justify-center p-2 sm:p-4 bg-slate-950 overflow-hidden relative">
+      {/* Main Device Viewport Container
+          On a phone the frame must fill the area completely (stretch, no
+          padding) so there is no dead black margin around the preview. At `sm:`
+          and up we restore the centred, padded layout where a scaled device mock
+          with real margins actually makes sense. */}
+      <div className="flex-1 flex items-stretch justify-stretch p-0 sm:items-center sm:justify-center sm:p-4 bg-slate-950 overflow-hidden relative">
         <div className={`transition-all duration-300 bg-white ${getDeviceStyles()} relative shadow-2xl`}>
           <iframe
             key={refreshKey}
