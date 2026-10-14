@@ -455,7 +455,7 @@ export default function App() {
     planName: 'Starter Free (المجانية)',
     status: 'active',
     generationsUsedToday: 1,
-    generationsLimitToday: 5,
+    generationsLimitToday: 2,
     canExportZip: false,
     canDeployCustomDomain: false,
     canUseVisualInspector: true,
@@ -1886,6 +1886,7 @@ export default function App() {
             files={project.files}
             onClose={() => setShowExport(false)}
             language={language}
+            tier={subscription.tier}
           />
         )}
 

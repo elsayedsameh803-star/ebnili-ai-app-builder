@@ -52,7 +52,9 @@ export const AI_ABSOLUTE_DAILY_CEILING = 400;
 
 /** Per-plan daily allowance. The numbers the pricing page promises. */
 export const TIER_DAILY_QUOTA = {
-  free: 5,
+  // FREE is a preview-only trial: a very small daily spend, so a free account
+  // cannot meaningfully burn the paid Gemini key. Raised only by upgrading.
+  free: 2,
   pro: 100,
   business: 400,
 } as const;

@@ -187,7 +187,7 @@ const DEFAULT_SUBSCRIPTION = {
   status: "active",
   planName: "Starter Free",
   generationsUsedToday: 0,
-  generationsLimitToday: 5,
+  generationsLimitToday: 2,
   canExportZip: false,
   canDeployCustomDomain: false,
   canUseVisualInspector: true,
@@ -866,6 +866,21 @@ app.post("/api/projects/export", (req: Request, res: Response) => {
   if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
 
   const tier = serverTierFor(req, session);
+
+  // FREE = PREVIEW ONLY. No source, no ZIP, no features — enforced here, on the
+  // server, so a tampered client cannot export by calling this route directly.
+  // The tier is resolved above from the signed session, never from the request
+  // body, so a body claiming `pro` changes nothing. The client UI hides these
+  // buttons too, but that is only a courtesy — this 403 is the real boundary.
+  if (!isPaidTier(tier)) {
+    return res.status(403).json({
+      success: false,
+      code: "FREE_PREVIEW_ONLY",
+      message:
+        "خطة مجانية = معاينة فقط. قم بالترقية إلى Pro أو Business لتحميل الكود أو ملف ZIP.",
+    });
+  }
+
   const body = (req.body as { files?: Record<string, string> }) ?? {};
   const files = body.files && typeof body.files === "object" ? body.files : {};
 

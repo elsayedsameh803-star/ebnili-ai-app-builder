@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
-import { Download, X, Copy, Check, FileArchive, Code, AlertCircle } from 'lucide-react';
+import { Download, X, Copy, Check, FileArchive, Code, AlertCircle, Lock, Sparkles } from 'lucide-react';
 import JSZip from 'jszip';
-import { Language } from '../types';
+import { Language, SubscriptionTier } from '../types';
 import { buildProjectExport } from '../lib/auth';
 import { exportProjectFiles } from '../lib/projects';
 import { useModalAccessibility } from './useModalAccessibility';
@@ -12,14 +12,57 @@ interface ExportModalProps {
   files: Record<string, string>;
   onClose: () => void;
   language: Language;
+  /**
+   * The account's real tier, resolved server-side on `/api/auth/me` and passed
+   * down. FREE is a PREVIEW-ONLY trial: the ZIP, the embed snippet and the
+   * quick-start commands are all hidden behind an upgrade notice.
+   *
+   * This is defence-in-depth only — `/api/projects/export` already refuses a
+   * free account with a 403 and resolves the tier from the signed session, so a
+   * tampered client that hides this gate still cannot download anything.
+   */
+  tier: SubscriptionTier;
 }
+
+/**
+ * Shown to a FREE account wherever a download/embed feature would otherwise be.
+ *
+ * FREE is a preview-only trial: the visitor can generate and preview, but every
+ * control that hands them the source (ZIP, embed iframe, quick-start commands)
+ * is replaced by this notice. `/api/projects/export` enforces the identical rule
+ * server-side, so this is a clear message rather than the security boundary —
+ * hiding it here would only produce an unexplained 403.
+ */
+const FreeUpgradeNotice = ({ language }: { language: Language }) => (
+  <div className="bg-slate-950/60 p-4 rounded-xl border border-amber-500/30 flex items-start gap-3">
+    <div className="w-9 h-9 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+      <Lock className="w-4 h-4" aria-hidden="true" />
+    </div>
+    <div className="space-y-1">
+      <h4 className="font-bold text-xs text-white flex items-center gap-1.5">
+        <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+        {language === 'ar' ? 'متاح في الباقة المدفوعة' : 'Available on a paid plan'}
+      </h4>
+      <p className="text-[11px] text-slate-400 leading-relaxed">
+        {language === 'ar'
+          ? 'الحساب المجاني للمعاينة فقط. ترقَّ إلى Pro أو Business لتحميل الكود المصدري (ZIP) وتضمين الموقع وتشغيله محلياً.'
+          : 'The free plan is preview-only. Upgrade to Pro or Business to download the source (ZIP), embed the site and run it locally.'}
+      </p>
+    </div>
+  </div>
+);
 
 export const ExportModal = ({
   projectName,
   files,
   onClose,
   language,
+  tier,
 }: ExportModalProps) => {
+  // FREE = preview only. Anything that hands the user the source (ZIP, embed,
+  // CLI commands) is gated here so a free visitor never meets a 403 they did
+  // not expect; the server enforces the same rule regardless of this flag.
+  const isPaid = tier === 'pro' || tier === 'business';
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
   const handleClose = useCallback(() => onClose(), [onClose]);
@@ -155,45 +198,52 @@ export const ExportModal = ({
           </div>
         )}
 
-        {/* Option 1: ZIP Archive */}
-        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <FileArchive className="w-8 h-8 text-rose-400 shrink-0" />
-            <div>
-              <h4 className="font-bold text-xs text-white">
-                {language === 'ar' ? 'تحميل كود مشروعك كملف ZIP' : 'Download Your Project as ZIP'}
-              </h4>
-              <p className="text-[11px] text-slate-400">
-                {language === 'ar'
-                  ? 'ملف مضغوط يحتوي على ملفات مشروعك التي أنشأتها، جاهز للتشغيل محلياً'
-                  : 'A compressed archive of the project files you generated, ready to run locally'}
-              </p>
+        {/* Option 1: ZIP Archive — PAID ONLY. FREE is a preview trial and gets
+            an upgrade notice in its place. The server refuses the request too. */}
+        {isPaid ? (
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <FileArchive className="w-8 h-8 text-rose-400 shrink-0" />
+              <div>
+                <h4 className="font-bold text-xs text-white">
+                  {language === 'ar' ? 'تحميل كود مشروعك كملف ZIP' : 'Download Your Project as ZIP'}
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  {language === 'ar'
+                    ? 'ملف مضغوط يحتوي على ملفات مشروعك التي أنشأتها، جاهز للتشغيل محلياً'
+                    : 'A compressed archive of the project files you generated, ready to run locally'}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleDownloadZip}
+                disabled={isZipping}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white transition shadow-sm flex items-center justify-center gap-1.5 cursor-pointer text-center"
+              >
+                <Download className={`w-3.5 h-3.5 ${isZipping ? 'animate-bounce' : ''}`} />
+                <span>
+                  {isZipping
+                    ? (language === 'ar' ? 'جارٍ التحضير...' : 'Preparing...')
+                    : (language === 'ar' ? 'تحميل ملف ZIP' : 'Download ZIP')}
+                </span>
+              </button>
             </div>
           </div>
-          <div className="flex flex-col gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={handleDownloadZip}
-              disabled={isZipping}
-              className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white transition shadow-sm flex items-center justify-center gap-1.5 cursor-pointer text-center"
-            >
-              <Download className={`w-3.5 h-3.5 ${isZipping ? 'animate-bounce' : ''}`} />
-              <span>
-                {isZipping
-                  ? (language === 'ar' ? 'جارٍ التحضير...' : 'Preparing...')
-                  : (language === 'ar' ? 'تحميل ملف ZIP' : 'Download ZIP')}
-              </span>
-            </button>
-          </div>
-        </div>
+        ) : (
+          <FreeUpgradeNotice language={language} />
+        )}
 
-        {/* Option 2: Embed Snippet */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
-            <span className="flex items-center gap-1.5">
-              <Code className="w-3.5 h-3.5 text-indigo-400" />
-              <span>{language === 'ar' ? 'كود التضمين (Embed iframe)' : 'Embed in your site'}</span>
-            </span>
+        {/* Option 2: Embed Snippet — PAID ONLY. FREE gets the same upgrade notice
+            in its place, so every locked control reads the same way. */}
+        {isPaid ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+              <span className="flex items-center gap-1.5">
+                <Code className="w-3.5 h-3.5 text-indigo-400" />
+                <span>{language === 'ar' ? 'كود التضمين (Embed iframe)' : 'Embed in your site'}</span>
+              </span>
             <button
               onClick={handleCopySnippet}
               className="text-slate-400 hover:text-white flex items-center gap-1 text-[11px] transition cursor-pointer"
@@ -211,18 +261,21 @@ export const ExportModal = ({
               )}
             </button>
           </div>
-          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-[11px] text-slate-300 break-all select-all">
-            {embedSnippet}
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-[11px] text-slate-300 break-all select-all">
+              {embedSnippet}
+            </div>
           </div>
-        </div>
+        ) : (
+          <FreeUpgradeNotice language={language} />
+        )}
 
-        {/* Option 3: Quick Start commands
-            Replaced a hard-coded four-line block. It always said `npm install`
-            / `npm run dev` for a ZIP whose contents depend on the project, and
-            it offered no way to publish — which is the only reason most visitors
-            opened this dialog. The same `CommandTerminal` used by the deploy
-            dialog now renders here, with the real project name. */}
-        <CommandTerminal projectName={projectName} language={language} />
+        {/* Option 3: Quick Start commands — PAID ONLY. Same `CommandTerminal` used
+            by the deploy dialog, gated behind the same preview-only free rule. */}
+        {isPaid ? (
+          <CommandTerminal projectName={projectName} language={language} />
+        ) : (
+          <FreeUpgradeNotice language={language} />
+        )}
 
         <div className="flex justify-end pt-2">
           <button
