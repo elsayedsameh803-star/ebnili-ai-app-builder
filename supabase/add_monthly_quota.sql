@@ -28,6 +28,9 @@
 alter table public.ebnily_accounts
   add column if not exists ai_month      date;
 
+alter table public.ebnily_accounts
+  add column if not exists ai_month_used integer not null default 0;
+
 -- ── 2. THE WINDOW-AWARE SPEND ───────────────────────────────────────────────
 -- Same atomic row lock, same fail-closed posture as the original. The only
 -- change is WHICH counter the window selects:
