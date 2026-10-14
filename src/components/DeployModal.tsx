@@ -1,49 +1,94 @@
-import { useState, useCallback } from 'react';
-import { Share2, X, Check, Copy, QrCode, Globe, Info, Terminal } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Share2, X, Check, Copy, QrCode, Globe, Info, Terminal, Rocket, Loader2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Language } from '../types';
 import { useModalAccessibility } from './useModalAccessibility';
 import { CommandTerminal } from './CommandTerminal';
+import type { PublishState } from '../lib/projects';
+import { fetchPublishState, publishRemoteProject, unpublishRemoteProject } from '../lib/projects';
 
 interface DeployModalProps {
   projectName: string;
+  /** The project to publish. `null` means there is nothing to publish yet. */
+  projectId: string | null;
   onClose: () => void;
   language: Language;
 }
 
 /**
- * /api/projects/export hands the project to the server, but there is no public
- * hosting route behind this modal yet. The previous version invented a
- * `https://ibnili.app/p/<slug>` link that has never existed and a box with
- * `[QR]` printed in it, then labelled the result "منشور ونشط" — so a visitor
- * copied a dead URL and scanned a fake code.
+ * Share & publish — now backed by the REAL publish API.
  *
- * The feature is kept (it is a real part of the product), but it now only ever
- * shows something that is true:
- *  • the app's own origin is the only host we can promise, so the share action
- *    is driven by a real, openable link plus a genuine scannable QR of it;
- *  • anything not yet available is labelled as such instead of faking success.
+ * The previous version invented a `/preview/<name-of-project>` link in the
+ * browser, never called the server, and stamped a QR on it — so a visitor
+ * copied a dead URL while the modal claimed the app was live.
+ *
+ * This version drives everything off the server: `fetchPublishState` reads the
+ * stored slug (if any), `publishRemoteProject` freezes the draft and mints the
+ * slug, and the link it shows is the one `GET /preview/:slug` actually serves.
+ * Nothing is invented; a project that is not published says so.
  */
 export const DeployModal = ({
   projectName,
+  projectId,
   onClose,
   language,
 }: DeployModalProps) => {
+  const ar = language === 'ar';
   const [copied, setCopied] = useState(false);
-  /**
-   * Two tabs, because they answer different questions: "how do I show this to
-   * someone right now" (share) versus "how do I put it on the internet
-   * permanently" (deploy). Hiding the second one behind a button used to make
-   * the product look like it had no deployment story at all.
-   */
   const [tab, setTab] = useState<'share' | 'deploy'>('share');
+  const [state, setState] = useState<PublishState | null>(null);
+  const [busy, setBusy] = useState<'reading' | 'publishing' | 'unpublishing' | null>('reading');
   const handleClose = useCallback(() => onClose(), [onClose]);
   const dialogRef = useModalAccessibility(true, handleClose);
-  const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'app';
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const publicUrl = `${origin}/preview/${slug}`;
+
+  // Read the stored publish state on mount so the modal never claims a project
+  // is live when it is not, and shows the real link when it is.
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectId) {
+      setState(null);
+      setBusy(null);
+      return;
+    }
+    setBusy('reading');
+    fetchPublishState(projectId)
+      .then((s) => !cancelled && setState(s))
+      .catch(() => !cancelled && setState(null))
+      .finally(() => !cancelled && setBusy(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const handlePublish = useCallback(async () => {
+    if (!projectId) return;
+    setBusy('publishing');
+    try {
+      setState(await publishRemoteProject(projectId));
+    } catch {
+      /* the inline note below already tells the truth on failure */
+    } finally {
+      setBusy(null);
+    }
+  }, [projectId]);
+
+  const handleUnpublish = useCallback(async () => {
+    if (!projectId) return;
+    setBusy('unpublishing');
+    try {
+      setState(await unpublishRemoteProject(projectId));
+    } catch {
+      /* ignore */
+    } finally {
+      setBusy(null);
+    }
+  }, [projectId]);
+
+  const isLive = state?.published === true && !!state.url;
+  const publicUrl = state?.url ?? '';
 
   const handleCopy = () => {
+    if (!publicUrl) return;
     navigator.clipboard?.writeText(publicUrl).catch(() => undefined);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -106,27 +151,68 @@ export const DeployModal = ({
           <CommandTerminal projectName={projectName} language={language} />
         ) : (
           <>
-        {/* Status badge — honest wording.
-            The old badge claimed the app was "live on the global edge" before
-            anything was published, which is a promise the platform cannot keep. */}
+        {/* Status badge — driven by the SERVER's real publish state. */}
         <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
+            <span
+              className={`w-2.5 h-2.5 rounded-full shrink-0 ${isLive ? 'bg-emerald-400' : 'bg-amber-400'}`}
+            />
             <span className="text-xs font-semibold text-slate-300 truncate">
-              {language === 'ar'
-                ? 'النشر على نطاق عام غير متاح بعد — استخدم المعاينة المباشرة أو صدّر المشروع'
-                : 'Public hosting is not available yet — use the live preview or export the project'}
+              {isLive
+                ? language === 'ar'
+                  ? 'الموقع منشور ونشط الآن — الرابط العام يعمل.'
+                  : 'Published and live — the public link below is active.'
+                : language === 'ar'
+                  ? 'غير منشور بعد — اضغط «نشر الموقع» لجعله عاماً.'
+                  : 'Not published yet — press “Publish site” to make it public.'}
             </span>
           </div>
-          <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono shrink-0">
-            {language === 'ar' ? 'قريباً' : 'Coming soon'}
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full font-mono shrink-0 ${
+              isLive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-300'
+            }`}
+          >
+            {isLive ? (language === 'ar' ? 'منشور' : 'Live') : language === 'ar' ? 'مسودة' : 'Draft'}
           </span>
         </div>
 
-        {/* Preview link box — a URL that actually resolves. */}
+        {/* Real publish / unpublish controls — one click, server-backed. */}
+        <div className="flex items-center gap-2">
+          {isLive ? (
+            <>
+              <button
+                onClick={handlePublish}
+                disabled={busy !== null}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+              >
+                {busy === 'publishing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
+                {language === 'ar' ? 'إعادة النشر بآخر التعديلات' : 'Re-publish latest'}
+              </button>
+              <button
+                onClick={handleUnpublish}
+                disabled={busy !== null}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-rose-300 text-xs font-bold transition cursor-pointer disabled:opacity-50 border border-rose-500/30"
+              >
+                {busy === 'unpublishing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {language === 'ar' ? 'إلغاء النشر' : 'Unpublish'}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handlePublish}
+              disabled={busy !== null || !projectId}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-rose-500 to-orange-500 text-white text-xs font-black hover:brightness-110 transition cursor-pointer disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
+              {language === 'ar' ? 'نشر الموقع الآن' : 'Publish site now'}
+            </button>
+          )}
+        </div>
+
+        {/* Preview link box — the REAL public URL (empty until published). */}
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-slate-300">
-            {language === 'ar' ? 'رابط المعاينة:' : 'Preview link:'}
+            {language === 'ar' ? 'الرابط العام:' : 'Public link:'}
           </label>
           <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl p-2">
             <Globe className="w-4 h-4 text-slate-500 ms-1 shrink-0" />
@@ -134,6 +220,7 @@ export const DeployModal = ({
               type="text"
               readOnly
               value={publicUrl}
+              placeholder={language === 'ar' ? 'لم يُنشر بعد' : 'Not published yet'}
               dir="ltr"
               className="bg-transparent text-xs text-white font-mono flex-1 outline-none truncate"
             />
@@ -157,42 +244,42 @@ export const DeployModal = ({
           </div>
         </div>
 
-        {/* Mobile QR — a REAL, scannable code for the link above. The previous
-            markup rendered a literal "[QR]" placeholder, so scanning it did
-            nothing at all. */}
-        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h4 className="font-bold text-xs text-white flex items-center gap-1.5">
-              <QrCode className="w-3.5 h-3.5 text-rose-400" />
-              <span>{language === 'ar' ? 'افتح على هاتفك' : 'Open on your phone'}</span>
-            </h4>
-            <p className="text-[11px] text-slate-400">
-              {language === 'ar' ? 'امسح الرمز بكاميرا الهاتف لفتح المعاينة' : 'Scan with your phone camera to open the preview'}
-            </p>
+        {/* Mobile QR — a REAL, scannable code for the link above. It only
+            appears once the project is actually published, so a scan can never
+            resolve to a dead or empty URL. */}
+        {isLive && publicUrl && (
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h4 className="font-bold text-xs text-white flex items-center gap-1.5">
+                <QrCode className="w-3.5 h-3.5 text-rose-400" />
+                <span>{language === 'ar' ? 'افتح على هاتفك' : 'Open on your phone'}</span>
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                {language === 'ar' ? 'امسح الرمز بكاميرا الهاتف لفتح الموقع المنشور' : 'Scan with your phone camera to open the published site'}
+              </p>
+            </div>
+            <div className="w-20 h-20 bg-white p-1.5 rounded-lg flex items-center justify-center shrink-0">
+              <QRCodeSVG
+                value={publicUrl}
+                size={68}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#020617"
+                title={language === 'ar' ? 'رمز الاستجابة السريعة للموقع المنشور' : 'Published site QR code'}
+              />
+            </div>
           </div>
-          <div className="w-20 h-20 bg-white p-1.5 rounded-lg flex items-center justify-center shrink-0">
-            <QRCodeSVG
-              value={publicUrl}
-              size={68}
-              level="M"
-              bgColor="#ffffff"
-              fgColor="#020617"
-              title={language === 'ar' ? 'رمز الاستجابة السريعة للمعاينة' : 'Preview QR code'}
-            />
-          </div>
-        </div>
+        )}
 
-        {/* Honest note about what this does and does not do yet.
-            The old text sent visitors to the export dialog for a ZIP, which was
-            a dead end — it gave them files and no way to publish them. The
-            "Deploy & push" tab above is now the real answer, so it is named
-            directly instead of describing the missing feature. */}
-        <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[11px] text-amber-100 leading-relaxed">
-          <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
+        {/* Honest note: the on-platform publish above is the real, one-click way
+            live. The custom-domain feature is the only part still unavailable,
+            and it is named as such rather than hidden. */}
+        <div className="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5 text-[11px] text-slate-300 leading-relaxed">
+          <Info className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" aria-hidden="true" />
           <span>
             {language === 'ar'
-              ? 'استخدم تبويب «نشر ودفع» للحصول على أوامر البناء والنشر جاهزة للنسخ، أو صدّر المشروع كملف ZIP. النشر على نطاق مخصّص غير مفعّل بعد.'
-              : 'Use the "Deploy & push" tab for copy-ready build and publish commands, or export the project as a ZIP. Custom-domain publishing is not enabled yet.'}
+              ? '«نشر الموقع» ينشئ رابطاً عاماً فعلياً يمكنك مشاركته. الدومين المخصص (Custom Domain) غير مفعّل حالياً.'
+              : '“Publish site” creates a real public link you can share. A custom domain is not enabled yet.'}
           </span>
         </div>
 

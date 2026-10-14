@@ -4,11 +4,10 @@ import {
   ExternalLink,
   Terminal,
   MousePointerClick,
-  Check,
-  Copy,
   Crown
 } from 'lucide-react';
 import { DeviceMode, ConsoleLog, SelectedElementInfo, Language } from '../types';
+import { PublishButton } from './PublishButton';
 
 interface PreviewFrameProps {
   code: string;
@@ -20,6 +19,8 @@ interface PreviewFrameProps {
   onOpenSubscription?: () => void;
   /** True while the AI is still streaming the document into this frame. */
   isStreaming?: boolean;
+  /** The project id, so the Publish button can publish the real project. */
+  projectId?: string | null;
 }
 
 export const PreviewFrame = ({
@@ -31,12 +32,12 @@ export const PreviewFrame = ({
   subscriptionTier = 'free',
   onOpenSubscription,
   isStreaming = false,
+  projectId = null,
 }: PreviewFrameProps) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([]);
   const [showConsole, setShowConsole] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [copiedUrl, setCopiedUrl] = useState(false);
 
   // Listen for messages from inside the preview iframe.
   //
@@ -208,12 +209,6 @@ export const PreviewFrame = ({
     window.open(url, '_blank');
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(window.location.href).catch(() => undefined);
-    setCopiedUrl(true);
-    setTimeout(() => setCopiedUrl(false), 2000);
-  };
-
   const injectedHtml = useMemo(() => {
     return buildInjectedCode(code, isInspectMode);
   }, [code, isInspectMode, refreshKey]);
@@ -269,21 +264,21 @@ export const PreviewFrame = ({
           >
             <RotateCw className="w-3.5 h-3.5" />
           </button>
+
+          {/* THE REAL PUBLISH BUTTON — sits above the preview, one click to go
+              live, and shows the actual public link once the server confirms it. */}
+          <PublishButton projectId={projectId} language={language} className="ml-1" />
         </div>
 
-        {/* Address Bar */}
         {/* Address Bar — hidden on phones: the mock chrome around it is wider
-            than a 375px screen, and every pixel belongs to the preview. */}
+            than a 375px screen, and every pixel belongs to the preview.
+            It is a MOCK address (the preview is a sandboxed iframe, not a real
+            origin), so it is labelled honestly instead of showing a fake domain. */}
         <div className="hidden sm:flex flex-1 max-w-md mx-4 bg-slate-950 px-3 py-1 rounded-md border border-slate-800 text-center font-mono text-[11px] text-slate-300 items-center justify-between">
           <span className="text-emerald-400 text-xs">🔒</span>
-          <span className="truncate">https://ibnili-preview.dev/live-app</span>
-          <button
-            onClick={handleCopyLink}
-            className="text-slate-500 hover:text-slate-300 transition"
-            title={language === 'ar' ? 'نسخ الرابط' : 'Copy link'}
-          >
-            {copiedUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-          </button>
+          <span className="truncate">
+            {language === 'ar' ? 'معاينة مباشرة (داخل الاستوديو)' : 'Live preview (in-studio)'}
+          </span>
         </div>
 
         {/* Right tools: Console Drawer & Popout */}

@@ -5694,19 +5694,54 @@ app.post("/api/projects/:id/unpublish", limitWrites, (req: Request, res: Respons
 // Public, sessionless read of a published page. Registered before the /api 404
 // catch-all so it is actually reachable. Serves the frozen snapshot only — never
 // the live draft — and a stranger's slug is indistinguishable from a missing one.
-app.get("/api/s/:slug", (req: Request, res: Response) => {
+//
+// TWO PATHS, ONE HANDLER. `vercel.json` rewrites `/preview/:slug` to this
+// function (that is the pretty public URL the UI shows), and `/api/s/:slug` is
+// the original short path kept for any old links. Both serve the exact same
+// snapshot, so there is one source of truth and neither can drift.
+function servePublishedPage(req: Request, res: Response): void {
   const slug = String(req.params.slug ?? "");
-  if (!slug) return res.status(404).send("Not found");
-  if (!supabaseConfig().dbConfigured) return res.status(503).send("Publishing is not configured");
+  if (!slug) return void res.status(404).send("Not found");
+  if (!supabaseConfig().dbConfigured) return void res.status(503).send("Publishing is not configured");
 
   void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
     query: { slug: `eq.${slug}`, published: `eq.true`, select: "published_html", limit: "1" },
   }).then((result) => {
     const row = result.ok ? result.data?.[0] : undefined;
-    if (!row || !row.published_html) return res.status(404).send("Not found");
+    if (!row || !row.published_html) return void res.status(404).send("Not found");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=60");
     res.status(200).send(row.published_html);
+  });
+}
+app.get("/api/s/:slug", servePublishedPage);
+app.get("/preview/:slug", servePublishedPage);
+
+/**
+ * The caller's OWN publish state for one project.
+ *
+ * WHY THIS EXISTS: the publish button needs to know, on load, whether the
+ * project is already live and what its public slug is — without spending a
+ * publish to find out. The read is owner-scoped exactly like the write, so a
+ * stranger asking for someone else's project id gets a 404, never a slug.
+ */
+app.get("/api/projects/:id/publish", (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return void res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return void dbUnavailable(res);
+
+  const id = String(req.params.id ?? "");
+  void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, select: "id,published,slug,published_at", limit: "1" },
+  }).then((result) => {
+    const row = result.ok ? result.data?.[0] : undefined;
+    if (!row) return void res.status(404).json({ success: false, code: "NOT_FOUND" });
+    res.json({
+      success: true,
+      published: row.published === true,
+      slug: row.slug ?? null,
+      publishedAt: row.published_at ?? null,
+    });
   });
 });
 

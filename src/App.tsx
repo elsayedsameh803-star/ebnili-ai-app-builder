@@ -1821,6 +1821,7 @@ export default function App() {
               language={language}
               subscriptionTier={subscription.tier}
               onOpenSubscription={() => setShowSubscription(true)}
+              projectId={projectId}
             />
           )}
 
@@ -1857,6 +1858,7 @@ export default function App() {
                   subscriptionTier={subscription.tier}
                   onOpenSubscription={() => setShowSubscription(true)}
                   isStreaming={isStreaming}
+                  projectId={projectId}
                 />
               </div>
             </div>
@@ -1893,6 +1895,7 @@ export default function App() {
         {showDeploy && (
           <DeployModal
             projectName={project.name}
+            projectId={projectId}
             onClose={() => setShowDeploy(false)}
             language={language}
           />

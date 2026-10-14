@@ -107,6 +107,73 @@ export interface ExportResult {
   files: Record<string, string>;
 }
 
+/** The public state of one project's publication. */
+export interface PublishState {
+  published: boolean;
+  /** The server-minted, url-safe slug. `null` until the project is published. */
+  slug: string | null;
+  /** The absolute, publicly openable link — `null` when not published. */
+  url: string | null;
+  publishedAt: string | null;
+}
+
+/** The public link for a published slug, built from the running app's origin. */
+function publishedUrlFor(slug: string): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}/preview/${slug}`;
+}
+
+/**
+ * Read whether THIS account's project is already live, and its public link.
+ *
+ * The server resolves the owner from the signed session cookie and scopes the
+ * read by `owner_id`, so asking about somebody else's project id answers 404 —
+ * never a slug. This is a pure read: it never publishes and never spends.
+ */
+export async function fetchPublishState(id: string): Promise<PublishState> {
+  const data = await api<{ published: boolean; slug: string | null; publishedAt: string | null }>(
+    `/api/projects/${encodeURIComponent(id)}/publish`,
+  );
+  return {
+    published: data.published === true,
+    slug: data.slug ?? null,
+    url: data.slug ? publishedUrlFor(data.slug) : null,
+    publishedAt: data.publishedAt ?? null,
+  };
+}
+
+/**
+ * Publish a project: the server freezes the current draft into `published_html`,
+ * mints a slug (or reuses the existing one so old links stay alive), and flips
+ * `published` to true. The returned link is the REAL public URL served by
+ * `GET /preview/:slug` — not an invented one.
+ */
+export async function publishRemoteProject(id: string): Promise<PublishState> {
+  const data = await api<{ slug: string; publishedAt: string | null }>(
+    `/api/projects/${encodeURIComponent(id)}/publish`,
+    { method: 'POST' },
+  );
+  const slug = String(data.slug ?? '').trim();
+  return {
+    published: true,
+    slug,
+    url: slug ? publishedUrlFor(slug) : null,
+    publishedAt: data.publishedAt ?? null,
+  };
+}
+
+/**
+ * Take a project offline. The slug is RETAINED server-side, so re-publishing
+ * later returns the same link rather than a new one — a share that was already
+ * circulated does not silently break and then reappear under a different URL.
+ */
+export async function unpublishRemoteProject(id: string): Promise<PublishState> {
+  await api<{ published: boolean }>(`/api/projects/${encodeURIComponent(id)}/unpublish`, {
+    method: 'POST',
+  });
+  return { published: false, slug: null, url: null, publishedAt: null };
+}
+
 /**
  * Produce the export through the SERVER so the watermark cannot be bypassed
  * from the browser. Whatever tier the UI believes it has is irrelevant here.
