@@ -54,23 +54,23 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     badgeAr: 'للمبتدئين',
     badgeEn: 'Starter',
     featuresAr: [
-      'توليد حتى 5 تطبيقات يومياً عبر الذكاء الاصطناعي',
-      'المعاينة الفورية على مختلف أحجام الشاشات',
-      'محرر كود متكامل مع التعديل اليدوي',
-      'وضع المعاينة البصرية التجريبي',
-      'تخزين محلي للمشاريع والإصدارات',
+      '٣ أوامر أو تعديلات بالذكاء الاصطناعي يومياً فقط',
+      'معاينة فورية للمشروع داخل الاستوديو',
+      'بدون تصدير كود (ZIP) — ميزة مدفوعة',
+      'بدون نشر على نطاق — ميزة مدفوعة',
+      'بدون ربط قواعد بيانات خارجية',
       'دعم عبر المجتمع وقاعدة المعرفة'
     ],
     featuresEn: [
-      'Generate up to 5 AI apps per day',
-      'Instant live preview on Desktop, Tablet & Mobile',
-      'Built-in Code Editor with live synchronization',
-      'Basic visual inspector tool',
-      'Local revision history and snapshot restore',
+      'Only 3 AI commands or modifications per day',
+      'Instant in-studio preview of your project',
+      'No code export (ZIP) — a paid feature',
+      'No publishing to a live domain — a paid feature',
+      'No external database connections',
       'Community knowledge base & guides'
     ],
-    limitsAr: '5 طلبات ذكاء اصطناعي يومياً',
-    limitsEn: '5 AI generations / day'
+    limitsAr: '٣ أوامر/تعديلات ذكاء اصطناعي يومياً',
+    limitsEn: '3 AI actions / day'
   },
   {
     id: 'pro',
@@ -87,32 +87,32 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     badgeEn: 'Most Popular 🔥',
     isPopular: true,
     featuresAr: [
-      '١٠٠ توليد بالذكاء الاصطناعي يومياً — أكثر من كافية لمشروع كامل',
+      '١٥٠ أمراً أو تعديلاً بالذكاء الاصطناعي شهرياً — كل أمر = توليد أو تعديل',
       'تصدير كود المشروع بالكامل كملف ZIP نظيف جاهز للنشر (React + Tailwind)',
       'تعديل بصري مباشر على أي عنصر بنقرة زر (Visual Inspector Pro)',
       'ربط قواعد بيانات Supabase و PostgreSQL و APIs خارجية',
       'نشر مباشر على نطاق فرعي من إبنيلي + ٣ مشاريع نشطة',
       'أولوية في الطابور وسرعة استجابة أعلى',
-      'مؤشر usage يوضح كم توليداً متبقياً لك كل يوم'
+      'مؤشر usage يوضح كم أوامر متبقية لك هذا الشهر'
     ],
     featuresEn: [
-      '100 AI generations per day — more than a full project needs',
+      '150 AI commands or modifications per month — each action = one generation or edit',
       'Full source code ZIP export ready for production (React & Tailwind)',
       'Advanced Visual Inspector: click & modify any element directly',
       'Connect Supabase, PostgreSQL schemas & external APIs',
       'Publish to a live Ebnili subdomain + 3 active projects',
       'Priority processing queue',
-      'Live usage meter showing your remaining daily generations'
+      'Live usage meter showing your remaining actions this month'
     ],
-    limitsAr: '١٠٠ توليد/يوم · ٣ مشاريع',
-    limitsEn: '100 generations/day · 3 projects'
+    limitsAr: '١٥٠ أمر/شهر · ٣ مشاريع',
+    limitsEn: '150 actions/month · 3 projects'
   },
   {
     id: 'business',
     nameAr: 'باقة الأعمال والشركات',
     nameEn: 'Business & Agency',
-    taglineAr: 'للوكالات والفرق: مشاريع غير محدودة + نطاق مخصص + ٤٠٠ توليد يومياً',
-    taglineEn: 'For agencies: unlimited projects, your own domain, 400 generations a day',
+    taglineAr: 'للوكالات والفرق: مشاريع غير محدودة + نطاق مخصص + ٤٠٠ أمر شهرياً',
+    taglineEn: 'For agencies: unlimited projects, your own domain, 400 actions a month',
     priceMonthly: BUSINESS_USD,
     priceYearly: BUSINESS_USD_YEARLY,
     currency: 'USD',
@@ -121,7 +121,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     badgeAr: 'للوكالات والفرق',
     badgeEn: 'Agencies',
     featuresAr: [
-      '٤٠٠ توليد بالذكاء الاصطناعي يومياً — استوديو وكالة كامل',
+      '٤٠٠ أمر أو تعديل بالذكاء الاصطناعي شهرياً — استوديو وكالة كامل',
       'مشاريع غير محدودة (Pro: ٣ فقط) — عميل جديد = مشروع جديد بلا تكلفة',
       'نشر على نطاق مخصص باسم علامتك (Live URL خاص بك)',
       'تصدير White-label بدون أي شعار أو نسبة لإبنيلي',
@@ -130,7 +130,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       'فواتير ضريبية للشركات (VAT) عند الطلب'
     ],
     featuresEn: [
-      '400 AI generations per day — a full agency studio',
+      '400 AI commands or modifications per month — a full agency studio',
       'Unlimited projects (Pro: only 3) — a new client costs you nothing extra',
       'Deploy to your OWN custom domain (not a subdomain)',
       'White-label export: no watermark, no attribution to Ebnili',
@@ -138,8 +138,8 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       'Highest priority queue + VIP support over WhatsApp',
       'Tax invoices (VAT) for registered businesses'
     ],
-    limitsAr: '٤٠٠ توليد/يوم · مشاريع + نطاق مخصص + API',
-    limitsEn: '400 generations/day · unlimited projects + custom domain + API'
+    limitsAr: '٤٠٠ أمر/شهر · مشاريع + نطاق مخصص + API',
+    limitsEn: '400 actions/month · unlimited projects + custom domain + API'
   }
 ];
 

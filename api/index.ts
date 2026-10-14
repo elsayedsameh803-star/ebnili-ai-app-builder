@@ -38,6 +38,7 @@ import {
   TIER_DAILY_QUOTA as SECURITY_TIER_DAILY_QUOTA,
   AI_ABSOLUTE_DAILY_CEILING,
   quotaForTier,
+  quotaWindowFor,
 } from "./security.js";
 
 const app = express();
@@ -187,7 +188,7 @@ const DEFAULT_SUBSCRIPTION = {
   status: "active",
   planName: "Starter Free",
   generationsUsedToday: 0,
-  generationsLimitToday: 2,
+  generationsLimitToday: SECURITY_TIER_DAILY_QUOTA.free,
   canExportZip: false,
   canDeployCustomDomain: false,
   canUseVisualInspector: true,
@@ -1668,7 +1669,7 @@ function dailyQuotaFor(tier: Tier | undefined): number {
  */
 async function consumeAiAllowance(
   req: Request,
-): Promise<{ allowed: boolean; used: number; limit: number; reason?: string }> {
+): Promise<{ allowed: boolean; used: number; limit: number; window?: string; reason?: string }> {
   const session = readAuthSession(req as AuthReq);
   // No session cannot happen (requireAiSession guards the route), but if it
   // ever does the free allowance is the safe answer.
@@ -1687,6 +1688,9 @@ async function consumeAiAllowance(
   const account = await findAccountByEmail(session.email);
   const tier: Tier = account ? tierOf(account.tier) : tierOf((req as Request & { accountTier?: Tier }).accountTier);
   const limit = dailyQuotaFor(tier);
+  // FREE resets daily; PRO/BUSINESS reset monthly (see api/security.ts). The
+  // window travels with the request so the database spends the right counter.
+  const window = quotaWindowFor(tier);
 
   // THE SINGLE SPEND PATH. `ebnily_consume_ai_credit` takes a row lock, so the
   // check and the increment cannot interleave with another request. Every AI
@@ -1694,7 +1698,7 @@ async function consumeAiAllowance(
   // place that writes `ai_used`, which is what makes the guarantee hold.
   const rpc = await dbRequest<RpcConsumeResult[]>(RPC_CONSUME_AI, {
     method: "POST",
-    body: JSON.stringify({ p_account_id: session.id, p_limit: limit }),
+    body: JSON.stringify({ p_account_id: session.id, p_limit: limit, p_window: window }),
   });
 
   if (!rpc.ok) {
@@ -1711,7 +1715,7 @@ async function consumeAiAllowance(
 
   const used = toNumber(row.used);
   const ceiling = toNumber(row.limit_value, limit);
-  return { allowed: row.allowed === true, used, limit: ceiling, reason: row.allowed === true ? undefined : "daily" };
+  return { allowed: row.allowed === true, used, limit: ceiling, window, reason: row.allowed === true ? undefined : "daily" };
 }
 
 /** The JSON a `rpc/<fn>` call returns: a single-element array of the row. */
@@ -1771,12 +1775,20 @@ async function findAccountByEmail(email: string): Promise<DbAccount | null> {
  */
 function aiQuotaRefusal(
   res: Response,
-  quota: { used: number; limit: number; reason?: string },
+  quota: { used: number; limit: number; reason?: string; window?: string },
 ): Response {
   res.setHeader("X-RateLimit-Limit", String(quota.limit));
   res.setHeader("X-RateLimit-Remaining", "0");
-  const ar = `وصلت للحد الأقصى لتوليدات اليوم في باقتك (${quota.used}/${quota.limit}). يتجدّد الحد غداً تلقائياً، أو رقِّ باقتك عبر أورانج كاش لمضاعفته.`;
-  const en = `You have used today's full allowance (${quota.used}/${quota.limit}). It resets tomorrow automatically, or upgrade via Orange Cash to raise it.`;
+  // The wording must match the window: a paid plan resets NEXT MONTH, not
+  // "tomorrow" — telling a Pro user it resets tomorrow, when it does not, is a
+  // broken promise that reads as a bug. FREE is the only plan that resets daily.
+  const monthly = quota.window === "monthly";
+  const ar = monthly
+    ? `وصلت للحد الأقصى لتوليدات هذا الشهر في باقتك (${quota.used}/${quota.limit}). يتجدّد الحد تلقائياً في أول الشهر القادم، أو رقِّ باقتك عبر أورانج كاش لمضاعفته.`
+    : `وصلت للحد الأقصى لتوليدات اليوم في باقتك (${quota.used}/${quota.limit}). يتجدّد الحد غداً تلقائياً، أو رقِّ باقتك عبر أورانج كاش لمضاعفته.`;
+  const en = monthly
+    ? `You have used this month's full allowance (${quota.used}/${quota.limit}). It resets automatically on the first of next month, or upgrade via Orange Cash to raise it.`
+    : `You have used today's full allowance (${quota.used}/${quota.limit}). It resets tomorrow automatically, or upgrade via Orange Cash to raise it.`;
   // The request's own language hint decides the wording. `Accept-Language` is the
   // browser's real signal; the header is only a fallback for fetch calls that do
   // not send one.
@@ -1789,8 +1801,18 @@ function aiQuotaRefusal(
     used: quota.used,
     limit: quota.limit,
     remaining: 0,
-    resetsAt: nextUtcMidnightIso(),
+    resetsAt: monthly ? nextUtcMonthIso() : nextUtcMidnightIso(),
+    window: monthly ? "monthly" : "daily",
   });
+}
+
+/** When the current UTC month ends — the reset boundary for a paid (monthly) plan. */
+function nextUtcMonthIso(): string {
+  const next = new Date();
+  // First day of next month, 00:00:00 UTC.
+  next.setUTCMonth(next.getUTCMonth() + 1, 1);
+  next.setUTCHours(0, 0, 0, 0);
+  return next.toISOString();
 }
 
 /** When the current UTC day ends — the allowance boundary, for the client. */
@@ -1807,25 +1829,26 @@ function nextUtcMidnightIso(): string {
  * It must never increment: a polling UI would otherwise burn the whole allowance
  * by watching it.
  */
-async function readAiAllowance(req: Request): Promise<{ used: number; limit: number; tier: Tier }> {
+async function readAiAllowance(req: Request): Promise<{ used: number; limit: number; tier: Tier; window: string }> {
   const session = readAuthSession(req as AuthReq);
   const tagged = req as Request & { accountTier?: Tier };
   if (!session || !supabaseConfig().dbConfigured) {
     const tier: Tier = session ? tierOf(tagged.accountTier) : "free";
-    return { used: 0, limit: dailyQuotaFor(tier), tier };
+    return { used: 0, limit: dailyQuotaFor(tier), tier, window: quotaWindowFor(tier) };
   }
   const account = await findAccountByEmail(session.email);
   const tier: Tier = account ? tierOf(account.tier) : tierOf(tagged.accountTier);
   const limit = dailyQuotaFor(tier);
   // Read-only, and spent by nobody: the same function the spend path uses, but
   // its read-only sibling, so the number the meter shows is the number the
-  // database holds — not a recomputation that could drift from it.
+  // database holds — not a recomputation that could drift from it. The window
+  // must match the spend path, or the meter would read a different counter.
   const rpc = await dbRequest<RpcConsumeResult[]>(RPC_READ_AI, {
     method: "POST",
-    body: JSON.stringify({ p_account_id: session.id }),
+    body: JSON.stringify({ p_account_id: session.id, p_window: quotaWindowFor(tier) }),
   });
   const used = rpc.ok && Array.isArray(rpc.data) && rpc.data[0] ? toNumber(rpc.data[0].used) : 0;
-  return { used, limit, tier };
+  return { used, limit, tier, window: quotaWindowFor(tier) };
 }
 
 /**
@@ -1872,7 +1895,8 @@ async function requireAiAllowance(req: Request, res: Response, next: NextFunctio
  * that polls must not consume the thing it is measuring.
  */
 app.get("/api/ai/quota", requireAiSession, async (req: Request, res: Response) => {
-  const { used, limit, tier } = await readAiAllowance(req);
+  const { used, limit, tier, window } = await readAiAllowance(req);
+  const monthly = window === "monthly";
   res.setHeader("X-RateLimit-Limit", String(limit));
   res.setHeader("X-RateLimit-Remaining", String(Math.max(0, limit - used)));
   res.json({
@@ -1881,7 +1905,10 @@ app.get("/api/ai/quota", requireAiSession, async (req: Request, res: Response) =
     used,
     limit,
     remaining: Math.max(0, limit - used),
-    resetsAt: nextUtcMidnightIso(),
+    // The reset boundary matches the plan's window: a paid plan refills at the
+    // start of next month, a free one at the next UTC midnight.
+    window,
+    resetsAt: monthly ? nextUtcMonthIso() : nextUtcMidnightIso(),
   });
 });
 

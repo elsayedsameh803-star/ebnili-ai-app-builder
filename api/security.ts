@@ -50,14 +50,59 @@ import type { Request, Response, NextFunction } from "express";
 /** The central ceiling. No account may exceed it, whatever a plan or a caller asks for. */
 export const AI_ABSOLUTE_DAILY_CEILING = 400;
 
-/** Per-plan daily allowance. The numbers the pricing page promises. */
+/**
+ * PER-PLAN ALLOWANCE + ITS RESET WINDOW.
+ *
+ * Two numbers per tier, because "3 credits" and "150 credits" are not the same
+ * kind of thing:
+ *   • `quota`  — how many AI actions (a command OR a modification) the plan buys.
+ *   • `window` — how long that budget lasts before it is topped back up:
+ *       - "daily"  resets every UTC day      → the FREE plan (3/day).
+ *       - "monthly" resets every calendar month → the PAID plans (150/mo, 400/mo).
+ *
+ * WHY THE PAID PLANS ARE MONTHLY AND NOT DAILY
+ * --------------------------------------------
+ * A Pro user paying for 150 credits was being able to burn all 150 in a single
+ * day and have every one of them back at midnight. That sells a month of work
+ * for one evening. Measuring the SAME number over a month is what "a plan"
+ * means commercially: 150 spreads across the month, 400 for an agency across
+ * the month. The reset key in the database therefore becomes the month for a
+ * paid tier and the day for a free one (see `quotaWindowFor` below).
+ *
+ * The numbers are deliberately identical to what the pricing page promises
+ * (`src/data/plans.ts`), so a change here without the page is caught by review.
+ */
 export const TIER_DAILY_QUOTA = {
-  // FREE is a preview-only trial: a very small daily spend, so a free account
-  // cannot meaningfully burn the paid Gemini key. Raised only by upgrading.
-  free: 2,
-  pro: 100,
+  // FREE is a preview-only trial: 3 AI actions a day, each action being one
+  // command OR one modification. Deliberately stingy so a free account cannot
+  // meaningfully burn the paid Gemini key, and so upgrading is the obvious move.
+  free: 3,
+  // Pro: 150 AI actions per month (a command OR a modification each).
+  pro: 150,
+  // Business: 400 AI actions per month — a full agency studio.
   business: 400,
 } as const;
+
+/** The reset window a plan's budget is measured over. */
+export type QuotaWindow = "daily" | "monthly";
+
+/** The reset window for each tier — monthly for paid, daily for the free trial. */
+export const TIER_QUOTA_WINDOW: Record<keyof typeof TIER_DAILY_QUOTA, QuotaWindow> = {
+  free: "daily",
+  pro: "monthly",
+  business: "monthly",
+} as const;
+
+/**
+ * The reset window that applies to a tier, clamped to the safe default.
+ *
+ * A tampered or unknown tier resolves to "daily" AND to the free quota, so an
+ * unreadable plan can never silently grant a paid monthly allowance.
+ */
+export function quotaWindowFor(tier: unknown): QuotaWindow {
+  const base = tier === "free" || tier === "pro" || tier === "business" ? tier : "free";
+  return TIER_QUOTA_WINDOW[base];
+}
 
 /** The ceiling for a tier, always clamped by the absolute maximum.
  *

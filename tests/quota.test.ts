@@ -4,8 +4,10 @@ import {
   spendAiCredit,
   newAccountDay,
   quotaForTier,
+  quotaWindowFor,
   utcDay,
   TIER_DAILY_QUOTA,
+  TIER_QUOTA_WINDOW,
   AI_ABSOLUTE_DAILY_CEILING,
 } from "../api/security.ts";
 
@@ -52,6 +54,34 @@ describe("plan limits", () => {
         limit <= AI_ABSOLUTE_DAILY_CEILING,
         `${tier} (${limit}) is above the ceiling (${AI_ABSOLUTE_DAILY_CEILING})`,
       );
+    }
+  });
+});
+
+describe("plan reset windows — daily vs monthly", () => {
+  test("the free plan resets daily, paid plans reset monthly", () => {
+    // The commercial point of the whole scheme: a Free account gets 3 back every
+    // day; a Pro/Business account is charged the SAME number across a whole
+    // month, so they cannot burn 150 in one evening and have it all back at
+    // midnight. Getting this backwards either strands a paying customer on a
+    // tiny daily budget or hands a trial user a month of paid work.
+    assert.equal(TIER_QUOTA_WINDOW.free, "daily");
+    assert.equal(TIER_QUOTA_WINDOW.pro, "monthly");
+    assert.equal(TIER_QUOTA_WINDOW.business, "monthly");
+  });
+
+  test("quotaWindowFor maps a tier to its window", () => {
+    assert.equal(quotaWindowFor("free"), "daily");
+    assert.equal(quotaWindowFor("pro"), "monthly");
+    assert.equal(quotaWindowFor("business"), "monthly");
+  });
+
+  test("an unknown or tampered tier resolves to the daily free window", () => {
+    // A hand-edited tier, or one that does not exist, must never inherit a paid
+    // monthly allowance — the safe default is daily AND the free quota.
+    for (const bogus of [undefined, null, "", "enterprise", "PRO", 42, {}, "admin"]) {
+      assert.equal(quotaWindowFor(bogus), "daily");
+      assert.equal(quotaForTier(bogus), TIER_DAILY_QUOTA.free);
     }
   });
 });
