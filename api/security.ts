@@ -282,15 +282,45 @@ export function resolveAllowedOrigins(req?: Request): string[] {
   return [];
 }
 
+/** The host this request actually arrived on, honouring a proxy's override. */
+function forwardedHost(req?: Request): string | undefined {
+  const fwd = req?.headers["x-forwarded-host"];
+  const raw = typeof fwd === "string" ? fwd.split(",")[0] : Array.isArray(fwd) ? fwd[0] : undefined;
+  return raw?.trim() || undefined;
+}
+
+/** scheme + host of a URL, so a Referer with a path still matches its origin. */
+function sourceOrigin(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "";
+  }
+}
+
 /**
  * CORS middleware built from an allowlist.
  *
  * A non-allowlisted `Origin` gets NO `Access-Control-Allow-Origin` header, which
  * is what makes the browser refuse the read. That is the intended behaviour, not
- * an oversight.
+ * an oversight — for a genuine FOREIGN origin.
+ *
+ * The host THIS request arrived on is always echoed back, in addition to the
+ * explicit allowlist. A browser can only ever send an `Origin`/`Referer` that
+ * matches the page it loaded, so a same-host request is genuinely same-origin —
+ * never a cross-site read. Including it is what lets preview deployments, custom
+ * domains and a changed `APP_URL` keep working with zero configuration instead
+ * of silently failing every credentialed request (the reported "cross-origin
+ * request blocked on sign-in" symptom).
  */
-export function corsGuard(allowed: string[]) {
+export function corsGuard(allowed: string[], req?: Request) {
   const set = new Set(allowed);
+  const host = forwardedHost(req) || req?.headers.host;
+  if (typeof host === "string" && host) {
+    set.add(`https://${host}`);
+    set.add(`http://${host}`);
+  }
   return (req: Request, res: Response, next: NextFunction): void => {
     const origin = req.headers.origin;
 
@@ -342,15 +372,31 @@ export function sameOriginGuard(req: Request, res: Response, next: NextFunction)
   const referer = req.headers.referer;
   const allowedSet = new Set(resolveAllowedOrigins(req));
 
+  // Always trust the host this request arrived on. A browser can only send an
+  // Origin/Referer that matches the page it loaded, so a same-host POST is
+  // genuinely same-origin, not a cross-site forgery. Without this, a preview
+  // deployment or a changed APP_URL (neither of which the visitor controls)
+  // would fail every sign-in with CROSS_ORIGIN_BLOCKED.
+  const host = forwardedHost(req) || req.headers.host;
+  if (typeof host === "string" && host) {
+    allowedSet.add(`https://${host}`);
+    allowedSet.add(`http://${host}`);
+  }
+
   // A browser POST always carries an `Origin`. No header at all => not a browser
   // form/fetch post => CSRF is not applicable.
-  const source = typeof origin === "string" && origin ? origin : typeof referer === "string" ? referer : "";
+  // A Referer is a full URL (…/path), so it is reduced to its scheme+host before
+  // comparison — otherwise it would never match an origin in the allowlist.
+  const source =
+    typeof origin === "string" && origin
+      ? origin.replace(/\/+$/, "")
+      : sourceOrigin(referer);
   if (!source) {
     next();
     return;
   }
 
-  if (allowedSet.has(source.replace(/\/+$/, ""))) {
+  if (allowedSet.has(source)) {
     next();
     return;
   }

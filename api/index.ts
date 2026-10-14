@@ -125,7 +125,7 @@ app.use("/api", sameOriginGuard);
 // SECURITY: this was `Access-Control-Allow-Origin: *`, which let any website read
 // this API's responses from a visitor's browser. A non-allowlisted origin now
 // receives NO CORS header at all, so the browser refuses the read.
-app.use((req, res, next) => corsGuard(resolveAllowedOrigins(req))(req, res, next));
+app.use((req, res, next) => corsGuard(resolveAllowedOrigins(req), req)(req, res, next));
 
 // ── Health & status ─────────────────────────────────────────────────────────
 // NOTE: getApiKey is defined in the Gemini section below (function hoisting
@@ -223,6 +223,40 @@ function isOwnerAccount(session: AuthUser | null): boolean {
   // Same normaliser the staff list uses, so an e-mail with stray whitespace or
   // mixed case can never be "the owner" for one check and "not staff" for another.
   return normalizeEmail(session.email) === OWNER_EMAIL;
+}
+
+/**
+ * Full-privilege administrators declared in the environment (ADMIN_EMAILS).
+ *
+ * These are OWNER-EQUIVALENT. Unlike a database-backed delegate — who can open
+ * the console but never manage the admin list — an address here can do
+ * everything the owner can: open the console AND manage it (settings,
+ * integrations, database console, and the admin list itself).
+ *
+ * WHY THIS EXISTS: the delegate list lives in Supabase. With the database not
+ * configured, `readStoredAdmins()` can only ever return [], so no delegate can
+ * be recognised and "add admin" silently fails with 503. Declaring the co-admin
+ * here grants full access with no database at all.
+ *
+ * Comma-separated, case-insensitive, same shape as STAFF_EMAILS. Ownership
+ * still comes from OWNER_EMAIL alone — `isOwnerAccount()` is unchanged.
+ */
+const ADMIN_EMAILS = new Set(
+  (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((entry) => normalizeEmail(entry))
+    .filter(Boolean),
+);
+
+/**
+ * Owner OR an environment-declared full admin. This is what `requireAdmin`,
+ * `requireOwner` and the admin PIN gate accept, so a full admin is
+ * interchangeable with the owner everywhere it matters.
+ */
+function isFullAdmin(session: AuthUser | null): boolean {
+  if (!session) return false;
+  if (isOwnerAccount(session)) return true;
+  return ADMIN_EMAILS.has(normalizeEmail(session.email));
 }
 
 // ── Staff accounts: automatic Business tier ───────────────────────────────────
@@ -2148,7 +2182,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
       message: "أدخل رمز دخول لوحة الإدارة للمتابعة.",
     });
   }
-  if (isOwnerAccount(session)) return next();
+  if (isFullAdmin(session)) return next();
 
   // A delegate needs an async lookup, so the guard cannot be a plain middleware.
   // The route list is short and this only runs for non-owners, who are rare.
@@ -2161,12 +2195,14 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 }
 
 /**
- * OWNER-ONLY guard: managing the admin list itself.
+ * OWNER-OR-FULL-ADMIN guard: managing the admin list itself.
  *
- * A delegate passes `requireAdmin` and can run the console, but must never reach
- * these routes — otherwise one co-admin could promote a friend, suspend the real
- * owner, or lock themselves back out. `isOwnerAccount()` reads `OWNER_EMAIL`
- * from the environment and nothing else, so no stored row can satisfy it.
+ * A database-backed delegate passes `requireAdmin` and can run the console, but
+ * must never reach these routes — otherwise one co-admin could promote a friend,
+ * suspend the real owner, or lock themselves back out. `isOwnerAccount()` reads
+ * `OWNER_EMAIL` from the environment; `isFullAdmin()` additionally accepts the
+ * addresses declared in `ADMIN_EMAILS`, which is the point of declaring them:
+ * full access, including this list, with no database row involved.
  */
 function requireOwner(req: Request, res: Response, next: NextFunction) {
   const session = readAuthSession(req as AuthReq);
@@ -2184,7 +2220,7 @@ function requireOwner(req: Request, res: Response, next: NextFunction) {
       message: "أدخل رمز دخول لوحة الإدارة للمتابعة.",
     });
   }
-  if (!isOwnerAccount(session)) {
+  if (!isFullAdmin(session)) {
     // A signed-in admin session that is NOT the owner: keep the 404 so the
     // owner-only surface stays invisible from the outside.
     return res.status(404).json({ success: false, message: "Not found" });
@@ -2207,10 +2243,10 @@ app.get("/api/admin/auth", (req: Request, res: Response) => {
 });
 
 app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "محاولات كثيرة جداً. انتظر قليلاً ثم أعد المحاولة."), async (req: Request, res: Response) => {
-  // Admin is the site owner OR an active delegate. The PIN is a second factor,
-  // not the identity: without a signed-in account this endpoint answers 404
-  // exactly like every other admin route, so a stranger cannot even obtain a
-  // session to try elsewhere with.
+  // Admin is the site owner OR an environment-declared full admin OR an active
+  // delegate. The PIN is a second factor, not the identity: without a signed-in
+  // account this endpoint answers 404 exactly like every other admin route, so a
+  // stranger cannot even obtain a session to try elsewhere with.
   const session = readAuthSession(req as AuthReq);
   if (!session) {
     // The ONE exception to the bare 404: a browser that reached this route from
@@ -2222,9 +2258,10 @@ app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "�
       message: "سجّل الدخول أولاً بنفس البريد المضاف كمسؤول، ثم أعد إدخال رمز الدخول.",
     });
   }
-  // Delegates need an async lookup, so the check is inline rather than a guard.
-  const isOwner = isOwnerAccount(session);
-  if (!isOwner) {
+  // `isFullAdmin` covers the owner AND the addresses declared in ADMIN_EMAILS, so
+  // a full admin can unlock the console with NO database row — the whole point of
+  // declaring them in the environment.
+  if (!isFullAdmin(session)) {
     try {
       const delegates = await loadDelegateAdmins();
       if (!isActiveAdmin(delegates, session.email)) {
@@ -4215,14 +4252,24 @@ app.get("/api/auth/me", async (req: AuthReq, res: AuthRes) => {
   // route re-checks server-side (`requireAdmin` / `requireOwner`), so a tampered
   // flag in the browser buys nothing.
   const isOwner = isOwnerAccount(user);
-  const isAdmin = Boolean(user) && (isOwner || isActiveAdmin(await readStoredAdmins(), user?.email));
+  // A full admin (declared via `ADMIN_EMAILS`) must reach the console even with no
+  // database delegate row — that is the entire reason they are declared in the
+  // environment. `isFullAdmin` folds the owner in, so this stays owner ⊇ delegate.
+  const isAdmin =
+    Boolean(user) &&
+    (isFullAdmin(user) || isActiveAdmin(await readStoredAdmins(), user?.email));
+  // `canManageAdmins` is owner-equivalent: the owner OR an environment-declared
+  // full admin. The admin-list UI is gated on this, so a full admin can manage
+  // the list the same way the owner can.
+  const canManageAdmins = isFullAdmin(user);
 
   res.json({
     success: true,
     authenticated: Boolean(user),
-    user: user ? { ...user, isOwner, isAdmin } : null,
+    user: user ? { ...user, isOwner, isAdmin, canManageAdmins } : null,
     isOwner,
     isAdmin,
+    canManageAdmins,
     ...(account
       ? {
           credits: toNumber(account.credits),
@@ -5679,7 +5726,7 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
       body: JSON.stringify({ status: "done", result: { html }, progress: 100, updated_at: new Date().toISOString() }),
     });
     if (!done.ok) return dbUnavailable(res);
-    res.json({ success: true, job: toPublicJob(done.data?.[0]) });
+    res.json({ success: true, job: toPublicJob(done.data?.[0] ?? { ...job, status: "done", result: { html }, progress: 100 }) });
   } catch (e) {
     const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     const failed = await dbRequest<DbJob[]>(JOBS_TABLE, {

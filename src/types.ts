@@ -251,6 +251,15 @@ export interface AuthUser {
    * the admin routes re-check server-side regardless of what a client believes.
    */
   isAdmin?: boolean;
+  /**
+   * Owner-EQUIVALENT privilege: the site owner OR an environment-declared full
+   * admin (`ADMIN_EMAILS`). Whoever this is `true` for may open the console AND
+   * manage the admin list itself, exactly like the owner. Stamped by the server
+   * on `/api/auth/me`; `isOwnerAccount()` in `src/lib/auth.ts` treats it as owner
+   * so every owner-only surface is reachable, while the server enforces the same
+   * rule via `requireOwner`.
+   */
+  canManageAdmins?: boolean;
 }
 
 export interface AuthProviderInfo {
