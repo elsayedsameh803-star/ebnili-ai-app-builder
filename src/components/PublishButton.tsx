@@ -71,15 +71,22 @@ export const PublishButton = ({ projectId, language, className = '' }: PublishBu
       setState(s);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
-      setError(
-        msg === 'AUTH_REQUIRED'
-          ? ar
-            ? 'انتهت الجلسة — سجّل الدخول ثم أعد النشر.'
-            : 'Signed out — sign in again to publish.'
-          : ar
-            ? 'تعذّر النشر. تأكد من الاتصال ثم أعد المحاولة.'
-            : 'Could not publish. Check your connection and retry.',
-      );
+      // Classify the error for a clear, user-facing message.
+      let detail = '';
+      if (msg === 'AUTH_REQUIRED') {
+        detail = ar ? 'انتهت الجلسة — سجّل الدخول ثم أعد النشر.' : 'Signed out — sign in again to publish.';
+      } else if (msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('too many')) {
+        detail = ar ? 'تجاوزت الحد المسموح، يرجى الانتظار ثم أعد المحاولة.' : 'Too many attempts. Wait a moment, then retry.';
+      } else if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('404')) {
+        detail = ar ? 'المشروع غير موجود، يرجى اختيار مشروع آخر.' : 'Project not found. Please select a different project.';
+      } else if (msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('forbidden')) {
+        detail = ar ? 'بيانات الاعتماد غير صالحة، تحقق من الإعدادات ثم أعد المحاولة.' : 'Invalid credentials. Check your setup and retry.';
+      } else if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('timeout') || msg.toLowerCase().includes('connection')) {
+        detail = ar ? 'لا يمكن الوصول للخادم، تحقق من اتصالك بالإنترنت ثم أعد المحاولة.' : 'Cannot reach the server. Check your internet connection and retry.';
+      } else {
+        detail = ar ? `تعذّر النشر: ${msg}` : `Publish failed: ${msg}`;
+      }
+      setError(detail);
     } finally {
       setBusy(null);
     }
