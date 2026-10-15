@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Share2, X, Check, Copy, QrCode, Globe, Info, Terminal, Rocket, Loader2 } from 'lucide-react';
+import { Share2, X, Check, Copy, QrCode, Globe, Info, Terminal, Rocket, Loader2, AlertCircle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Language } from '../types';
 import { useModalAccessibility } from './useModalAccessibility';
 import { CommandTerminal } from './CommandTerminal';
 import type { PublishState } from '../lib/projects';
-import { fetchPublishState, publishRemoteProject, unpublishRemoteProject } from '../lib/projects';
+import { DbUnavailableError, fetchPublishState, publishRemoteProject, unpublishRemoteProject } from '../lib/projects';
 
 interface DeployModalProps {
   projectName: string;
@@ -38,6 +38,7 @@ export const DeployModal = ({
   const [tab, setTab] = useState<'share' | 'deploy'>('share');
   const [state, setState] = useState<PublishState | null>(null);
   const [busy, setBusy] = useState<'reading' | 'publishing' | 'unpublishing' | null>('reading');
+  const [error, setError] = useState<string | null>(null);
   const handleClose = useCallback(() => onClose(), [onClose]);
   const dialogRef = useModalAccessibility(true, handleClose);
 
@@ -60,29 +61,60 @@ export const DeployModal = ({
     };
   }, [projectId]);
 
+  const classifyPublishError = useCallback(
+    (e: unknown): string => {
+      const msg = e instanceof Error ? e.message : '';
+      if (e instanceof DbUnavailableError) {
+        return ar ? 'قاعدة البيانات غير متوفرة لحظياً — حاول مرة أخرى في لحظة.' : 'Database unavailable for a moment — please try again shortly.';
+      }
+      if (msg === 'AUTH_REQUIRED') {
+        return ar ? 'انتهت الجلسة — سجّل الدخول ثم أعد النشر.' : 'Signed out — sign in again to publish.';
+      }
+      if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('404')) {
+        return ar ? 'المشروع غير موجود، يرجى اختيار مشروع آخر.' : 'Project not found. Please select a different project.';
+      }
+      if (msg.toLowerCase().includes('nothing to publish') || msg.includes('لا يوجد محتوى')) {
+        return ar ? 'لا يوجد محتوى للنشر في هذا المشروع بعد.' : 'Nothing to publish yet in this project.';
+      }
+      if (msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('too many')) {
+        return ar ? 'تجاوزت الحد المسموح، يرجى الانتظار ثم أعد المحاولة.' : 'Too many attempts. Wait a moment, then retry.';
+      }
+      if (msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('forbidden')) {
+        return ar ? 'بيانات الاعتماد غير صالحة، تحقق من الإعدادات ثم أعد المحاولة.' : 'Invalid credentials. Check your setup and retry.';
+      }
+      if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('timeout') || msg.toLowerCase().includes('connection')) {
+        return ar ? 'لا يمكن الوصول للخادم، تحقق من اتصالك بالإنترنت ثم أعد المحاولة.' : 'Cannot reach the server. Check your internet connection and retry.';
+      }
+      return ar ? `تعذّر النشر: ${msg}` : `Publish failed: ${msg}`;
+    },
+    [ar],
+  );
+
   const handlePublish = useCallback(async () => {
     if (!projectId) return;
     setBusy('publishing');
+    setError(null);
     try {
       setState(await publishRemoteProject(projectId));
-    } catch {
-      /* the inline note below already tells the truth on failure */
+    } catch (e) {
+      setError(classifyPublishError(e));
     } finally {
       setBusy(null);
     }
-  }, [projectId]);
+  }, [projectId, classifyPublishError]);
 
   const handleUnpublish = useCallback(async () => {
     if (!projectId) return;
     setBusy('unpublishing');
+    setError(null);
     try {
       setState(await unpublishRemoteProject(projectId));
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setError(classifyPublishError(e));
     } finally {
       setBusy(null);
     }
-  }, [projectId]);
+  }, [projectId, classifyPublishError]);
 
   const isLive = state?.published === true && !!state.url;
   const publicUrl = state?.url ?? '';
@@ -208,6 +240,17 @@ export const DeployModal = ({
             </button>
           )}
         </div>
+
+         {/* Publish error — a clear, user-friendly message, never swallowed. */}
+        {error && (
+          <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2.5 text-[11px] text-rose-200 leading-relaxed">
+            <span className="flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-400" aria-hidden="true" />
+              <span>{error}</span>
+            </span>
+          </div>
+        )}
+
 
         {/* Preview link box — the REAL public URL (empty until published). */}
         <div className="space-y-1.5">

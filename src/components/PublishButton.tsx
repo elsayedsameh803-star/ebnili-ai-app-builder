@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Rocket, Check, Copy, ExternalLink, Loader2, AlertCircle, Globe } from 'lucide-react';
 import type { Language } from '../types';
 import type { PublishState } from '../lib/projects';
-import { fetchPublishState, publishRemoteProject } from '../lib/projects';
+import { DbUnavailableError, fetchPublishState, publishRemoteProject } from '../lib/projects';
 
 interface PublishButtonProps {
   /** The project to publish. `null` (starter screen) renders nothing. */
@@ -73,12 +73,16 @@ export const PublishButton = ({ projectId, language, className = '' }: PublishBu
       const msg = e instanceof Error ? e.message : '';
       // Classify the error for a clear, user-facing message.
       let detail = '';
-      if (msg === 'AUTH_REQUIRED') {
+      if (e instanceof DbUnavailableError) {
+        detail = ar ? 'قاعدة البيانات غير متوفرة لحظياً — حاول مرة أخرى في لحظة.' : 'Database unavailable for a moment — please try again shortly.';
+      } else if (msg === 'AUTH_REQUIRED') {
         detail = ar ? 'انتهت الجلسة — سجّل الدخول ثم أعد النشر.' : 'Signed out — sign in again to publish.';
-      } else if (msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('too many')) {
-        detail = ar ? 'تجاوزت الحد المسموح، يرجى الانتظار ثم أعد المحاولة.' : 'Too many attempts. Wait a moment, then retry.';
       } else if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('404')) {
         detail = ar ? 'المشروع غير موجود، يرجى اختيار مشروع آخر.' : 'Project not found. Please select a different project.';
+      } else if (msg.toLowerCase().includes('nothing to publish') || msg.includes('لا يوجد محتوى')) {
+        detail = ar ? 'لا يوجد محتوى للنشر في هذا المشروع بعد.' : 'Nothing to publish yet in this project.';
+      } else if (msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('too many')) {
+        detail = ar ? 'تجاوزت الحد المسموح، يرجى الانتظار ثم أعد المحاولة.' : 'Too many attempts. Wait a moment, then retry.';
       } else if (msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('forbidden')) {
         detail = ar ? 'بيانات الاعتماد غير صالحة، تحقق من الإعدادات ثم أعد المحاولة.' : 'Invalid credentials. Check your setup and retry.';
       } else if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('timeout') || msg.toLowerCase().includes('connection')) {
@@ -165,7 +169,7 @@ export const PublishButton = ({ projectId, language, className = '' }: PublishBu
       {error && (
         <span className="flex items-center gap-1 text-[10px] text-rose-300" role="alert">
           <AlertCircle className="w-3 h-3 shrink-0" aria-hidden="true" />
-          <span className="hidden sm:inline">{error}</span>
+          <span>{error}</span>
         </span>
       )}
     </div>
