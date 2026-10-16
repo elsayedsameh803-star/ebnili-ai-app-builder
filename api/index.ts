@@ -4849,10 +4849,15 @@ const CANDIDATE_MODELS = [
 // allowed to run (see `maxDuration` in vercel.json), leaving room for a real
 // answer plus a second attempt, and the text-only studio endpoints keep a
 // shorter slice because they never return a document.
-const GENERATE_BUDGET_MS = 240_000;
-const GENERATE_ATTEMPT_TIMEOUT_MS = 75_000;
-const REFINE_BUDGET_MS = 180_000;
-const REFINE_ATTEMPT_TIMEOUT_MS = 70_000;
+const GENERATE_BUDGET_MS = 180_000; // 3 min, headroom under the Vercel function cap
+// Per-model attempt ceiling: when the provider is busy, 429/503 come back fast,
+// so a tight per-model budget means the route fails EARLY and offers retry
+// instead of holding the browser hostage for minutes. Keep ≥15s so a healthy
+// model still gets real time to produce a 40-110s document.
+const GENERATE_ATTEMPT_TIMEOUT_MS = 45_000;
+// Refine (edit existing code) handles smaller payloads; keep it tighter.
+const REFINE_BUDGET_MS = 120_000;
+const REFINE_ATTEMPT_TIMEOUT_MS = 45_000;
 const STUDIO_BUDGET_MS = 120_000;
 const STUDIO_ATTEMPT_TIMEOUT_MS = 45_000;
 

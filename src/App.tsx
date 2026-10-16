@@ -993,16 +993,35 @@ export default function App() {
     templateId: string | undefined,
     devFp: { deviceId: string; fingerprintHash: string },
   ): Promise<{ ok: boolean; failure?: string }> => {
-    const res = await fetch('/api/ai/generate-app/stream', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-device-id': devFp.deviceId,
-        'x-fingerprint-hash': devFp.fingerprintHash,
-      },
-      body: JSON.stringify({ prompt, templateId, language }),
-    });
-    if (!res.ok || !res.body) {
+    const streamController = new AbortController();
+    // HARD CUTOFF: if the server is busy or the function is killed (Vercel/load
+    // balancer), a fetch can hang for minutes and freeze the UI. 200s is long
+    // enough for a real generation, short enough that the browser always gives
+    // up and surfaces the retry bar instead of an eternal spinner.
+    const streamTimeout = setTimeout(() => streamController.abort(), 200_000);
+    let streamRes: Response;
+    try {
+      streamRes = await fetch('/api/ai/generate-app/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-id': devFp.deviceId,
+          'x-fingerprint-hash': devFp.fingerprintHash,
+        },
+        body: JSON.stringify({ prompt, templateId, language }),
+        signal: streamController.signal,
+      });
+      clearTimeout(streamTimeout);
+    } catch (streamErr) {
+      clearTimeout(streamTimeout);
+      // Aborts are normal failures — surface a clear Arabic message so the user
+      // knows exactly what to do instead of staring at a frozen screen.
+      if ((streamErr as Error)?.name === 'AbortError') {
+        throw new Error('الاتصال بالخادم انقطع — تأكد من الإنترنت وحاول مرة أخرى.');
+      }
+      throw streamErr;
+    }
+    if (!streamRes.ok || !streamRes.body) {
       // Surface the SERVER's reason (e.g. "GEMINI_API_KEY غير مُعد", quota,
       // rate-limit) instead of silently swallowing it into a generic fallback.
       const errBody = (await res.json().catch(() => ({}))) as { message?: string };
@@ -1125,15 +1144,20 @@ export default function App() {
         return;
       }
 
+      const ctrl = new AbortController();
+      const fetchTimeout = setTimeout(() => ctrl.abort(), 240_000); // generous: real sites take 40-110s
       const res = await fetch('/api/ai/generate-app', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-device-id': devFp.deviceId,
           'x-fingerprint-hash': devFp.fingerprintHash,
         },
         body: JSON.stringify({ prompt, templateId, language, deviceId: devFp.deviceId, fingerprintHash: devFp.fingerprintHash }),
+        signal: ctrl.signal,
       });
+      clearTimeout(fetchTimeout);
+
       // Defensive JSON parse: the server always returns JSON, but a CDN/proxy
       // 404 page would be HTML — never crash, show the real server message.
       const data = await res.json().catch(() => ({ success: false as const, message: '' as string }));

@@ -174,36 +174,53 @@ export const GeminiStudioModal = ({
     ]);
 
     try {
-      const res = await fetch('/api/ai/generate-app', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          templateId: selectedCategory,
-          language,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setGeneratorError(
-          (data as { message?: string }).message ||
-            (language === 'ar' ? 'فشل توليد التطبيق، حاول مرة أخرى.' : 'Generation failed. Please try again.'),
-        );
-        return;
-      }
-      if ((data as { code?: string }).code) {
-        onApplyGeneratedCode(
-          (data as { code: string }).code,
-          (data as { appName?: string }).appName,
-          (data as { plan?: string[] }).plan,
-        );
-        onClose();
-      } else {
-        // Closing the modal with no code applied is the worst outcome: the user
-        // loses their prompt and has no idea anything went wrong.
-        setGeneratorError(
-          language === 'ar' ? 'لم يُرجع المحرك أي كود، أعد المحاولة بتفاصيل أكثر.' : 'The engine returned no code. Try again with more detail.',
-        );
+      const ctrl = new AbortController();
+      const fetchTimeout = setTimeout(() => ctrl.abort(), 240_000); // generous: real sites take 40-110s
+      try {
+        const res = await fetch('/api/ai/generate-app', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: prompt.trim(),
+            templateId: selectedCategory,
+            language,
+          }),
+          signal: ctrl.signal,
+        });
+        clearTimeout(fetchTimeout);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setGeneratorError(
+            (data as { message?: string }).message ||
+              (language === 'ar' ? 'فشل توليد التطبيق، حاول مرة أخرى.' : 'Generation failed. Please try again.'),
+          );
+          return;
+        }
+        if ((data as { code?: string }).code) {
+          onApplyGeneratedCode(
+            (data as { code: string }).code,
+            (data as { appName?: string }).appName,
+            (data as { plan?: string[] }).plan,
+          );
+          onClose();
+        } else {
+          // Closing the modal with no code applied is the worst outcome: the user
+          // loses their prompt and has no idea anything went wrong.
+          setGeneratorError(
+            language === 'ar'
+              ? 'لم يُرجع المحرك أي كود، أعد المحاولة بتفاصيل أكثر.'
+              : 'The engine returned no code. Try again with more detail.',
+          );
+        }
+      } catch (fetchErr) {
+        clearTimeout(fetchTimeout);
+        // Aborts are normal failures — surface a clear Arabic message so the user
+        // knows exactly what to do instead of staring at a frozen screen.
+        if ((fetchErr as Error)?.name === 'AbortError') {
+          setGeneratorError('الاتصال بالخادم انقطع — تأكد من الإنترنت وحاول مرة أخرى.');
+          return;
+        }
+        throw fetchErr;
       }
     } catch {
       setGeneratorError(
