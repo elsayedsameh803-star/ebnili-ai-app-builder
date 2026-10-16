@@ -39,10 +39,13 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
   });
   const data = await res.json().catch(() => ({}));
+  const body = data as { code?: string; message?: string };
   if (res.status === 401) throw new Error('AUTH_REQUIRED');
   if (!res.ok) {
-    if (res.status === 503) throw new DbUnavailableError();
-    throw new Error((data as { message?: string }).message || 'request failed');
+    if (res.status === 503 || body.code === 'DB_UNAVAILABLE') throw new DbUnavailableError(body.message);
+    // Preserve the machine code (NOT_FOUND, NOTHING_TO_PUBLISH, ...) so the
+    // UI classifies a missing project vs a DB outage instead of guessing.
+    throw new Error(body.code || body.message || `request failed (${res.status})`);
   }
   return data as T;
 }

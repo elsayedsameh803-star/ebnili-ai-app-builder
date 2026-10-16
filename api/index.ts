@@ -742,6 +742,9 @@ app.get("/api/projects", (req: Request, res: Response) => {
         .slice(0, 160),
     }));
     res.json({ success: true, projects: rows });
+  }).catch((err) => {
+    console.error("projects list failed:", err);
+    return dbUnavailable(res);
   });
 });
 
@@ -769,6 +772,9 @@ app.get("/api/projects/:id", (req: Request, res: Response) => {
     // that does not exist.
     if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
     res.json({ success: true, project: toPublicProject(row) });
+  }).catch((err) => {
+    console.error("project read failed:", err);
+    return dbUnavailable(res);
   });
 });
 
@@ -800,6 +806,9 @@ app.post("/api/projects", limitWrites, (req: Request, res: Response) => {
       return dbUnavailable(res);
     }
     res.status(201).json({ success: true, project: toPublicProject(result.data[0]) });
+  }).catch((err) => {
+    console.error("project create failed:", err);
+    return dbUnavailable(res);
   });
 });
 
@@ -831,6 +840,9 @@ app.patch("/api/projects/:id", limitWrites, (req: Request, res: Response) => {
     const row = result.data?.[0];
     if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
     res.json({ success: true, project: toPublicProject(row) });
+  }).catch((err) => {
+    console.error("project update failed:", err);
+    return dbUnavailable(res);
   });
 });
 
@@ -852,6 +864,9 @@ app.delete("/api/projects/:id", (req: Request, res: Response) => {
       return res.status(404).json({ success: false, code: "NOT_FOUND" });
     }
     res.json({ success: true, deleted: id });
+  }).catch((err) => {
+    console.error("project delete failed:", err);
+    return dbUnavailable(res);
   });
 });
 
@@ -5638,7 +5653,13 @@ app.post("/api/projects/:id/publish", limitWrites, (req: Request, res: Response)
     query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
   })
     .then(async (existing) => {
-      const row = existing.ok ? existing.data?.[0] : undefined;
+      // A failed DB read must stay a 503 — never a 404. Otherwise a transient
+      // outage (or a missing migration) looks like "project doesn't exist".
+      if (!existing.ok) {
+        console.error("publish read failed:", existing.error);
+        return dbUnavailable(res);
+      }
+      const row = existing.data?.[0];
       if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
 
       // Keep an existing slug across re-publishes so old links stay alive; mint
@@ -5666,10 +5687,14 @@ app.post("/api/projects/:id/publish", limitWrites, (req: Request, res: Response)
         }),
       });
       const fresh = updated.ok ? updated.data?.[0] : undefined;
+      if (!updated.ok) console.error("publish write failed:", updated.error);
       if (!fresh) return dbUnavailable(res);
       res.json({ success: true, slug: fresh.slug, publishedAt: fresh.published_at });
     })
-    .catch(() => dbUnavailable(res));
+    .catch((err) => {
+      console.error("publish failed:", err);
+      return dbUnavailable(res);
+    });
 });
 
 app.post("/api/projects/:id/unpublish", limitWrites, (req: Request, res: Response) => {
@@ -5685,9 +5710,15 @@ app.post("/api/projects/:id/unpublish", limitWrites, (req: Request, res: Respons
     query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
     body: JSON.stringify({ published: false, updated_at: new Date().toISOString() }),
   }).then((result) => {
-    if (!result.ok) return dbUnavailable(res);
+    if (!result.ok) {
+      console.error("unpublish failed:", result.error);
+      return dbUnavailable(res);
+    }
     if (!result.data?.[0]) return res.status(404).json({ success: false, code: "NOT_FOUND" });
     res.json({ success: true, published: false });
+  }).catch((err) => {
+    console.error("unpublish failed:", err);
+    return dbUnavailable(res);
   });
 });
 
@@ -5707,11 +5738,18 @@ function servePublishedPage(req: Request, res: Response): void {
   void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
     query: { slug: `eq.${slug}`, published: `eq.true`, select: "published_html", limit: "1" },
   }).then((result) => {
-    const row = result.ok ? result.data?.[0] : undefined;
+    if (!result.ok) {
+      console.error("servePublishedPage failed:", result.error);
+      return void res.status(503).send("Publishing is not configured");
+    }
+    const row = result.data?.[0];
     if (!row || !row.published_html) return void res.status(404).send("Not found");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=60");
     res.status(200).send(row.published_html);
+  }).catch((err) => {
+    console.error("servePublishedPage failed:", err);
+    return void res.status(503).send("Publishing is not configured");
   });
 }
 app.get("/api/s/:slug", servePublishedPage);
@@ -5734,7 +5772,11 @@ app.get("/api/projects/:id/publish", (req: Request, res: Response) => {
   void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
     query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, select: "id,published,slug,published_at", limit: "1" },
   }).then((result) => {
-    const row = result.ok ? result.data?.[0] : undefined;
+    if (!result.ok) {
+      console.error("publish state read failed:", result.error);
+      return void dbUnavailable(res);
+    }
+    const row = result.data?.[0];
     if (!row) return void res.status(404).json({ success: false, code: "NOT_FOUND" });
     res.json({
       success: true,
@@ -5742,6 +5784,9 @@ app.get("/api/projects/:id/publish", (req: Request, res: Response) => {
       slug: row.slug ?? null,
       publishedAt: row.published_at ?? null,
     });
+  }).catch((err) => {
+    console.error("publish state read failed:", err);
+    return void dbUnavailable(res);
   });
 });
 
