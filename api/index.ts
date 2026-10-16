@@ -670,12 +670,17 @@ function toPublicProject(row: DbProject) {
   };
 }
 
-/** 503 with a readable reason instead of pretending the data exists. */
-function dbUnavailable(res: Response) {
+/** 503 with the ACTUAL database reason, never a generic fallback. */
+function dbUnavailable(res: Response, detail?: string, dbStatus?: number) {
+  const reason = (detail || "").trim();
+  if (reason) console.error("dbUnavailable:", reason, dbStatus ? `(postgrest_status=${dbStatus})` : "");
   return res.status(503).json({
     success: false,
     code: "DB_UNAVAILABLE",
-    message: "قاعدة بيانات المشاريع غير مهيأة على الخادم.",
+    message: reason || "قاعدة بيانات المشاريع غير مهيأة على الخادم.",
+    // Exact PostgREST / fetch error so DevTools shows the real cause.
+    error: reason || "database_not_configured",
+    ...(typeof dbStatus === "number" ? { dbStatus } : {}),
   });
 }
 
@@ -5643,58 +5648,69 @@ function randomReferralCode(): string {
 // FROZEN snapshot taken at publish time, so later edits to the draft do not
 // change the public link until an explicit re-publish.
 
-app.post("/api/projects/:id/publish", limitWrites, (req: Request, res: Response) => {
+app.post("/api/projects/:id/publish", limitWrites, async (req: Request, res: Response) => {
   const owner = currentOwner(req);
   if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
 
   const id = String(req.params.id ?? "");
-  void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
-    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
-  })
-    .then(async (existing) => {
-      // A failed DB read must stay a 503 — never a 404. Otherwise a transient
-      // outage (or a missing migration) looks like "project doesn't exist".
-      if (!existing.ok) {
-        console.error("publish read failed:", existing.error);
-        return dbUnavailable(res);
-      }
-      const row = existing.data?.[0];
-      if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
-
-      // Keep an existing slug across re-publishes so old links stay alive; mint
-      // one only the first time.
-      const slug =
-        row.slug && String(row.slug).trim() ? String(row.slug) : await mintPublishSlug();
-      const html = primaryHtml(row);
-      if (!html.trim()) {
-        return res.status(400).json({
-          success: false,
-          code: "NOTHING_TO_PUBLISH",
-          message: "لا يوجد محتوى HTML للنشر في هذا المشروع.",
-        });
-      }
-
-      const updated = await dbRequest<PublishRow[]>(PROJECTS_TABLE, {
-        method: "PATCH",
-        query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
-        body: JSON.stringify({
-          published: true,
-          slug,
-          published_html: html,
-          published_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }),
-      });
-      const fresh = updated.ok ? updated.data?.[0] : undefined;
-      if (!updated.ok) console.error("publish write failed:", updated.error);
-      if (!fresh) return dbUnavailable(res);
-      res.json({ success: true, slug: fresh.slug, publishedAt: fresh.published_at });
-    })
-    .catch((err) => {
-      console.error("publish failed:", err);
-      return dbUnavailable(res);
+  try {
+    const existing = await dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+      query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
     });
+    if (!existing.ok) {
+      const detail = `publish READ failed: postgrest_status=${existing.status} error=${existing.error ?? "unknown"}`;
+      console.error(detail, { projectId: id, ownerId: owner.id });
+      return dbUnavailable(res, `READ ${PROJECTS_TABLE}: ${existing.error ?? "unknown"}`, existing.status);
+    }
+    const row = existing.data?.[0];
+    if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+
+    // Keep an existing slug across re-publishes so old links stay alive; mint
+    // one only the first time.
+    let slug = row.slug && String(row.slug).trim() ? String(row.slug) : "";
+    if (!slug) {
+      try {
+        slug = await mintPublishSlug();
+      } catch (err) {
+        const detail = `publish SLUG mint failed: ${err instanceof Error ? err.stack || err.message : String(err)}`;
+        console.error(detail, { projectId: id, ownerId: owner.id });
+        return dbUnavailable(res, `SLUG mint failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const html = primaryHtml(row);
+    if (!html.trim()) {
+      return res.status(400).json({
+        success: false,
+        code: "NOTHING_TO_PUBLISH",
+        message: "لا يوجد محتوى HTML للنشر في هذا المشروع.",
+      });
+    }
+
+    const updated = await dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+      method: "PATCH",
+      query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+      body: JSON.stringify({
+        published: true,
+        slug,
+        published_html: html,
+        published_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    if (!updated.ok || !updated.data?.[0]) {
+      const detail = `publish WRITE failed: postgrest_status=${updated.status} error=${updated.error ?? "unknown"}`;
+      console.error(detail, { projectId: id, ownerId: owner.id, slug });
+      return dbUnavailable(res, `WRITE ${PROJECTS_TABLE}: ${updated.error ?? "unknown"}`, updated.status);
+    }
+    const fresh = updated.data[0];
+    res.json({ success: true, slug: fresh.slug, publishedAt: fresh.published_at });
+  } catch (err) {
+    // The EXACT internal error — printed to server logs AND returned in JSON.
+    const detail = `publish handler threw: ${err instanceof Error ? err.stack || err.message : String(err)}`;
+    console.error(detail, { projectId: id });
+    return dbUnavailable(res, detail);
+  }
 });
 
 app.post("/api/projects/:id/unpublish", limitWrites, (req: Request, res: Response) => {
@@ -5711,14 +5727,15 @@ app.post("/api/projects/:id/unpublish", limitWrites, (req: Request, res: Respons
     body: JSON.stringify({ published: false, updated_at: new Date().toISOString() }),
   }).then((result) => {
     if (!result.ok) {
-      console.error("unpublish failed:", result.error);
-      return dbUnavailable(res);
+      console.error("unpublish failed:", result.error, { projectId: id, ownerId: owner.id });
+      return dbUnavailable(res, `WRITE ${PROJECTS_TABLE}: ${result.error ?? "unknown"}`, result.status);
     }
     if (!result.data?.[0]) return res.status(404).json({ success: false, code: "NOT_FOUND" });
     res.json({ success: true, published: false });
   }).catch((err) => {
-    console.error("unpublish failed:", err);
-    return dbUnavailable(res);
+    const detail = `unpublish handler threw: ${err instanceof Error ? err.stack || err.message : String(err)}`;
+    console.error(detail, { projectId: id });
+    return dbUnavailable(res, detail);
   });
 });
 
@@ -5739,8 +5756,8 @@ function servePublishedPage(req: Request, res: Response): void {
     query: { slug: `eq.${slug}`, published: `eq.true`, select: "published_html", limit: "1" },
   }).then((result) => {
     if (!result.ok) {
-      console.error("servePublishedPage failed:", result.error);
-      return void res.status(503).send("Publishing is not configured");
+      console.error("servePublishedPage failed:", result.error, { slug });
+      return void res.status(503).json({ success: false, code: "DB_UNAVAILABLE", error: `READ ${PROJECTS_TABLE}: ${result.error ?? "unknown"}`, dbStatus: result.status });
     }
     const row = result.data?.[0];
     if (!row || !row.published_html) return void res.status(404).send("Not found");
@@ -5748,8 +5765,9 @@ function servePublishedPage(req: Request, res: Response): void {
     res.setHeader("Cache-Control", "public, max-age=60");
     res.status(200).send(row.published_html);
   }).catch((err) => {
-    console.error("servePublishedPage failed:", err);
-    return void res.status(503).send("Publishing is not configured");
+    const detail = `servePublishedPage threw: ${err instanceof Error ? err.stack || err.message : String(err)}`;
+    console.error(detail, { slug });
+    return void res.status(503).json({ success: false, code: "DB_UNAVAILABLE", error: detail });
   });
 }
 app.get("/api/s/:slug", servePublishedPage);
@@ -5773,8 +5791,8 @@ app.get("/api/projects/:id/publish", (req: Request, res: Response) => {
     query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, select: "id,published,slug,published_at", limit: "1" },
   }).then((result) => {
     if (!result.ok) {
-      console.error("publish state read failed:", result.error);
-      return void dbUnavailable(res);
+      console.error("publish state read failed:", result.error, { projectId: id, ownerId: owner.id });
+      return void dbUnavailable(res, `READ ${PROJECTS_TABLE}: ${result.error ?? "unknown"}`, result.status);
     }
     const row = result.data?.[0];
     if (!row) return void res.status(404).json({ success: false, code: "NOT_FOUND" });
@@ -5785,8 +5803,9 @@ app.get("/api/projects/:id/publish", (req: Request, res: Response) => {
       publishedAt: row.published_at ?? null,
     });
   }).catch((err) => {
-    console.error("publish state read failed:", err);
-    return void dbUnavailable(res);
+    const detail = `publish state read threw: ${err instanceof Error ? err.stack || err.message : String(err)}`;
+    console.error(detail, { projectId: id });
+    return void dbUnavailable(res, detail);
   });
 });
 

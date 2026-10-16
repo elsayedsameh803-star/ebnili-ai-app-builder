@@ -74,7 +74,9 @@ export const PublishButton = ({ projectId, language, className = '' }: PublishBu
       // Classify the error for a clear, user-facing message.
       let detail = '';
       if (e instanceof DbUnavailableError) {
-        detail = ar ? 'قاعدة البيانات غير متوفرة لحظياً — حاول مرة أخرى في لحظة.' : 'Database unavailable for a moment — please try again shortly.';
+        // DbUnavailableError now carries the EXACT backend detail
+        // (PostgREST error + dbStatus) — show it, don't mask it.
+        detail = ar ? `تعذّر النشر — السبب: ${msg}` : `Publish failed — cause: ${msg}`;
       } else if (msg === 'AUTH_REQUIRED') {
         detail = ar ? 'انتهت الجلسة — سجّل الدخول ثم أعد النشر.' : 'Signed out — sign in again to publish.';
       } else if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('404')) {

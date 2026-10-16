@@ -65,7 +65,9 @@ export const DeployModal = ({
     (e: unknown): string => {
       const msg = e instanceof Error ? e.message : '';
       if (e instanceof DbUnavailableError) {
-        return ar ? 'قاعدة البيانات غير متوفرة لحظياً — حاول مرة أخرى في لحظة.' : 'Database unavailable for a moment — please try again shortly.';
+        // DbUnavailableError now carries the EXACT backend detail
+        // (PostgREST error + dbStatus) — show it, don't mask it.
+        return ar ? `تعذّر النشر — السبب: ${msg}` : `Publish failed — cause: ${msg}`;
       }
       if (msg === 'AUTH_REQUIRED') {
         return ar ? 'انتهت الجلسة — سجّل الدخول ثم أعد النشر.' : 'Signed out — sign in again to publish.';

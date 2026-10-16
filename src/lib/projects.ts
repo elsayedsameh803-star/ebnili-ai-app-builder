@@ -39,13 +39,20 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
   });
   const data = await res.json().catch(() => ({}));
-  const body = data as { code?: string; message?: string };
+  const body = data as { code?: string; message?: string; error?: string; dbStatus?: number };
   if (res.status === 401) throw new Error('AUTH_REQUIRED');
   if (!res.ok) {
-    if (res.status === 503 || body.code === 'DB_UNAVAILABLE') throw new DbUnavailableError(body.message);
+    // Surface the EXACT backend reason: `error` carries the PostgREST / handler
+    // detail, `dbStatus` the PostgREST HTTP status. Log it so DevTools shows
+    // the real cause even if the UI message is translated.
+    const exact = [body.error, body.message].filter(Boolean).join(' | ');
+    if (exact) console.error(`API ${path} failed (${res.status}):`, exact, body.dbStatus ? `(dbStatus=${body.dbStatus})` : '');
+    if (res.status === 503 || body.code === 'DB_UNAVAILABLE') {
+      throw new DbUnavailableError(exact || 'DB_UNAVAILABLE');
+    }
     // Preserve the machine code (NOT_FOUND, NOTHING_TO_PUBLISH, ...) so the
     // UI classifies a missing project vs a DB outage instead of guessing.
-    throw new Error(body.code || body.message || `request failed (${res.status})`);
+    throw new Error(body.code || exact || `request failed (${res.status})`);
   }
   return data as T;
 }
