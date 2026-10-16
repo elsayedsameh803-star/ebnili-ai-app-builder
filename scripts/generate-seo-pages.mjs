@@ -46,11 +46,11 @@ const esc = (s) =>
 /** Escape for a `<script type="application/ld+json">` block. */
 const jsonLd = (obj) => JSON.stringify(obj, null, 2).replace(/</g, '\\u003c');
 
-const GRADIENT = 'linear-gradient(135deg,#f43f5e 0%,#ec4899 50%,#f59e0b 100%)';
+const GRADIENT = 'linear-gradient(135deg,#38bdf8 0%,#22d3ee 45%,#8b5cf6 100%)';
 
 const CTA = `      <p style="margin:32px 0 0">
         <a href="/" style="display:inline-block;padding:13px 30px;border-radius:14px;background:${GRADIENT};color:#fff;font-weight:800;text-decoration:none">ابدأ الآن مجاناً</a>
-        <a href="/pricing" style="display:inline-block;padding:13px 24px;border-radius:14px;border:1px solid #334155;color:#cbd5e1;font-weight:700;text-decoration:none;margin-inline-start:10px">عرض الأسعار</a>
+        <a href="/pricing" style="display:inline-block;padding:13px 24px;border-radius:14px;border:1px solid #1c3350;color:#a9bfd6;font-weight:700;text-decoration:none;margin-inline-start:10px">عرض الأسعار</a>
       </p>`;
 
 /**
@@ -62,19 +62,19 @@ const CTA = `      <p style="margin:32px 0 0">
  * the support number from that page at all. The links are real URLs so a
  * crawler follows them and the documents are indexable in their own right.
  */
-const FOOTER = `      <footer style="margin-top:56px;padding-top:24px;border-top:1px solid #1e293b;text-align:center;font-size:13px;color:#64748b">
+const FOOTER = `      <footer style="margin-top:56px;padding-top:24px;border-top:1px solid #12233a;text-align:center;font-size:13px;color:#4a6884">
         <nav style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:14px">
-          <a href="${ORIGIN}/about" style="padding:7px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-weight:700">من نحن</a>
-          <a href="${ORIGIN}/contact" style="padding:7px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-weight:700">اتصل بنا</a>
-          <a href="${ORIGIN}/privacy" style="padding:7px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-weight:700">سياسة الخصوصية</a>
-          <a href="${ORIGIN}/terms" style="padding:7px 12px;border-radius:8px;color:#94a3b8;text-decoration:none;font-weight:700">الشروط والأحكام</a>
+          <a href="${ORIGIN}/about" style="padding:7px 12px;border-radius:8px;color:#7d97b3;text-decoration:none;font-weight:700">من نحن</a>
+          <a href="${ORIGIN}/contact" style="padding:7px 12px;border-radius:8px;color:#7d97b3;text-decoration:none;font-weight:700">اتصل بنا</a>
+          <a href="${ORIGIN}/privacy" style="padding:7px 12px;border-radius:8px;color:#7d97b3;text-decoration:none;font-weight:700">سياسة الخصوصية</a>
+          <a href="${ORIGIN}/terms" style="padding:7px 12px;border-radius:8px;color:#7d97b3;text-decoration:none;font-weight:700">الشروط والأحكام</a>
         </nav>
         <p style="margin:0 0 6px">
           <a href="tel:+201207782741" dir="ltr" style="color:#34d399;font-weight:700;text-decoration:none">01207782741</a>
-          <span style="margin:0 8px;color:#334155">·</span>
-          <a href="mailto:elsayedsameh803@gmail.com" dir="ltr" style="color:#94a3b8;text-decoration:none">elsayedsameh803@gmail.com</a>
+          <span style="margin:0 8px;color:#1c3350">·</span>
+          <a href="mailto:elsayedsameh803@gmail.com" dir="ltr" style="color:#7d97b3;text-decoration:none">elsayedsameh803@gmail.com</a>
         </p>
-        <p style="margin:0;font-size:12px;color:#475569">© 2026 إبنيلي — كل الحقوق محفوظة</p>
+        <p style="margin:0;font-size:12px;color:#2b4767">© 2026 إبنيلي — كل الحقوق محفوظة</p>
       </footer>`;
 
 function page({ path, title, description, inner, nav = '', jsonLdBlocks }) {
@@ -109,7 +109,19 @@ function page({ path, title, description, inner, nav = '', jsonLdBlocks }) {
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet" />
 ${jsonLdBlocks.map((b) => `    <script type="application/ld+json">${jsonLd(b)}</script>`).join('\n')}
   </head>
-  <body style="margin:0;background:#020617;color:#e2e8f0;font-family:'Cairo',system-ui,sans-serif;line-height:1.9">
+  <!-- Icy palette shim: these static pages carry inline styles written before
+       the icy redesign. These attribute selectors + !important retint every
+       legacy slate hex to the icy ramp in one place — no scattered edits. -->
+  <style>
+    [style*="#94a3b8"] { color:#7d97b3 !important; }
+    [style*="#cbd5e1"] { color:#a9bfd6 !important; }
+    [style*="#64748b"] { color:#4a6884 !important; }
+    [style*="#475569"] { color:#2b4767 !important; }
+    [style*="#334155"] { border-color:#1c3350 !important; color:#1c3350 !important; }
+    [style*="#1e293b"] { border-color:#12233a !important; }
+    [style*="#0f172a"] { background-color:#0a1626 !important; }
+  </style>
+  <body style="margin:0;background:#050e1a;color:#e9f1f9;font-family:'Cairo',system-ui,sans-serif;line-height:1.9">
     <div style="max-width:1000px;margin:0 auto;padding:48px 20px">
 ${nav}${inner}
 ${FOOTER}

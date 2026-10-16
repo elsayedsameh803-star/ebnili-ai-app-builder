@@ -128,8 +128,8 @@ function createBlankProject(): AppProject {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #020617;
-      color: #e2e8f0;
+      background: #050e1a;
+      color: #e9f1f9;
       font-family: "Cairo", system-ui, -apple-system, sans-serif;
       padding: 24px;
       text-align: center;
@@ -139,16 +139,16 @@ function createBlankProject(): AppProject {
       display: inline-block;
       font-size: 11px;
       letter-spacing: .08em;
-      color: #fda4af;
-      border: 1px solid #fb7185;
-      background: rgba(244,63,94,.1);
+      color: #7dd3fc;
+      border: 1px solid #38bdf8;
+      background: rgba(56,189,248,.1);
       border-radius: 999px;
       padding: 4px 12px;
       margin-bottom: 18px;
     }
     h1 { font-size: 26px; font-weight: 800; margin-bottom: 12px; }
-    p { font-size: 14px; line-height: 1.9; color: #94a3b8; }
-    .hint { margin-top: 18px; font-size: 12px; color: #64748b; }
+    p { font-size: 14px; line-height: 1.9; color: #7d97b3; }
+    .hint { margin-top: 18px; font-size: 12px; color: #4a6884; }
   </style>
 </head>
 <body>

@@ -9,6 +9,37 @@
    errors/danger, emerald still success — only BRAND gradients moved.
    ═══════════════════════════════════════════════════════════════════════════ */
 @theme {
+  /* ═══ SITE-WIDE ICY OVERRIDE ═══
+     Every `bg-slate-*`, `border-slate-*`, `text-slate-*` class in the whole app
+     (studio, sidebar, modals, dashboards, auth, pricing, pay — ~176 files)
+     resolves from these values. Re-tinting the neutral ramp here shifts the
+     ENTIRE site to a cool icy-blue canvas in one place — no component edits.
+     The ramp is blue-shifted but keeps the original lightness steps, so every
+     existing contrast pairing (text-400 on bg-900, white on bg-800, etc.)
+     stays as legible as before. Semantic colors (emerald/rose/amber) are NOT
+     touched — errors still read red, success still reads green. */
+
+  /* Near-black page canvas: dark navy instead of neutral near-black */
+  --color-slate-950: #050e1a;
+  /* Panels / cards */
+  --color-slate-900: #0a1626;
+  /* Raised surfaces / inputs / buttons */
+  --color-slate-800: #12233a;
+  /* Borders on raised surfaces */
+  --color-slate-700: #1c3350;
+  /* Muted fills */
+  --color-slate-600: #2b4767;
+  /* Placeholder / disabled text */
+  --color-slate-500: #4a6884;
+  /* Secondary text — the "muted but readable" tone */
+  --color-slate-400: #7d97b3;
+  /* Tertiary text */
+  --color-slate-300: #a9bfd6;
+  /* Strong secondary surfaces on dark (badges, hovers) */
+  --color-slate-200: #cfdeee;
+  /* Lightest text / dividers */
+  --color-slate-100: #e9f1f9;
+
   /* Icy-blue ramp (brand primary) */
   --color-ice-100: #e0f2fe;
   --color-ice-200: #bae6fd;
@@ -45,12 +76,12 @@ html {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #1c3350; /* icy slate-700 — matches the overridden ramp */
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #2b4767; /* icy slate-600 */
 }
 
 /* Accessibility: visible keyboard focus — icy blue, the new brand primary */
