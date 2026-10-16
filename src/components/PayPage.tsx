@@ -281,7 +281,7 @@ export const PayPage = ({
               <button
                 onClick={submit}
                 disabled={busy}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-500 via-pink-600 to-amber-500 text-slate-950 text-xs font-extrabold transition flex items-center justify-center gap-2 disabled:opacity-60"
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-300 via-cyan-200 to-violet-400 text-slate-950 text-xs font-extrabold transition flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 {busy ? (ar ? 'جارٍ الإرسال...' : 'Sending...') : (ar ? 'إرسال طلب التفعيل' : 'Submit activation request')}

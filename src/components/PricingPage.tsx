@@ -81,12 +81,12 @@ export const PricingPage = ({ language, onNavigate }: { language: Language; onNa
                 key={plan.id}
                 className={`relative flex flex-col rounded-2xl p-6 border transition ${
                   plan.isPopular
-                    ? 'bg-gradient-to-b from-rose-950/40 via-slate-900 to-slate-900 border-rose-500/50 ring-1 ring-rose-500/30'
+                    ? 'bg-gradient-to-b from-violet-950/40 via-slate-900 to-slate-900 border-sky-400/40 ring-1 ring-violet-400/30'
                     : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
                 }`}
               >
                 {plan.badgeAr && (
-                  <span className="absolute -top-3 right-5 bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 text-[10px] font-extrabold px-3 py-0.5 rounded-full">
+                  <span className="absolute -top-3 right-5 bg-gradient-to-r from-sky-300 to-violet-400 text-slate-950 text-[10px] font-extrabold px-3 py-0.5 rounded-full">
                     {ar ? plan.badgeAr : plan.badgeEn}
                   </span>
                 )}
@@ -134,7 +134,7 @@ export const PricingPage = ({ language, onNavigate }: { language: Language; onNa
                     onClick={() => onNavigate(`/pay?plan=${plan.id}&cycle=${cycle}`)}
                     className={`mt-6 w-full py-3 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-2 ${
                       plan.isPopular
-                        ? 'bg-gradient-to-r from-rose-500 via-pink-600 to-amber-500 text-slate-950'
+                        ? 'bg-gradient-to-r from-sky-300 via-cyan-200 to-violet-400 text-slate-950'
                         : 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-700'
                     }`}
                   >
@@ -217,7 +217,7 @@ export const PricingPage = ({ language, onNavigate }: { language: Language; onNa
             <button
               type="button"
               onClick={() => onNavigate('/')}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 via-pink-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white text-xs font-bold transition shadow-lg shadow-rose-500/25 cursor-pointer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-400 via-cyan-300 to-violet-500 hover:from-sky-300 hover:to-violet-400 text-white text-xs font-bold transition shadow-lg shadow-violet-500/25 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
               {ar ? 'ابدأ الآن مجاناً' : 'Start building free'}

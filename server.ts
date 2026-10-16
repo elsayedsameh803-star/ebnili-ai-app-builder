@@ -308,21 +308,20 @@ function recordDeviceGeneration(device: DeviceRecord) {
   saveAdminSettings(adminSettings);
 }
 
-// Watermark Injection Helper
-// Owner standard #1 (clean output only): generated interfaces must contain
-// absolutely no side text, badges, or watermarks — injection stays disabled.
-function injectWatermark(html: string, _tier: "free" | "pro" | "business"): string {
-  return html;
-}
+// Watermark — DELETED STUB, single server truth lives in api/index.ts.
+// `server.ts` mounts the whole API via `mountApi()`, so the export route and
+// `applyWatermark` there are the ONLY enforcement point. A second,
+// divergent helper here (previously an `injectWatermark` no-op returning its
+// input) is exactly how preview/export drift apart — it must not exist.
 
-// Accepts GEMINI_API_KEY plus common aliases (same list as api/index.ts)
-// so a key configured under any known variable name still works locally.
+// Accepts GEMINI_API_KEY plus server-side aliases (same list as api/index.ts).
+// `VITE_*` is deliberately NOT read: Vite inlines it into the browser bundle,
+// so it is public by construction and must never be trusted as a server secret.
 function getGeminiApiKey(): string {
   return (
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
     ""
   ).trim();
 }

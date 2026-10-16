@@ -905,10 +905,25 @@ app.post("/api/projects/export", (req: Request, res: Response) => {
   const body = (req.body as { files?: Record<string, string> }) ?? {};
   const files = body.files && typeof body.files === "object" ? body.files : {};
 
+  // SERVER-SIDE SANITISATION (mirror of the ExportModal guards): names are
+  // untrusted, so drop absolute paths and `..` escapes, cap entries and
+  // bytes. Prevents Zip-Slip archives and OOM payloads from a crafted call.
+  const entries = Object.entries(files);
+  if (entries.length > 500) {
+    return res.status(413).json({ success: false, code: "EXPORT_TOO_MANY_FILES" });
+  }
+  let exportBytes = 0;
   const marked: Record<string, string> = {};
-  for (const [path, content] of Object.entries(files)) {
+  for (const [rawPath, content] of entries) {
+    const safeName = String(rawPath ?? "").replace(/\\/g, "/").trim();
+    if (!safeName || safeName.startsWith("/") || /(^|\/)\.\.(\/|$)/.test(safeName)) continue;
+    const text = String(content ?? "");
+    exportBytes += safeName.length + text.length;
+    if (exportBytes > 20 * 1024 * 1024) {
+      return res.status(413).json({ success: false, code: "EXPORT_TOO_LARGE" });
+    }
     // Only the executable page carries a mark; README/JSON/SQL are not documents.
-    marked[path] = /\.html?$/i.test(path) ? applyWatermark(String(content), tier) : String(content);
+    marked[safeName] = /\.html?$/i.test(safeName) ? applyWatermark(text, tier) : text;
   }
 
   res.json({
@@ -1378,6 +1393,17 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
   if (planId !== "pro" && planId !== "business") {
     return res.status(400).json({ success: false, message: "خطة الاشتراك غير صحيحة." });
   }
+  // SERVER-TRUSTED PRICING: the EGP/USD amounts are DERIVED here from the
+  // canonical plan table — never from the request body. A caller submitting
+  // amountEgp: 1 for a Business plan gets the real price stored instead.
+  const cycle = String(body.cycle ?? body.billingCycle ?? "monthly") === "yearly" ? "yearly" : "monthly";
+  const PLAN_PRICES = {
+    pro: { monthlyEgp: 500, yearlyEgp: 4995, monthlyUsd: 9.99, yearlyUsd: 99.9 },
+    business: { monthlyEgp: 750, yearlyEgp: 7495, monthlyUsd: 14.99, yearlyUsd: 149.9 },
+  } as const;
+  const price = PLAN_PRICES[planId as "pro" | "business"];
+  const amountEgp = cycle === "yearly" ? price.yearlyEgp : price.monthlyEgp;
+  const amountUsd = cycle === "yearly" ? price.yearlyUsd : price.monthlyUsd;
   const reference = String(body.transactionReference ?? "").trim();
   const senderPhone = String(body.senderPhone ?? "").trim();
   if (senderPhone.length < 8 || reference.length < 3) {
@@ -1392,12 +1418,54 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
   const fileData = typeof body.fileData === "string" ? body.fileData : "";
 
   if (!fileData) {
-    // Nothing attached — the transfer details alone are still worth recording.
+    // Nothing attached — record the transfer details as a durable
+    // `awaiting_receipt` row FIRST, then report success. Previously this path
+    // returned `pending` WITHOUT writing any row, so a receipt-less payment
+    // vanished: the dashboard never listed it and nobody could approve it.
+    // The row is the reviewable record; the receipt image (if later attached)
+    // only annotates it — an image alone is never proof of payment.
+    if (!supabaseConfig().dbConfigured) {
+      return res.status(503).json({
+        success: false,
+        code: "DB_UNAVAILABLE",
+        error: "تعذّر تسجيل طلب الدفع على الخادم. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+      });
+    }
+    const pendingId = `pay_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
+    const pendingSession = readAuthSession(req as AuthReq);
+    const pendingWrite = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+      method: "POST",
+      query: { on_conflict: "id" },
+      headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+      body: JSON.stringify({
+        id: pendingId,
+        account_email: pendingSession?.email ?? "",
+        account_id: pendingSession?.id ?? "",
+        plan_id: planId,
+        billing_cycle: cycle,
+        amount_egp: amountEgp,
+        amount_usd: amountUsd,
+        sender_phone: senderPhone,
+        transaction_ref: reference,
+        receipt_path: null,
+        receipt_file_name: null,
+        status: "pending",
+      }),
+    });
+    if (!pendingWrite.ok || !pendingWrite.data?.[0]) {
+      console.error("payment row insert failed (no receipt):", pendingWrite.error);
+      return res.status(503).json({
+        success: false,
+        code: "PAYMENT_STORE_FAILED",
+        error: "تعذّر حفظ طلب الاشتراك الآن. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+      });
+    }
     return res.json({
       success: true,
       receiptStored: false,
-      status: "pending",
-      message: "تم استلام بيانات التحويل. سنتحقق منها ونفعّل اشتراكك.",
+      referenceId: pendingId,
+      status: "awaiting_receipt",
+      message: "تم تسجيل بيانات التحويل بانتظار الإيصال. أرفق صورة الإشعار أو أرسلها على واتساب مع المرجع.",
     });
   }
 
@@ -1444,9 +1512,10 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
   const record = {
     id: `pay_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
     planId,
-    cycle: String(body.cycle ?? "monthly"),
-    amountEgp: Number(body.amountEgp ?? 0),
-    amountUsd: Number(body.amountUsd ?? 0),
+    cycle,
+    // Server-derived (see PLAN_PRICES above) — the caller's amount is ignored.
+    amountEgp,
+    amountUsd,
     senderPhone,
     transactionReference: reference,
     account: session?.email ?? "",
@@ -1705,7 +1774,12 @@ async function consumeAiAllowance(
     return { allowed: false, used: 0, limit: TIER_DAILY_QUOTA.free, reason: "db_unavailable" };
   }
 
-  const account = await findAccountByEmail(session.email);
+  const lookup = await lookupAccountByEmail(session.email);
+  // DB failure must NEVER look like "no account" (free tier). `null` here
+  // means: account missing OR email invalid — both safely resolve to the
+  // request tier. A db_error keeps `lookup.account` absent but is logged
+  // above; the RPC below still runs and will itself fail closed.
+  const account = lookup.found ? lookup.account : null;
   const tier: Tier = account ? tierOf(account.tier) : tierOf((req as Request & { accountTier?: Tier }).accountTier);
   const limit = dailyQuotaFor(tier);
   // FREE resets daily; PRO/BUSINESS reset monthly (see api/security.ts). The
@@ -1762,27 +1836,63 @@ function tierOf(value: unknown): Tier {
   return value === "pro" || value === "business" || value === "free" ? value : "free";
 }
 
+/** Discriminated account lookup: never confuse DB failure with "no account". */
+export type AccountLookup =
+  | { found: true; account: DbAccount }
+  | { found: false; reason: "not_found" | "db_error" | "invalid_email"; error?: string; status?: number };
+
 /** The account row for an address, or null. Used by the quota and the session. */
 async function findAccountByEmail(email: string): Promise<DbAccount | null> {
-  const normalized = normalizeEmail(email);
-  if (!normalized) return null;
-  const rows = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
-    query: { select: ACCOUNT_QUOTA_COLUMNS, account_email: `eq.${normalized}`, limit: "1" },
-  });
-  if (rows.ok && Array.isArray(rows.data) && rows.data[0]) return rows.data[0];
+  const result = await lookupAccountByEmail(email);
+  return result.found ? result.account : null;
+}
 
-  // A database created before the Phase 6 migration has no `referral_code`
-  // column, and PostgREST rejects the WHOLE select with a 400 — which would
-  // make every account look missing and silently downgrade paying customers to
-  // the free allowance. Retry with the columns the quota path actually needs.
-  const basic = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
-    query: {
-      select: "account_id,email,tier,ai_used,ai_day",
-      account_email: `eq.${normalized}`,
-      limit: "1",
-    },
+/**
+ * Exact lookup with the failure reason preserved.
+ *
+ * SCHEMA TRUTH (`supabase/projects.sql`): `ebnily_accounts.email` is the
+ * address column. There is NO `account_email` column on this table (that name
+ * lives on `ebnily_payments` / `ebnily_devices`). Querying `account_email`
+ * here made PostgREST answer 400 "column does not exist" for EVERY lookup,
+ * which callers read as "no account" and silently downgraded paid users to
+ * the free allowance. The filter below MUST stay `email`.
+ */
+async function lookupAccountByEmail(email: string): Promise<AccountLookup> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return { found: false, reason: "invalid_email" };
+  const rows = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+    query: { select: ACCOUNT_QUOTA_COLUMNS, email: `eq.${normalized}`, limit: "1" },
   });
-  return basic.ok && Array.isArray(basic.data) && basic.data[0] ? basic.data[0] : null;
+  if (rows.ok && Array.isArray(rows.data) && rows.data[0]) return { found: true, account: rows.data[0] };
+  if (!rows.ok) {
+    // A database created before the Phase 6 migration has no `referral_code`
+    // column, and PostgREST rejects the WHOLE select with a 400. Retry with
+    // the columns the quota path actually needs — but ONLY when the error
+    // looks like a missing column; any other DB error is returned as db_error
+    // so callers never mistake it for "account missing".
+    const errText = String(rows.error ?? "");
+    const looksLikeMissingColumn =
+      /referral_code/i.test(errText) || /column .* does not exist/i.test(errText);
+    if (!looksLikeMissingColumn) {
+      console.error("lookupAccountByEmail db_error:", rows.status, rows.error);
+      return { found: false, reason: "db_error", error: rows.error, status: rows.status };
+    }
+    const basic = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+      query: {
+        select: "account_id,email,tier,ai_used,ai_day",
+        email: `eq.${normalized}`,
+        limit: "1",
+      },
+    });
+    if (basic.ok && Array.isArray(basic.data) && basic.data[0])
+      return { found: true, account: basic.data[0] };
+    if (!basic.ok) {
+      console.error("lookupAccountByEmail retry db_error:", basic.status, basic.error);
+      return { found: false, reason: "db_error", error: basic.error, status: basic.status };
+    }
+    return { found: false, reason: "not_found" };
+  }
+  return { found: false, reason: "not_found" };
 }
 
 /**
@@ -1856,7 +1966,8 @@ async function readAiAllowance(req: Request): Promise<{ used: number; limit: num
     const tier: Tier = session ? tierOf(tagged.accountTier) : "free";
     return { used: 0, limit: dailyQuotaFor(tier), tier, window: quotaWindowFor(tier) };
   }
-  const account = await findAccountByEmail(session.email);
+  const readLookup = await lookupAccountByEmail(session.email);
+  const account = readLookup.found ? readLookup.account : null;
   const tier: Tier = account ? tierOf(account.tier) : tierOf(tagged.accountTier);
   const limit = dailyQuotaFor(tier);
   // Read-only, and spent by nobody: the same function the spend path uses, but
@@ -3277,20 +3388,42 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
 
   const reviewed = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
     method: "PATCH",
-    query: { id: `eq.${transactionId}` },
+    // ATOMIC: the `status=eq.pending` filter makes the decision conditional —
+    // two concurrent approvals race on the SAME row, and PostgREST applies the
+    // write only where status is still pending. The loser gets zero rows back
+    // and answers 409 instead of minting a second entitlement.
+    query: { id: `eq.${transactionId}`, status: "eq.pending" },
     body: JSON.stringify({
       status,
       reviewed_at: new Date().toISOString(),
       reviewed_by: OWNER_EMAIL || "owner",
     }),
   });
-  if (!reviewed.ok || !Array.isArray(reviewed.data) || reviewed.data.length === 0) {
+  if (!reviewed.ok) {
     console.error("payment review write failed:", reviewed.error);
     return res.status(503).json({ success: false, error: "تعذّر حفظ قرار المراجعة. أعد المحاولة." });
+  }
+  if (!Array.isArray(reviewed.data) || reviewed.data.length === 0) {
+    // Lost the race: someone else decided this payment between our read and
+    // our write. Re-read to report the actual outcome, never a silent success.
+    const reread = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+      query: { select: "status", id: `eq.${transactionId}`, limit: "1" },
+    });
+    const actual = reread.ok && Array.isArray(reread.data) && reread.data[0] ? String(reread.data[0].status) : "unknown";
+    return res.status(409).json({
+      success: false,
+      error: `تمت مراجعة هذه المعاملة مسبقاً (${actual === "confirmed" ? "مؤكدة" : actual === "rejected" ? "مرفوضة" : actual}).`,
+    });
   }
 
   // Confirmations grant nothing extra here: the row now says "confirmed", and
   // `/api/subscriptions/current` turns that into a real tier for the account.
+  // AUDIT: every decision is logged with reviewer identity, time and outcome —
+  // the payments table itself is the audit trail (reviewed_at/reviewed_by).
+  const reviewer = readAuthSession(req as AuthReq)?.email ?? "unknown-admin";
+  console.error(
+    `payment ${status}: id=${transactionId} account=${payment.account_email} plan=${payment.plan_id} by=${reviewer} at=${new Date().toISOString()}`,
+  );
   if (status === "confirmed" && payment.account_email) {
     // Fast path for the owner's own browser only. The durable entitlement is the
     // status written above — never this cookie.
@@ -4623,11 +4756,14 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
 function getApiKeys(): string[] {
   const keys: string[] = [];
   const seen = new Set<string>();
+  // SERVER-ONLY sources. `VITE_*` values are embedded in the browser bundle by
+  // Vite, so they can NEVER be a secret source — reading one here would bless
+  // a public value as a server credential. Only GEMINI_API_KEY (+ aliases and
+  // the paid rotation key) are honoured.
   const sources = [
     process.env.GEMINI_API_KEY,
     process.env.GOOGLE_API_KEY,
     process.env.GOOGLE_GEMINI_API_KEY,
-    process.env.VITE_GEMINI_API_KEY,
     process.env.PAID_GEMINI_API_KEY,
   ];
   for (const source of sources) {
@@ -5653,6 +5789,18 @@ app.post("/api/projects/:id/publish", limitWrites, async (req: Request, res: Res
   if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
 
+  // PLAN GATE (advertised matrix in src/data/plans.ts): Free = preview only,
+  // publishing is a PAID feature. The tier is resolved server-side from the
+  // session — a direct API call from a free account gets 403, not a page.
+  const publishTier = serverTierFor(req, readAuthSession(req as AuthReq));
+  if (!isPaidTier(publishTier)) {
+    return res.status(403).json({
+      success: false,
+      code: "FREE_PREVIEW_ONLY",
+      message: "النشر ميزة مدفوعة. قم بالترقية إلى Pro أو Business لنشر موقعك على رابط عام.",
+    });
+  }
+
   const id = String(req.params.id ?? "");
   try {
     const existing = await dbRequest<PublishRow[]>(PROJECTS_TABLE, {
@@ -6088,8 +6236,13 @@ app.post("/api/teams/:id/invite", limitWrites, async (req, res) => {
   const b = (req.body as Record<string, unknown>) ?? {};
   const em = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
   if (!em) return res.status(400).json({ success: false, code: "EMAIL_REQUIRED" });
-  const a = await findAccountByEmail(em);
-  if (!a) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND", message: "المستخدم ليس لديه حساب في المنصة." });
+  const inviteLookup = await lookupAccountByEmail(em);
+  if (!inviteLookup.found) {
+    if (inviteLookup.reason === "db_error")
+      return dbUnavailable(res, `READ ${ACCOUNTS_TABLE}: ${inviteLookup.error ?? "unknown"}`, inviteLookup.status);
+    return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND", message: "المستخدم ليس لديه حساب في المنصة." });
+  }
+  const a = inviteLookup.account;
   const r: TeamRole = typeof b.role === "string" && isTeamRole(b.role) ? b.role : "member";
   if (r === "owner") return res.status(400).json({ success: false, code: "OWNER_NOT_ALLOWED", message: "لا يمكن تعيين مالك بهذا الطريق." });
   const now = new Date().toISOString();
@@ -6158,8 +6311,13 @@ app.get("/api/referral", limitWrites, async (req, res) => {
   const o = currentOwner(req);
   if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
-  let acct = await findAccountByEmail(o.email);
-  if (!acct) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
+  const refLookup = await lookupAccountByEmail(o.email);
+  if (!refLookup.found) {
+    if (refLookup.reason === "db_error")
+      return dbUnavailable(res, `READ ${ACCOUNTS_TABLE}: ${refLookup.error ?? "unknown"}`, refLookup.status);
+    return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
+  }
+  let acct = refLookup.account;
   if (!acct.referral_code) {
     const code = randomReferralCode();
     // CORRECTNESS (two bugs, either one alone made the mint fail 100%):

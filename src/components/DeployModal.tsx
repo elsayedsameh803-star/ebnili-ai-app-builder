@@ -235,7 +235,7 @@ export const DeployModal = ({
             <button
               onClick={handlePublish}
               disabled={busy !== null || !projectId}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-rose-500 to-orange-500 text-white text-xs font-black hover:brightness-110 transition cursor-pointer disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-sky-400 to-violet-500 text-white text-xs font-black hover:brightness-110 transition cursor-pointer disabled:opacity-60"
             >
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
               {language === 'ar' ? 'نشر الموقع الآن' : 'Publish site now'}

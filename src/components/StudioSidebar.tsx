@@ -262,7 +262,7 @@ export const StudioSidebar = ({
           be the anchor. */}
       <div ref={projectsMenuRef} className="relative shrink-0 border-b border-slate-800 p-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center shadow-md shadow-rose-500/20">
+          <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-tr from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center shadow-md shadow-sky-400/20">
             <span className="text-white text-base font-bold">♥</span>
           </div>
           <div className="min-w-0 flex-1">
@@ -515,9 +515,9 @@ export const StudioSidebar = ({
             title={authUser.name}
           >
             {authUser.picture ? (
-              <img src={authUser.picture} alt="" referrerPolicy="no-referrer" className="w-7 h-7 shrink-0 rounded-full object-cover ring-1 ring-rose-500/40" />
+              <img src={authUser.picture} alt="" referrerPolicy="no-referrer" className="w-7 h-7 shrink-0 rounded-full object-cover ring-1 ring-sky-400/40" />
             ) : (
-              <span className="w-7 h-7 shrink-0 rounded-full bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center">
+              <span className="w-7 h-7 shrink-0 rounded-full bg-gradient-to-tr from-sky-400 to-violet-500 flex items-center justify-center">
                 <UserIcon className="w-3.5 h-3.5 text-white" />
               </span>
             )}
@@ -586,7 +586,7 @@ export const StudioSidebar = ({
               {authUser?.picture ? (
                 <img src={authUser.picture} alt="" referrerPolicy="no-referrer" className="w-9 h-9 shrink-0 rounded-full object-cover" />
               ) : (
-                <span className="w-9 h-9 shrink-0 rounded-full bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center">
+                <span className="w-9 h-9 shrink-0 rounded-full bg-gradient-to-tr from-sky-400 to-violet-500 flex items-center justify-center">
                   <UserIcon className="w-4 h-4 text-white" />
                 </span>
               )}

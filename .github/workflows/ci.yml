@@ -1,0 +1,55 @@
+name: CI
+
+# Fails the branch when type-check, tests, build, or the secret scan fail.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Lockfile-compatible install; never --force.
+      - name: Install dependencies
+        run: npm ci
+
+      # 1) TypeScript
+      - name: Type check
+        run: npm run lint
+
+      # 2) Unit + contract tests (includes tests/hardening.test.ts)
+      - name: Tests
+        run: npm test
+
+      # 3) Production build (vite + brand images + seo pages)
+      - name: Build
+        run: npm run build
+
+      # 4) Secret scan of the built bundle. Patterns are precise to avoid
+      #    false positives: real Google API keys start with `AIza` + 35 chars,
+      #    and the removed dev fallback must never reappear.
+      - name: Scan build output for secrets
+        run: |
+          set -euo pipefail
+          if grep -rIlE 'AIza[0-9A-Za-z_-]{35}' dist/ ; then
+            echo "::error::Google API key material found in dist/"
+            exit 1
+          fi
+          if grep -rIl 'ebnili-insecure-dev-secret' dist/ ; then
+            echo "::error::Removed insecure fallback secret found in dist/"
+            exit 1
+          fi
+          if grep -rIlE 'process\.env\.VITE_GEMINI' dist/ api/ server.ts ; then
+            echo "::error::VITE_GEMINI read as a server secret"
+            exit 1
+          fi
+          echo "secret scan clean"

@@ -160,7 +160,7 @@ export const PublishButton = ({ projectId, language, className = '' }: PublishBu
         <button
           onClick={handlePublish}
           disabled={busy !== null}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-orange-500 text-white text-[11px] font-black hover:brightness-110 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-sky-400 to-violet-500 text-white text-[11px] font-black hover:brightness-110 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
           title={language === 'ar' ? 'نشر الموقع فعليًا على رابط عام' : 'Publish the site to a real public link'}
         >
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}

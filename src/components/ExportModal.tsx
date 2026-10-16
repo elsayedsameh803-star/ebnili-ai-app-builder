@@ -103,9 +103,23 @@ export const ExportModal = ({
       const result = await exportProjectFiles(project.files);
       const zip = new JSZip();
 
-      Object.entries(result.files).forEach(([path, content]) => {
-        zip.file(path, content);
-      });
+      // ZIP-SLIP + SIZE GUARDS: file names arrive from the generated project,
+      // so treat them as untrusted. Reject absolute paths, `..` escapes and
+      // backslashes, cap entries and bytes — a malicious project must not
+      // write outside the archive or OOM the tab.
+      const MAX_ZIP_FILES = 500;
+      const MAX_ZIP_BYTES = 20 * 1024 * 1024;
+      let zipBytes = 0;
+      const entries = Object.entries(result.files);
+      if (entries.length > MAX_ZIP_FILES) throw new Error('ZIP_TOO_MANY_FILES');
+      for (const [rawPath, content] of entries) {
+        const name = String(rawPath ?? "").replace(/\\/g, "/").trim();
+        if (!name || name.startsWith("/") || /(^|\/)\.\.(\/|$)/.test(name)) continue;
+        const text = String(content ?? "");
+        zipBytes += name.length + text.length;
+        if (zipBytes > MAX_ZIP_BYTES) throw new Error('ZIP_TOO_LARGE');
+        zip.file(name, text);
+      }
 
       // Generate blob — compression keeps large projects fast to build and small
       // to download. `streamFiles: true` is the default, but being explicit

@@ -44,7 +44,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6"
       >
         <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-8 text-center">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white shadow-xl shadow-rose-500/20 mb-5">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-tr from-sky-400 to-violet-500 flex items-center justify-center text-white shadow-xl shadow-sky-400/20 mb-5">
             <AlertTriangle className="w-8 h-8" />
           </div>
 

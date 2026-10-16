@@ -142,7 +142,7 @@ export const NewProjectHero = ({
       {/* Top Bar */}
       <header className="px-6 py-4 flex items-center justify-between border-b border-slate-800/80 bg-slate-950/90 sticky top-0 z-30 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center shadow-lg shadow-rose-500/25">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center shadow-lg shadow-sky-400/25">
             <span className="text-white text-lg font-bold">♥</span>
           </div>
           <div className="flex items-center gap-2">
@@ -205,14 +205,14 @@ export const NewProjectHero = ({
             {language === 'ar' ? (
               <>
                 ابنِ أي فكرة تطبيق ويب <br className="hidden sm:inline" />
-                <span className="bg-gradient-to-r from-rose-400 via-pink-400 to-amber-300 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-sky-300 via-cyan-200 to-violet-400 bg-clip-text text-transparent">
                   خلال ثوانٍ معدودة بكلماتك
                 </span>
               </>
             ) : (
               <>
                 Build any web application <br className="hidden sm:inline" />
-                <span className="bg-gradient-to-r from-rose-400 via-pink-400 to-amber-300 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-sky-300 via-cyan-200 to-violet-400 bg-clip-text text-transparent">
                   in seconds with plain words
                 </span>
               </>
@@ -230,7 +230,7 @@ export const NewProjectHero = ({
         <div className="w-full max-w-3xl">
           <form
             onSubmit={handleSubmit}
-            className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 sm:p-4 shadow-2xl shadow-rose-950/20 focus-within:border-rose-500/80 focus-within:ring-2 focus-within:ring-rose-500/20 transition backdrop-blur-xl"
+            className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 sm:p-4 shadow-2xl shadow-violet-950/20 focus-within:border-sky-400/80 focus-within:ring-2 focus-within:ring-sky-400/20 transition backdrop-blur-xl"
           >
             <textarea
               value={promptText}
@@ -270,7 +270,7 @@ export const NewProjectHero = ({
                 disabled={!promptText.trim() || isGenerating}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition shadow-lg cursor-pointer ${
                   promptText.trim() && !isGenerating
-                    ? 'bg-gradient-to-r from-rose-500 via-pink-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white shadow-rose-500/30 hover:scale-[1.02]'
+                    ? 'bg-gradient-to-r from-sky-400 via-cyan-300 to-violet-500 hover:from-sky-300 hover:to-violet-400 text-white shadow-sky-400/30 hover:scale-[1.02]'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                 }`}
               >
@@ -337,7 +337,7 @@ export const NewProjectHero = ({
               <div
                 key={tpl.id}
                 onClick={() => handleSelectTemplate(tpl)}
-                className="group bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-rose-500/40 rounded-2xl p-5 text-right transition cursor-pointer hover:shadow-xl hover:shadow-rose-950/10 flex flex-col justify-between"
+                className="group bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-sky-400/40 rounded-2xl p-5 text-right transition cursor-pointer hover:shadow-xl hover:shadow-violet-950/20 flex flex-col justify-between"
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">

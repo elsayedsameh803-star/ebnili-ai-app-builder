@@ -186,7 +186,7 @@ const AuthGateView = ({
     <div className="relative flex min-h-full items-center justify-center p-5">
       <div className="w-full max-w-[440px]">
         <div className="flex flex-col items-center text-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center shadow-lg shadow-rose-500/25">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center shadow-lg shadow-sky-400/25">
             <Sparkles className="w-8 h-8 text-white" />
           </div>
           <h1 className="mt-5 text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
@@ -199,7 +199,7 @@ const AuthGateView = ({
         </div>
 
         <div className="mt-7 rounded-2xl border border-slate-800 bg-slate-900/70 backdrop-blur-xl shadow-2xl overflow-hidden">
-          <div className="h-1 w-full bg-gradient-to-l from-rose-500 via-pink-500 to-amber-400" />
+          <div className="h-1 w-full bg-gradient-to-l from-sky-400 via-cyan-300 to-violet-500" />
 
           <div className="p-6 sm:p-7">
             {errorCode && (

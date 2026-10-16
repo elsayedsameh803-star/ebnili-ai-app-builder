@@ -123,18 +123,18 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     featuresAr: [
       '٤٠٠ أمر أو تعديل بالذكاء الاصطناعي شهرياً — استوديو وكالة كامل',
       'مشاريع غير محدودة (Pro: ٣ فقط) — عميل جديد = مشروع جديد بلا تكلفة',
-      'نشر على نطاق مخصص باسم علامتك (Live URL خاص بك)',
+      'نشر على نطاق مخصص باسم علامتك (قريباً — حالياً رابط /preview عام)',
       'تصدير White-label بدون أي شعار أو نسبة لإبنيلي',
-      'وصول عبر API لأتمتة التوليد داخل أنظمة وكالتك',
+      'وصول عبر API لأتمتة التوليد داخل أنظمة وكالتك (قريباً)',
       'أولوية قصوى في طابور المعالجة + دعم VIP عبر واتساب',
       'فواتير ضريبية للشركات (VAT) عند الطلب'
     ],
     featuresEn: [
       '400 AI commands or modifications per month — a full agency studio',
       'Unlimited projects (Pro: only 3) — a new client costs you nothing extra',
-      'Deploy to your OWN custom domain (not a subdomain)',
+      'Custom-domain publishing (coming soon — currently a public /preview link)',
       'White-label export: no watermark, no attribution to Ebnili',
-      'API access to automate generation inside your agency tooling',
+      'API access for agency automation (coming soon)',
       'Highest priority queue + VIP support over WhatsApp',
       'Tax invoices (VAT) for registered businesses'
     ],

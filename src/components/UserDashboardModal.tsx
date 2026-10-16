@@ -233,8 +233,8 @@ export const UserDashboardModal = ({
     >
       <div className="w-full max-w-5xl rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl overflow-hidden my-auto">
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-3 px-4 sm:px-6 py-4 border-b border-slate-800 bg-gradient-to-r from-slate-950 via-slate-900 to-rose-950/40">
-          <span className="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-rose-500 to-amber-400 flex items-center justify-center shadow-lg">
+        <div className="flex items-center gap-3 px-4 sm:px-6 py-4 border-b border-slate-800 bg-gradient-to-r from-slate-950 via-slate-900 to-violet-950/40">
+          <span className="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-sky-400 to-violet-500 flex items-center justify-center shadow-lg">
             <FolderTree className="w-5 h-5 text-white" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">

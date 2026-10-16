@@ -1,5 +1,29 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   BRAND PALETTE — icy blue primary + soft violet glow accents
+   ───────────────────────────────────────────────────────────────────────────
+   The old brand was rose/pink → amber (warm). The new identity is COOL:
+   icy blue (sky family) as the primary, violet as the glow/accent, with the
+   dark slate canvas unchanged. Semantic colors stay semantic — rose is still
+   errors/danger, emerald still success — only BRAND gradients moved.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@theme {
+  /* Icy-blue ramp (brand primary) */
+  --color-ice-100: #e0f2fe;
+  --color-ice-200: #bae6fd;
+  --color-ice-300: #7dd3fc;
+  --color-ice-400: #38bdf8;
+  --color-ice-500: #0ea5e9;
+  --color-ice-600: #0284c7;
+
+  /* Violet glow accents */
+  --color-glow-300: #c4b5fd;
+  --color-glow-400: #a78bfa;
+  --color-glow-500: #8b5cf6;
+  --color-glow-600: #7c3aed;
+}
+
 @layer base {
   body {
     font-family: 'Plus Jakarta Sans', 'Cairo', system-ui, -apple-system, sans-serif;
@@ -29,9 +53,9 @@ html {
   background: #475569;
 }
 
-/* Accessibility: visible keyboard focus without overriding component styles */
+/* Accessibility: visible keyboard focus — icy blue, the new brand primary */
 :focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid #38bdf8;
   outline-offset: 2px;
 }
 
@@ -42,8 +66,53 @@ body {
 }
 
 ::selection {
-  background: rgba(99, 102, 241, 0.35);
+  background: rgba(56, 189, 248, 0.30);
   color: #f8fafc;
+}
+
+/* ═══ Brand utilities ═══════════════════════════════════════════════════════
+   One canonical gradient + glow set. Components reference these instead of
+   hand-rolling color pairs, so the palette can be retuned in ONE place. */
+@layer utilities {
+  /* Icy blue → violet. The signature brand gradient (CTAs, logo tiles). */
+  .gradient-brand {
+    background-image: linear-gradient(135deg, #38bdf8 0%, #22d3ee 45%, #8b5cf6 100%);
+  }
+
+  /* Softer two-stop variant for hover states / smaller chips. */
+  .gradient-brand-strong {
+    background-image: linear-gradient(135deg, #22d3ee 0%, #818cf8 100%);
+  }
+
+  /* Text in icy blue → violet (headings, hero words). */
+  .text-gradient-brand {
+    background: linear-gradient(90deg, #7dd3fc 0%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Soft violet-tinted surface wash for featured cards/headers. */
+  .bg-glow-wash {
+    background-image: linear-gradient(120deg, rgba(56, 189, 248, 0.10) 0%, rgba(139, 92, 246, 0.14) 100%);
+  }
+
+  /* Ambient rays: icy glow top-start, violet glow bottom-end. Drop onto any
+     dark container that should feel "lit" without changing its layout. */
+  .bg-ambient-glow {
+    background-image:
+      radial-gradient(640px 320px at 10% -10%, rgba(56, 189, 248, 0.10), transparent 62%),
+      radial-gradient(720px 360px at 98% 110%, rgba(139, 92, 246, 0.12), transparent 60%);
+  }
+
+  /* Halo shadows for primary buttons / active nav. */
+  .glow-icy {
+    box-shadow: 0 0 22px rgba(56, 189, 248, 0.35), 0 0 60px rgba(56, 189, 248, 0.12);
+  }
+
+  .glow-violet {
+    box-shadow: 0 0 26px rgba(139, 92, 246, 0.35), 0 0 70px rgba(139, 92, 246, 0.14);
+  }
 }
 
 /* Respect users who prefer reduced motion (WCAG) */

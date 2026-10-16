@@ -32,11 +32,11 @@ export const NotFoundPage = ({ language, onNavigate }: NotFoundPageProps) => {
       dir={ar ? 'rtl' : 'ltr'}
       className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center px-5 py-12 text-center"
     >
-      <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center text-white shadow-xl shadow-rose-500/20 mb-6">
+      <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center text-white shadow-xl shadow-sky-400/20 mb-6">
         <Search className="w-7 h-7" aria-hidden="true" />
       </div>
 
-      <p className="font-mono text-6xl sm:text-7xl font-black bg-gradient-to-r from-rose-400 via-pink-400 to-amber-300 bg-clip-text text-transparent leading-none">
+      <p className="font-mono text-6xl sm:text-7xl font-black bg-gradient-to-r from-sky-300 via-cyan-200 to-violet-400 bg-clip-text text-transparent leading-none">
         404
       </p>
 
@@ -54,7 +54,7 @@ export const NotFoundPage = ({ language, onNavigate }: NotFoundPageProps) => {
         <button
           type="button"
           onClick={() => onNavigate('/')}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 via-pink-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white text-sm font-bold transition shadow-lg shadow-rose-500/25 cursor-pointer"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-400 via-cyan-300 to-violet-500 hover:from-sky-300 hover:to-violet-400 text-white text-sm font-bold transition shadow-lg shadow-violet-500/25 cursor-pointer"
         >
           <Home className="w-4 h-4" aria-hidden="true" />
           <span>{ar ? 'العودة إلى الاستوديو' : 'Back to the studio'}</span>

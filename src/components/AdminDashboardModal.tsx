@@ -1121,7 +1121,7 @@ export const AdminDashboardModal = ({
         {/* Top Header */}
         <div className="px-6 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-rose-500/20 font-bold">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-400 to-violet-500 flex items-center justify-center text-white shadow-lg shadow-sky-400/20 font-bold">
               <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
@@ -1212,7 +1212,7 @@ export const AdminDashboardModal = ({
               <button
                 type="submit"
                 disabled={isAuthenticating}
-                className="w-full py-3 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-rose-600/20"
+                className="w-full py-3 bg-gradient-to-r from-sky-500 to-violet-500 hover:from-sky-400 hover:to-violet-400 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-violet-500/20"
               >
                 {isAuthenticating ? 'جاري التحقق...' : 'دخول لوحة الإدارة'}
               </button>
@@ -1967,7 +1967,7 @@ export const AdminDashboardModal = ({
 
                   <button
                     type="submit"
-                    className="py-2.5 px-6 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl text-xs transition shadow-md shadow-rose-600/20"
+                    className="py-2.5 px-6 bg-gradient-to-r from-sky-500 to-violet-500 hover:from-sky-400 hover:to-violet-400 text-white font-bold rounded-xl text-xs transition shadow-md shadow-violet-500/20"
                   >
                     حفظ التغييرات في النظام
                   </button>

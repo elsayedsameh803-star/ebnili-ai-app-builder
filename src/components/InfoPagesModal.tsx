@@ -86,7 +86,7 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
       >
         <div className="px-5 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center text-white text-base font-bold shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-400 to-violet-500 flex items-center justify-center text-white text-base font-bold shrink-0">
               ⚡
             </div>
             <div className="min-w-0">

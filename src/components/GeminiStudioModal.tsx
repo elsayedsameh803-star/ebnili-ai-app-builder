@@ -304,7 +304,7 @@ export const GeminiStudioModal = ({
         {/* Modal Top Header */}
         <div className="px-6 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 via-purple-600 to-amber-400 flex items-center justify-center shadow-lg shadow-rose-500/20">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center shadow-lg shadow-sky-400/20">
               <Sparkles className="w-5 h-5 text-white animate-spin-slow" />
             </div>
             <div>
@@ -554,7 +554,7 @@ export const GeminiStudioModal = ({
                   disabled={!prompt.trim() || isGenerating}
                   className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer ${
                     prompt.trim() && !isGenerating
-                      ? 'bg-gradient-to-r from-rose-500 via-pink-600 to-amber-500 hover:from-rose-400 hover:to-pink-500 text-white shadow-md shadow-rose-500/30'
+                      ? 'bg-gradient-to-r from-sky-400 to-violet-500 hover:from-sky-300 hover:to-violet-400 text-white shadow-md shadow-sky-400/30'
                       : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                   }`}
                 >

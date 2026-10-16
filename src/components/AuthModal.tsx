@@ -59,12 +59,12 @@ export const AuthModal = ({ isOpen, onClose, language, errorCode }: AuthModalPro
         className="w-full max-w-[400px] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden"
       >
         {/* Gradient accent line */}
-        <div className="h-1 w-full bg-gradient-to-l from-rose-500 via-pink-500 to-amber-400" />
+        <div className="h-1 w-full bg-gradient-to-l from-sky-400 via-cyan-300 to-violet-500" />
 
         <div className="p-6 sm:p-7">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center shadow-md shadow-rose-500/20">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center shadow-md shadow-sky-400/20">
                 <LogIn className="w-5 h-5 text-white" />
               </div>
               <div>

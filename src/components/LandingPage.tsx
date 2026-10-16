@@ -102,7 +102,7 @@ export const LandingPage = ({ initialLanguage, onNavigateToLogin, onNavigateToPr
       <motion.header className="fixed top-0 left-0 right-0 z-50 transition-all duration-300" style={{ y: scrollTransform }}>
         <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between">
           <a href="/" className="flex items-center gap-2 group">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center shadow-md shadow-rose-500/20 group-hover:scale-105 transition-transform">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center shadow-md shadow-sky-400/20 group-hover:scale-105 transition-transform">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl font-extrabold tracking-tight font-['Cairo',sans-serif]">
@@ -176,7 +176,7 @@ export const LandingPage = ({ initialLanguage, onNavigateToLogin, onNavigateToPr
             >
               <button
                 onClick={onNavigateToLogin}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-l from-rose-500 via-pink-500 to-amber-400 px-7 py-3.5 text-base font-bold text-white shadow-lg shadow-rose-500/25 hover:shadow-xl hover:shadow-rose-500/30 hover:from-rose-600 hover:via-pink-600 hover:to-amber-500 transition-all duration-300"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-l from-sky-400 via-cyan-300 to-violet-500 px-7 py-3.5 text-base font-bold text-white shadow-lg shadow-sky-400/25 hover:shadow-xl hover:shadow-violet-500/30 hover:from-sky-300 hover:via-cyan-200 hover:to-violet-400 transition-all duration-300"
               >
                 {t.heroCta}
                 <ArrowRight className="w-5 h-5" />
@@ -235,7 +235,7 @@ export const LandingPage = ({ initialLanguage, onNavigateToLogin, onNavigateToPr
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ ...fadeUp.transition, delay: i * 0.15 }}
               >
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center text-white text-2xl font-bold shadow-lg shadow-rose-500/20 mx-auto mb-4">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center text-white text-2xl font-bold shadow-lg shadow-violet-500/20 mx-auto mb-4">
                   {num}
                 </div>
                 <h3 className="text-lg font-bold text-slate-900 mb-2">{i === 0 ? 'أدخل وصف مشروعك' : i === 1 ? 'أنتج الذكاء الاصطناعي الموقع' : i === 2 ? 'عدل وتفاعل مع المشروع' : 'نشر ومشاركة'}</h3>
@@ -261,7 +261,7 @@ export const LandingPage = ({ initialLanguage, onNavigateToLogin, onNavigateToPr
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ ...fadeUp.transition, delay: i * 0.1 }}
               >
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center text-white text-xl mb-4">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center text-white text-xl mb-4">
                   {i === 0 ? '✏️' : i === 1 ? '🤖' : i === 2 ? '🛠️' : '🚀'}
                 </div>
                 <div className="flex items-center gap-2 mb-3">

@@ -1574,10 +1574,10 @@ export default function App() {
     return (
       <div className="h-screen bg-slate-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center">
             <Sparkles className="w-5 h-5 text-white" />
           </div>
-          <div className="w-6 h-6 rounded-full border-2 border-slate-800 border-t-indigo-400 animate-spin" />
+          <div className="w-6 h-6 rounded-full border-2 border-slate-800 border-t-sky-400 animate-spin" />
         </div>
       </div>
     );

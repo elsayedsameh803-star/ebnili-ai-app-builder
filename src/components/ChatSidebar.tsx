@@ -801,7 +801,7 @@ export const ChatSidebar = ({
               disabled={!inputText.trim() || isGenerating}
               className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg font-bold text-xs transition cursor-pointer ${
                 inputText.trim() && !isGenerating
-                  ? 'bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-400 hover:to-pink-500 text-white shadow-sm shadow-rose-500/30'
+                  ? 'bg-gradient-to-r from-sky-400 to-violet-500 hover:from-sky-300 hover:to-violet-400 text-white shadow-sm shadow-sky-400/30'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed'
               }`}
             >

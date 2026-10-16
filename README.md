@@ -20,7 +20,7 @@ and an Orange Cash wallet.
 - **Visual Inspector** — Click any element in the preview to select, edit, or delete it.
 - **Code Editor** — Monaco-style editor with syntax highlighting and version history.
 - **Export to ZIP** — Download the generated project as a `.zip` archive.
-- **Deploy to Custom Domain** — Built-in deployment workflow.
+- **Publish to a public link** — One-click publish to a shareable `/preview/<slug>` URL (paid plans). **Custom-domain publishing is not implemented yet** — the pricing page marks it "coming soon".
 - **Subscription System** — Gemini AI calls gated behind free / Pro / Business tiers.
 - **Orange Cash Payments** — Pay via Orange Money; admins verify transactions.
 - **Admin Dashboard** — Real statistics, device management, transaction approval, settings.
@@ -51,9 +51,11 @@ All API routes are served through the Vercel serverless function at `api/index.t
 | POST     | `/api/ai/gemini-architect`            | Multi-target code architect          |
 | POST     | `/api/ai/gemini-code-doctor`          | Optimize & fix code with Gemini      |
 
-> **Export:** the ZIP is generated in the browser from the user's own project
-> files (see `src/components/ExportModal.tsx`). There is no server route that
-> serves the platform's source code.
+> **Export:** the ZIP archive is assembled in the browser, but the FILES come from
+> the server: `POST /api/projects/export` resolves the tier from the session,
+> applies the watermark to free-tier HTML (`applyWatermark`), and sanitises file
+> names (Zip-Slip / size caps). A free account gets 403 `FREE_PREVIEW_ONLY`.
+> No route serves the platform's own source code.
 
 ## Local Development
 
@@ -363,13 +365,28 @@ All stateful endpoints on `api/index.ts` therefore use **Supabase (PostgREST)**
 instead. On Vercel you must:
 
 1. Create a Supabase project.
-2. Run **`supabase/projects.sql`** in the SQL editor. It creates:
+2. Run the SQL files **in this exact order** in the SQL editor (each is
+   idempotent / safe to re-run, but the ORDER matters — the API is fail-closed,
+   so functions must exist BEFORE the code that calls them):
+
+   | # | File | Adds |
+   |---|------|------|
+   | 1 | `supabase/projects.sql` | The five base tables + RLS + the 2-arg daily credit RPC |
+   | 2 | `supabase/phase1_atomic_quota.sql` | Daily allowance columns + atomic spend function |
+   | 3 | `supabase/add_monthly_quota.sql` | **LAST** — monthly counters + the 3-arg window-aware RPCs the API actually calls (`p_window`) |
+   | 4 | `supabase/phase2_6_publish_jobs_teams_referral.sql` | Publish columns (`published`, `slug`, `published_html`, `published_at`), jobs / teams / referral tables |
+
+   ⚠️ Run `add_monthly_quota.sql` **after** `projects.sql`. If you ever re-run
+   `projects.sql`, re-run `add_monthly_quota.sql` afterwards — the API always
+   sends `p_window`, so the window-aware function must be the one in place.
+
    | Table                | Holds                                                   |
    | -------------------- | ------------------------------------------------------- |
-   | `ebnily_projects`    | Per-account projects                                    |
+   | `ebnily_projects`    | Per-account projects (+ publish snapshot columns)       |
    | `ebnily_payments`    | The Orange Cash review queue                            |
    | `ebnily_devices`     | The device registry (blocks, quota, tier)               |
    | `ebnily_settings`    | Owner-editable platform values                          |
+   | `ebnily_accounts`    | Accounts, credits wallet, AI allowance counters         |
 3. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in Vercel.
 
 Until that is done every stateful endpoint answers **503 `DB_UNAVAILABLE`** and the
@@ -385,10 +402,15 @@ This is the flow that used to be broken end to end:
 
 1. The customer submits from `/pay` or the subscription dialog → a row is written to
    `ebnily_payments` with `status = 'pending'` and `account_email` taken from the
-   session cookie.
+   session cookie. **Amounts (EGP/USD) are derived server-side from the plan
+   table — a client-supplied amount is ignored.** Submitting without a receipt
+   still creates the row (the response says `awaiting_receipt`); an image alone
+   is never treated as proof of payment.
 2. The owner opens the dashboard → **Transactions** lists the request.
-3. Approving writes `status = 'confirmed'` plus `reviewed_at`. The account and tier
-   are read from the stored row, never from the request body.
+3. Approving writes `status = 'confirmed'` plus `reviewed_at`/`reviewed_by` in
+   ONE conditional write (`status = eq.pending`), so two concurrent approvals
+   cannot double-grant: the loser gets 409. The account and tier are read from
+   the stored row, never from the request body.
 4. `/api/subscriptions/current` returns the paid tier to that account on any device,
    with the expiry measured from `reviewed_at`.
 
