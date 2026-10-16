@@ -22,9 +22,11 @@ const SERVER_SRC = readFileSync(new URL("../server.ts", import.meta.url), "utf8"
 function fnBody(src: string, signature: string): string {
   const start = src.indexOf(signature);
   assert.ok(start >= 0, `signature not found: ${signature}`);
-  const end = src.indexOf("\n}\n", start);
+  // Windows CRLF (server.ts) breaks a bare "\n}" search; normalise both flavors.
+  const normalized = src.replace(/\r\n/g, "\n");
+  const end = normalized.indexOf("\n}\n", start);
   assert.ok(end > start, `unterminated function: ${signature}`);
-  return src.slice(start, end + 3);
+  return normalized.slice(start, end + 3);
 }
 
 describe("phase 1 — account lookup uses the real schema column", () => {

@@ -29,8 +29,6 @@ import {
   updateRemoteProject,
   type ProjectSummary,
   type RemoteProject,
-  type GitHubImportResult,
-  pickEntryFile,
 } from './lib/projects';
 
 // ── Code splitting ───────────────────────────────────────────────────────────
@@ -43,7 +41,7 @@ const DeployModal = lazy(() => import('./components/DeployModal').then((m) => ({
 const IntegrationsModal = lazy(() => import('./components/IntegrationsModal').then((m) => ({ default: m.IntegrationsModal })));
 const SubscriptionModal = lazy(() => import('./components/SubscriptionModal').then((m) => ({ default: m.SubscriptionModal })));
 const GeminiStudioModal = lazy(() => import('./components/GeminiStudioModal').then((m) => ({ default: m.GeminiStudioModal })));
-const GitHubImportModal = lazy(() => import('./components/GitHubImportModal').then((m) => ({ default: m.GitHubImportModal })));
+
 const AdminDashboardModal = lazy(() => import('./components/AdminDashboardModal').then((m) => ({ default: m.AdminDashboardModal })));
 // «لوحة المستخدم» — the signed-in customer's dashboard. Lazy like every other
 // overlay so it stays out of the first paint.
@@ -190,9 +188,7 @@ export default function App() {
   const [showIntegrations, setShowIntegrations] = useState<boolean>(false);
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
   const [showGeminiStudio, setShowGeminiStudio] = useState<boolean>(false);
-  const [showGitHubImport, setShowGitHubImport] = useState<boolean>(false);
-  /** Why a GitHub link attempt came back failed, shown inside the import dialog. */
-  const [gitHubLinkError, setGitHubLinkError] = useState<string | null>(null);
+
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
   /** «لوحة المستخدم» — only ever opened by a signed-in account. */
   const [showUserDashboard, setShowUserDashboard] = useState<boolean>(false);
@@ -312,40 +308,7 @@ export default function App() {
   // Returning from the GitHub link: `/?github=linked` or `/?github_error=<code>`.
   // The importer opens straight away so the user picks a repository next, and
   // the query string is scrubbed exactly like the auth one.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const linked = params.get('github');
-    const failure = params.get('github_error');
-    if (!linked && !failure) return;
 
-    setShowGitHubImport(true);
-    if (failure) {
-      // GitHub itself refuses to even show its consent screen when the callback
-      // URL is not registered, so it never redirects back here — meaning the
-      // visitor lands on github.com's error page with no idea what to change.
-      // These codes are the ones our own callback produces; explain each one in
-      // plain language instead of showing a raw identifier.
-      const messages: Record<string, string> = {
-        auth_required:
-          'انتهت جلستك قبل اكتمال الربط مع GitHub. سجّل الدخول مجدداً ثم أعد المحاولة.',
-        state_mismatch:
-          'انتهت صلاحية طلب الربط. أعد المحاولة من جديد.',
-        exchange_failed:
-          'تعذّر إتمام الربط مع GitHub. تأكد من صحة مفاتيح GITHUB_CLIENT_ID و GITHUB_CLIENT_SECRET.',
-        not_configured:
-          'الربط مع GitHub غير مُعد على الخادم. أضف مفاتيح GITHUB_CLIENT_ID و GITHUB_CLIENT_SECRET في Vercel.',
-        account_required:
-          'الربط متاح فقط بعد تسجيل الدخول بحسابك أولاً.',
-      };
-      setGitHubLinkError(
-        messages[failure] ||
-          (language === 'ar'
-            ? 'تعذّر إتمام الربط مع GitHub. حاول مرة أخرى.'
-            : 'Could not complete the GitHub link. Please try again.'),
-      );
-    }
-    window.history.replaceState({}, '', window.location.pathname);
-  }, [language]);
 
   const handleLogout = useCallback(async () => {
     await authLogout();
@@ -784,61 +747,12 @@ export default function App() {
     [projectId, projectList, authUser, refreshProjectList, handleSelectProject, handleStartNewProject],
   );
 
-  /**
-   * Take a repository's files and drop them straight into the studio.
-   *
-   * The imported tree becomes the project's `files`, and `code` (the document the
-   * preview renders) points at the real entry file. A brand-new project id is
-   * minted so the import lands in its own saved project rather than overwriting
-   * whatever was open.
-   */
-  const handleGitHubImported = useCallback(
-    (result: GitHubImportResult) => {
-      const files = result.files;
-      const activeFile = pickEntryFile(files);
-      const name = result.repo.name;
-      const importedAt = new Date().toISOString();
 
-      setProject({
-        id: '',
-        name,
-        description: `مستورد من ${result.repo.fullName} (${result.repo.branch})`,
-        code: files[activeFile] ?? '',
-        files,
-        activeFile,
-        versions: [],
-        createdAt: importedAt,
-        updatedAt: importedAt,
-        theme: createBlankProject().theme,
-      });
-      // SECURITY / CORRECTNESS — mint the id HERE instead of clearing it.
-      // `setProjectId(null)` used to run right after `setProject`, which left the
-      // import with no id at all: the auto-save effect bails out on a falsy
-      // `projectId`, so an imported repository was never persisted and vanished
-      // the moment the user left the page. Minting it here means the imported
-      // tree lands in its own saved project and is listed like any other.
-      const importedId = newProjectId();
-      setProjectId(importedId);
-      setActiveId(importedId);
-      setSelectedElement(null);
-      setHasStarted(true);
-      setLastFailedPrompt(null);
-      setLastFailReason(null);
-      setChatMessages([
-        {
-          id: 'm-1',
-          sender: 'assistant',
-          text:
-            language === 'ar'
-              ? `تم استيراد ${result.stats.imported} ملف من ${result.repo.fullName}. عدّل عليه مباشرة أو اطلب مني أي تعديل.`
-              : `Imported ${result.stats.imported} files from ${result.repo.fullName}. Edit them directly or ask me for any change.`,
-          timestamp: 'الآن',
-        },
-      ]);
-      void refreshProjectList();
-    },
-    [language, refreshProjectList],
-  );
+
+
+
+
+
 
   const handleRenameStoredProject = useCallback(
     (id: string, name: string) => {
@@ -1024,11 +938,11 @@ export default function App() {
     if (!streamRes.ok || !streamRes.body) {
       // Surface the SERVER's reason (e.g. "GEMINI_API_KEY غير مُعد", quota,
       // rate-limit) instead of silently swallowing it into a generic fallback.
-      const errBody = (await res.json().catch(() => ({}))) as { message?: string };
+      const errBody = (await streamRes.json().catch(() => ({}))) as { message?: string };
       return { ok: false, failure: errBody.message || undefined };
     }
 
-    const reader = res.body.getReader();
+    const reader = streamRes.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let received = '';
@@ -1532,25 +1446,14 @@ export default function App() {
           onToggleLanguage={() => setLanguage((l) => (l === 'ar' ? 'en' : 'ar'))}
           subscription={subscription}
           onOpenSubscription={() => setShowSubscription(true)}
-          onOpenGitHubImport={() => setShowGitHubImport(true)}
+
           // The hero is the guest's landing page and the studio rail (which also
           // offers sign-in) is not mounted until a session exists, so the button
           // has to be wired here or a visitor has no visible way to sign in.
           onOpenAuth={() => setShowAuthModal(true)}
           onOpenInfoPage={setInfoPage}
         />
-        {showGitHubImport && (
-          <GitHubImportModal
-            onClose={() => {
-              setShowGitHubImport(false);
-              // Clear the failure so it does not reappear next time the dialog opens.
-              setGitHubLinkError(null);
-            }}
-            language={language}
-            onImported={handleGitHubImported}
-            initialError={gitHubLinkError}
-          />
-        )}
+
         {showSubscription && (
           <SubscriptionModal
             currentSubscription={subscription}
@@ -1937,10 +1840,7 @@ export default function App() {
         {isOwner && showIntegrations && (
           <IntegrationsModal
             onClose={() => setShowIntegrations(false)}
-            onOpenGitHubImport={() => {
-              setShowIntegrations(false);
-              setShowGitHubImport(true);
-            }}
+
             language={language}
           />
         )}
