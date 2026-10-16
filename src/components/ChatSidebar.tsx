@@ -41,6 +41,8 @@ interface ChatSidebarProps {
   onOpenGeminiStudio?: () => void;
   /** Prompt of the last failed generation — enables the one-tap retry bar. */
   retryPrompt?: string | null;
+  /** Human-readable reason for that failure — shown inside the retry bar. */
+  retryReason?: string | null;
   onRetryPrompt?: () => void;
   /** True while tokens are streaming in from the AI engine. */
   isStreaming?: boolean;
@@ -65,6 +67,7 @@ export const ChatSidebar = ({
   onOpenSubscription,
   onOpenGeminiStudio,
   retryPrompt,
+  retryReason,
   onRetryPrompt,
   isStreaming,
   streamSeconds,
@@ -669,8 +672,15 @@ export const ChatSidebar = ({
               long specification again instead of making the user retype it. */}
           {retryPrompt && onRetryPrompt && !isGenerating && (
             <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30">
-              <span className="text-[11px] text-amber-200 truncate">
-                {language === 'ar' ? 'آخر محاولة لم تُنفَّذ' : 'Last attempt did not complete'}
+              <span
+                className="text-[11px] text-amber-200 truncate"
+                title={retryReason || undefined}
+              >
+                {retryReason
+                  ? `${language === 'ar' ? 'آخر محاولة: ' : 'Last attempt: '}${
+                      retryReason.length > 72 ? `${retryReason.slice(0, 72)}…` : retryReason
+                    }`
+                  : language === 'ar' ? 'آخر محاولة لم تُنفَّذ' : 'Last attempt did not complete'}
               </span>
               <button
                 type="button"

@@ -501,6 +501,8 @@ export default function App() {
   // Prompt of the last generation that failed, so the chat can offer a real
   // "try again" instead of making the user retype a long specification.
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
+  /** Why the last attempt failed — surfaced in the retry bar so it is actionable. */
+  const [lastFailReason, setLastFailReason] = useState<string | null>(null);
   // Streaming progress: seconds elapsed and whether tokens are arriving.
   const [streamSeconds, setStreamSeconds] = useState<number>(0);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -751,6 +753,7 @@ export default function App() {
     setSelectedElement(null);
     setHasStarted(false);
     setLastFailedPrompt(null);
+    setLastFailReason(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -820,6 +823,7 @@ export default function App() {
       setSelectedElement(null);
       setHasStarted(true);
       setLastFailedPrompt(null);
+      setLastFailReason(null);
       setChatMessages([
         {
           id: 'm-1',
@@ -978,6 +982,7 @@ export default function App() {
     };
     setChatMessages((prev) => [...prev, assistantMsg]);
     setLastFailedPrompt(null);
+    setLastFailReason(null);
   };
 
   // Consume /api/ai/generate-app/stream and paint the preview as tokens arrive.
@@ -987,7 +992,7 @@ export default function App() {
     prompt: string,
     templateId: string | undefined,
     devFp: { deviceId: string; fingerprintHash: string },
-  ): Promise<boolean> => {
+  ): Promise<{ ok: boolean; failure?: string }> => {
     const res = await fetch('/api/ai/generate-app/stream', {
       method: 'POST',
       headers: {
@@ -997,7 +1002,12 @@ export default function App() {
       },
       body: JSON.stringify({ prompt, templateId, language }),
     });
-    if (!res.ok || !res.body) return false;
+    if (!res.ok || !res.body) {
+      // Surface the SERVER's reason (e.g. "GEMINI_API_KEY غير مُعد", quota,
+      // rate-limit) instead of silently swallowing it into a generic fallback.
+      const errBody = (await res.json().catch(() => ({}))) as { message?: string };
+      return { ok: false, failure: errBody.message || undefined };
+    }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -1050,31 +1060,21 @@ export default function App() {
     } catch (err) {
       console.error('stream read failed', err);
       setIsStreaming(false);
-      return false;
+      return { ok: false };
     }
 
     setIsStreaming(false);
 
     if (!received.trim()) {
-      // Nothing came through — let the caller fall back to the normal call.
-      if (failureMessage) {
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            id: String(Date.now() + 1),
-            sender: 'assistant',
-            text: failureMessage,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          },
-        ]);
-      }
-      return false;
+      // Nothing came through — report the stream's own failure reason (if the
+      // server sent one) and let the caller offer a retry with that context.
+      return { ok: false, failure: failureMessage || undefined };
     }
 
     paint(true);
     setStreamSeconds((Date.now() - streamStartedAt.current) / 1000);
     commitGeneratedSite(prompt, received);
-    return true;
+    return { ok: true };
   };
 
   // Handle New App Generation
@@ -1094,32 +1094,36 @@ export default function App() {
     // ONE try/catch for the whole generation, INCLUDING the streaming attempt:
     // `finally` is what guarantees `isGenerating` is cleared on every exit path.
     try {
-      let streamed = false;
+      let streamResult: { ok: boolean; failure?: string } = { ok: false };
       let streamAttempted = false;
       try {
-        streamed = await tryStreamedGeneration(prompt, templateId, devFp);
-      streamAttempted = true;
-    } catch (streamErr) {
-      console.error('streaming path unavailable, falling back', streamErr);
-      streamed = false;
-    }
+        streamResult = await tryStreamedGeneration(prompt, templateId, devFp);
+        streamAttempted = true;
+      } catch (streamErr) {
+        console.error('streaming path unavailable, falling back', streamErr);
+        streamResult = { ok: false };
+      }
 
-    if (streamed) return;
+      if (streamResult.ok) return;
 
-    // The stream endpoint ran but produced no usable output: it already spent
-    // the credit, so show its failure instead of spending a second one.
-    if (streamAttempted) {
-      const assistantMsg: ChatMessage = {
-        id: String(Date.now() + 1),
-        sender: 'assistant',
-        text: language === 'ar'
-          ? '⚠️ تعذر إكمال التوليد المباشر. حاول مرة أخرى بطلب جديد.'
-          : '⚠️ Live generation could not finish. Please try again with a new request.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setChatMessages((prev) => [...prev, assistantMsg]);
-      return;
-    }
+      // The stream route ran but produced no usable output: it already spent
+      // the credit, so show ITS failure reason (never a generic line), offer a
+      // one-tap retry, and do NOT fall back into a second spend.
+      if (streamAttempted) {
+        const streamFailText = streamResult.failure || (language === 'ar'
+          ? '⚠️ تعذر إكمال التوليد المباشر. اضغط «إعادة المحاولة».'
+          : '⚠️ Live generation could not finish. Press Retry.');
+        const assistantMsg: ChatMessage = {
+          id: String(Date.now() + 1),
+          sender: 'assistant',
+          text: streamFailText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setChatMessages((prev) => [...prev, assistantMsg]);
+        setLastFailedPrompt(prompt);
+        setLastFailReason(streamFailText);
+        return;
+      }
 
       const res = await fetch('/api/ai/generate-app', {
         method: 'POST',
@@ -1155,6 +1159,7 @@ export default function App() {
         setChatMessages((prev) => [...prev, assistantMsg]);
         // Keep the prompt around so the chat can offer a one-tap retry.
         setLastFailedPrompt(prompt);
+        setLastFailReason(errorMsg);
         // Only open the subscription modal for quota errors, not server/key errors.
         if (/QUOTA|quota|استنفذت|الرصيد/.test(errorMsg)) setShowSubscription(true);
         return;
@@ -1195,6 +1200,7 @@ export default function App() {
       };
       setChatMessages((prev) => [...prev, networkMsg]);
       setLastFailedPrompt(prompt);
+      setLastFailReason(networkMsg.text);
     } finally {
       setIsGenerating(false);
       setCurrentPlanSteps([]);
@@ -1292,6 +1298,7 @@ export default function App() {
         };
         setChatMessages((prev) => [...prev, notApplied]);
         setLastFailedPrompt(prompt);
+        setLastFailReason(notApplied.text);
         return;
       }
 
@@ -1802,6 +1809,7 @@ export default function App() {
           onOpenSubscription={() => setShowSubscription(true)}
           onOpenGeminiStudio={() => setShowGeminiStudio(true)}
           retryPrompt={lastFailedPrompt}
+          retryReason={lastFailReason}
           onRetryPrompt={() => {
             if (lastFailedPrompt) handleStartProject(lastFailedPrompt);
           }}

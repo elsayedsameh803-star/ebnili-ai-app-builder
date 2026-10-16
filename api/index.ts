@@ -2014,6 +2014,28 @@ async function requireAiAllowance(req: Request, res: Response, next: NextFunctio
 }
 
 /**
+ * Refuse an AI request when the server has NO Gemini key configured — BEFORE
+ * `requireAiAllowance` spends a credit.
+ *
+ * WHY: the allowance middleware runs first on every AI route, so a missing
+ * `GEMINI_API_KEY` used to burn one of the customer's limited credits and then
+ * fail anyway with "GEMINI_API_KEY غير مُعد". A configuration problem on the
+ * server must never be paid for by the customer's quota.
+ */
+function requireGeminiKey(_req: Request, res: Response, next: NextFunction) {
+  if (getGeminiClients().length === 0) {
+    console.error("requireGeminiKey: no GEMINI_API_KEY configured — refusing WITHOUT spending a credit");
+    return res.status(503).json({
+      success: false,
+      code: "GEMINI_KEY_MISSING",
+      message:
+        "محرك الذكاء الاصطناعي غير مُهيّأ على الخادم (متغيّر GEMINI_API_KEY غير مضبوط). تواصل مع إدارة المنصة — لم يُخصم من رصيدك.",
+    });
+  }
+  return next();
+}
+
+/**
  * The signed-in account's remaining daily allowance.
  *
  * WHY THIS EXISTS: until now a customer could only discover their limit by
@@ -5244,7 +5266,7 @@ function friendlyAiError(raw: string, language: string): string {
     : "فشل توليد التطبيق. حاول مرة أخرى.";
 }
 
-app.post("/api/ai/generate-app", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/generate-app", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
   try {
     const ai = getGeminiClients();
     if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
@@ -5293,7 +5315,7 @@ app.post("/api/ai/generate-app", requireAiSession, requireAiAllowance, async (re
 // the model is still writing. Same models, same system rules, same fallbacks —
 // only the transport changes. On any model-level failure the client silently
 // falls back to the non-streaming /api/ai/generate-app above.
-app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/generate-app/stream", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
   const language = String((req.body as { language?: string })?.language ?? "ar");
   const promptRaw = String((req.body as { prompt?: string })?.prompt ?? "");
   const clients = getGeminiClients();
@@ -5309,7 +5331,12 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, as
   // be expressed as a 429 — the customer would just see a broken stream.
 
   if (clients.length === 0 || !promptRaw.trim()) {
-    return res.status(400).json({ success: false, message: clients.length === 0 ? "GEMINI_API_KEY غير مُعد" : "prompt مطلوب" });
+    // 503 for a server-side config problem (not the client's fault), 400 for a
+    // missing prompt. The `requireGeminiKey` guard normally catches the no-key
+    // case before spending a credit; this is defence-in-depth.
+    return res
+      .status(clients.length === 0 ? 503 : 400)
+      .json({ success: false, message: clients.length === 0 ? "GEMINI_API_KEY غير مُعد" : "prompt مطلوب" });
   }
 
   // SSE needs an unbuffered text/event-stream; Vercel otherwise holds the body
@@ -5408,7 +5435,7 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, as
 // the initial generate — so it was a full-cost Gemini call that the old flat
 // cap never touched. `refine-app` now spends from the same plan allowance as
 // every other AI route.
-app.post("/api/ai/refine-app", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/refine-app", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as {
     prompt?: string;
     currentCode?: string;
@@ -5485,7 +5512,7 @@ app.post("/api/ai/refine-app", requireAiSession, requireAiAllowance, async (req:
 // `improvements` in the doctor. The keys never matched, so all three buttons
 // silently did nothing. Each handler below asks the model for its own JSON
 // contract and maps the answer onto the exact keys the UI already reads.
-app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
   try {
     const ai = getGeminiClients();
     if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
@@ -5541,7 +5568,7 @@ app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireAiAllowance, 
   }
 });
 
-app.post("/api/ai/gemini-architect", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-architect", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
   try {
     const ai = getGeminiClients();
     if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
@@ -5603,7 +5630,7 @@ app.post("/api/ai/gemini-architect", requireAiSession, requireAiAllowance, async
   }
 });
 
-app.post("/api/ai/gemini-code-doctor", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-code-doctor", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
   try {
     const ai = getGeminiClients();
     if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });

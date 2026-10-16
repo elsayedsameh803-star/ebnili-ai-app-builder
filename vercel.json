@@ -70,7 +70,7 @@
 
   "functions": {
     "api/index.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   }
 }
