@@ -5725,7 +5725,7 @@ app.post("/api/jobs", limitWrites, async (req: Request, res: Response) => {
     console.error("job create failed:", created.error);
     return dbUnavailable(res);
   }
-  res.status(201).json({ success: true, job: toPublicJob(created.data[0]) });
+  res.status(201).json({ success: true, job: toPublicJob(created.data[0]!) });
 });
 
 app.get("/api/jobs", async (req: Request, res: Response) => {
@@ -5892,7 +5892,7 @@ app.post("/api/teams", limitWrites, async (req: Request, res: Response) => {
   const team: DbTeam = { id: mintId("team"), owner_id: owner.id, name_ar: nameAr, name_en: nameEn, created_at: now, updated_at: now };
   const created = await dbRequest<DbTeam[]>(TEAMS_TABLE, { method: "POST", body: JSON.stringify(team) });
   if (!created.ok || !created.data?.[0]) { console.error("team create failed:", created.error); return dbUnavailable(res); }
-  const row = created.data[0];
+  const row = created.data[0]!;
 
   // Seed the creator as the first member so the detail view and memberCount are
   // consistent from the first render. A failure here is non-fatal: teamRoleOf
@@ -5959,7 +5959,7 @@ app.post("/api/teams/:id/invite", limitWrites, async (req, res) => {
   const m: DbTeamMember = { id: mintId("mem"), team_id: t.id, user_id: a.account_id, user_email: a.email, user_name: a.display_name ?? "", role: r, joined_at: now, active: true };
   const created = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "POST", body: JSON.stringify(m) });
   if (!created.ok || !created.data?.[0]) { console.error("team invite failed:", created.error); return dbUnavailable(res); }
-  res.json({ success: true, member: toPublicMember(created.data[0]) });
+  res.json({ success: true, member: toPublicMember(created.data[0]!) });
 });
 
 
@@ -5979,7 +5979,7 @@ app.post("/api/teams/:id/change-role", limitWrites, async (req, res) => {
   if (t.owner_id !== c.id && role === "owner") return res.status(400).json({ success: false, code: "ROLE_TOO_HIGH", message: "فقط المالك يمكنه تعيين مالك." });
   const patched = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "PATCH", query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}` }, body: JSON.stringify({ role, updated_at: new Date().toISOString() }) });
   if (!patched.ok || !patched.data?.[0]) { console.error("team role change failed:", patched.error); return dbUnavailable(res); }
-  res.json({ success: true, member: toPublicMember(patched.data[0]) });
+  res.json({ success: true, member: toPublicMember(patched.data[0]!) });
 });
 app.post("/api/teams/:id/remove", limitWrites, async (req, res) => {
   const c = currentOwner(req);
@@ -6041,7 +6041,7 @@ app.get("/api/referral", limitWrites, async (req, res) => {
       body: JSON.stringify({ referral_code: code }),
     });
     if (!minted.ok || !minted.data?.[0]) { console.error("referral code mint failed:", minted.error); return dbUnavailable(res); }
-    acct = minted.data[0];
+    acct = minted.data[0]!;
   }
   res.json({ success: true, code: acct.referral_code });
 });

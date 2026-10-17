@@ -136,6 +136,17 @@ body {
       radial-gradient(720px 360px at 98% 110%, rgba(139, 92, 246, 0.12), transparent 60%);
   }
 
+  /* Modern purple canvas: deep purple base with soft violet/magenta rays.
+     Applied to the root page background so the whole site feels "lit" from
+     within without touching any panel/card colors. */
+  .bg-canvas-purple {
+    background-color: #0a0a1a;
+    background-image:
+      radial-gradient(900px 450px at 15% 0%, rgba(139, 92, 246, 0.16), transparent 55%),
+      radial-gradient(800px 400px at 110% 110%, rgba(236, 72, 153, 0.14), transparent 55%),
+      radial-gradient(560px 280px at 45% 45%, rgba(168, 85, 247, 0.10), transparent 50%);
+  }
+
   /* Halo shadows for primary buttons / active nav. */
   .glow-icy {
     box-shadow: 0 0 22px rgba(56, 189, 248, 0.35), 0 0 60px rgba(56, 189, 248, 0.12);

@@ -1,5 +1,3 @@
-import { supabase } from '../supabaseClient';
-
 /**
  * OWNER-LEVEL UI GATING
  * ─────────────────────
@@ -584,14 +582,9 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
   }
 }
 
-/** Full-page redirect into the provider's consent screen via Supabase OAuth. */
+/** Full-page redirect into the provider's consent screen via the server-side OAuth flow. */
 export async function startOAuth(provider: AuthProviderId): Promise<void> {
-  await supabase.auth.signInWithOAuth({
-    provider: provider,
-    options: {
-      redirectTo: 'https://ebnily.app',
-    },
-  })
+  window.location.href = `/api/auth/${provider}`;
 }
 
 /**
