@@ -1561,7 +1561,7 @@ export default function App() {
 
   return (
     <div
-      className={`h-screen flex flex-col bg-canvas-purple text-slate-100 overflow-hidden ${
+      className={`h-screen flex flex-col bg-canvas-purple text-slate-900 overflow-hidden ${
         language === 'ar' ? 'font-sans' : 'font-sans'
       }`}
       dir={language === 'ar' ? 'rtl' : 'ltr'}
