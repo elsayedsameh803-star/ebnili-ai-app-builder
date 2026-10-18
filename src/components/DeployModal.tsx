@@ -266,7 +266,7 @@ export const DeployModal = ({
               readOnly
               value={publicUrl}
               placeholder={language === 'ar' ? 'لم يُنشر بعد' : 'Not published yet'}
-              dir="ltr"
+             
               className="bg-transparent text-xs text-white font-mono flex-1 outline-none truncate"
             />
             <button

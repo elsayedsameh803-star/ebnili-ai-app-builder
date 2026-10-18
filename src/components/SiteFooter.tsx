@@ -79,7 +79,7 @@ export const SiteFooter = ({ language, onOpenInfoPage, className = '' }: SiteFoo
       <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-slate-500">
         <a
           href={`tel:${SUPPORT_PHONE_INTL}`}
-          dir="ltr"
+         
           className="inline-flex items-center gap-1.5 font-bold text-emerald-400 hover:text-emerald-300 transition"
         >
           <Phone className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -87,7 +87,7 @@ export const SiteFooter = ({ language, onOpenInfoPage, className = '' }: SiteFoo
         </a>
         <a
           href="mailto:elsayedsameh803@gmail.com"
-          dir="ltr"
+         
           className="inline-flex items-center gap-1.5 hover:text-white transition min-w-0"
         >
           <Mail className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />

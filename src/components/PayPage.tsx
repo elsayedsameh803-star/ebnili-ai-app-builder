@@ -239,7 +239,7 @@ export const PayPage = ({
                 <input
                   value={senderPhone}
                   onChange={(e) => setSenderPhone(e.target.value)}
-                  dir="ltr"
+                 
                   placeholder="01xxxxxxxxx"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
                 />
@@ -300,7 +300,7 @@ export const PayPage = ({
                 </div>
                 <div className="flex-1 min-w-[180px]">
                   <div className="text-[11px] text-slate-400 mb-1">{ar ? 'رقم المحفظة' : 'Wallet number'}</div>
-                  <div className="text-2xl font-black text-white font-mono tracking-wider" dir="ltr">{ORANGE_CASH_WALLET_NUMBER}</div>
+                  <div className="text-2xl font-black text-white font-mono tracking-wider">{ORANGE_CASH_WALLET_NUMBER}</div>
                   <div className="text-[11px] text-slate-400 mt-2">{ar ? 'أو من داخل التطبيق: #115#' : 'Or dial from the app: #115#'}</div>
                   <button onClick={copyWallet} className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition">
                     {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}

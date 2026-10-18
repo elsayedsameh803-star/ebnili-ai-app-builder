@@ -225,7 +225,7 @@ const AuthGateView = ({
                           {p}
                         </span>
                         <code
-                          dir="ltr"
+                         
                           className="flex-1 select-all break-all rounded bg-slate-950/60 px-1.5 py-1 text-[9px] text-rose-200 font-mono"
                         >
                           {callbacks[p]}
@@ -296,7 +296,7 @@ const AuthGateView = ({
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-center">
                 <p className="text-[11px] text-amber-200 leading-relaxed">{t.notReady}</p>
                 <p className="mt-1.5 text-[11px] text-amber-200/80 leading-relaxed">{t.notReadyHint}</p>
-                <code className="mt-2.5 block text-[10px] text-amber-300/90 font-mono break-all" dir="ltr">
+                <code className="mt-2.5 block text-[10px] text-amber-300/90 font-mono break-all">
                   GOOGLE_CLIENT_ID · GOOGLE_CLIENT_SECRET
                   <br />
                   GITHUB_CLIENT_ID · GITHUB_CLIENT_SECRET

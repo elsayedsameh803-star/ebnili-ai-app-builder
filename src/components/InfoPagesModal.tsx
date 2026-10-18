@@ -164,11 +164,11 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
                   </div>
                   <div className="flex items-center gap-2 text-slate-300">
                     <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span dir="ltr">{SUPPORT_PHONE_INTL}</span>
+                    <span>{SUPPORT_PHONE_INTL}</span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-300">
                     <Mail className="w-4 h-4 text-indigo-400 shrink-0" />
-                    <span dir="ltr" className="truncate">{SUPPORT_EMAIL}</span>
+                    <span className="truncate">{SUPPORT_EMAIL}</span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-300">
                     <Clock className="w-4 h-4 text-amber-400 shrink-0" />
@@ -200,7 +200,7 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
                     </div>
                     <a
                       href={`tel:${SUPPORT_PHONE_INTL}`}
-                      dir="ltr"
+                     
                       className="text-2xl font-black text-white hover:text-emerald-300 transition tracking-wider inline-block"
                     >
                       {SUPPORT_PHONE}
@@ -225,7 +225,7 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
                     <Mail className="w-4 h-4 text-indigo-400 shrink-0" />
                     <div className="min-w-0">
                       <div className="text-[11px] text-slate-400">{ar ? 'البريد الإلكتروني' : 'Email'}</div>
-                      <a href={`mailto:${SUPPORT_EMAIL}`} dir="ltr" className="text-[13px] text-white hover:text-rose-300 transition break-all">
+                      <a href={`mailto:${SUPPORT_EMAIL}`} className="text-[13px] text-white hover:text-rose-300 transition break-all">
                         {SUPPORT_EMAIL}
                       </a>
                     </div>
@@ -256,7 +256,7 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
                   <div className="text-[11px] text-orange-300/80 font-bold">
                     {ar ? 'محفظة أورانج كاش' : 'Orange Cash wallet'}
                   </div>
-                  <a href={`tel:${SUPPORT_PHONE_INTL}`} dir="ltr" className="text-lg font-black text-white hover:text-orange-300 transition tracking-wider">
+                  <a href={`tel:${SUPPORT_PHONE_INTL}`} className="text-lg font-black text-white hover:text-orange-300 transition tracking-wider">
                     {SUPPORT_PHONE}
                   </a>
                   <span className="text-[11px] text-slate-400">
@@ -367,7 +367,7 @@ export const InfoPagesModal = ({ onClose, language, initialPage = 'about' }: Inf
           </span>
           <a
             href={`tel:${SUPPORT_PHONE_INTL}`}
-            dir="ltr"
+           
             className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition"
           >
             <Phone className="w-3.5 h-3.5" />

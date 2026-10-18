@@ -23,6 +23,10 @@ export interface RemoteProject extends Omit<AppProject, 'description' | 'activeF
   description?: string;
   activeFile?: string;
   preview?: string;
+  /** Custom domain linked to this project (e.g. "myshop.example.com"). */
+  custom_domain?: string | null;
+  custom_domain_status?: 'pending' | 'verifying' | 'active' | 'failed' | null;
+  custom_domain_error?: string | null;
 }
 
 export class DbUnavailableError extends Error {

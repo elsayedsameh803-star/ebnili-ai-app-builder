@@ -8,6 +8,7 @@ import crypto from "crypto";
 // `server.ts` mounts it instead of duplicating those routes — see the note
 // next to `mountApi()` further down.
 import { mountApi } from "./api/index";
+import { customDomainMiddleware, customDomainServe } from "./middleware";
 
 // The README tells users to create `.env.local`, while classic dotenv only
 // reads `.env` — load both so GEMINI_API_KEY is picked up either way.
@@ -393,6 +394,8 @@ async function generateWithGeminiResilient(ai: GoogleGenAI, options: { contents:
 // with its full `/api/...` path, and it sits before the static handler so an
 // API route is always answered by the API, never by index.html.
 app.use(mountApi());
+app.use(customDomainMiddleware());
+app.use(customDomainServe());
 
 const distDir = path.join(appRootDir, "dist");
 

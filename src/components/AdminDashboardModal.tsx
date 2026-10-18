@@ -1258,7 +1258,7 @@ export const AdminDashboardModal = ({
                   {/* WHY: the database's own message. "column X does not exist"
                       IS the fix list — no guessing, no support thread. */}
                   {Object.keys(failedDetails).length > 0 && (
-                    <ul className="mt-1.5 space-y-0.5 font-mono text-[10px] text-amber-100/80" dir="ltr">
+                    <ul className="mt-1.5 space-y-0.5 font-mono text-[10px] text-amber-100/80">
                       {Object.entries(failedDetails).map(([table, detail]) => (
                         <li key={table} className="break-all">
                           <span className="font-semibold">{table}</span>: {detail}
@@ -1556,7 +1556,7 @@ export const AdminDashboardModal = ({
                                 <div className="text-xs font-bold text-slate-100 truncate">
                                   {account.name || 'مستخدم'}
                                 </div>
-                                <div className="text-[10px] text-slate-400 truncate" dir="ltr" title={account.email}>
+                                <div className="text-[10px] text-slate-400 truncate" title={account.email}>
                                   {account.email || '—'}
                                 </div>
                               </div>
@@ -2001,7 +2001,7 @@ export const AdminDashboardModal = ({
                       <div className="flex flex-col sm:flex-row gap-2">
                         <input
                           type="email"
-                          dir="ltr"
+                         
                           value={newAdminEmail}
                           onChange={(e) => setNewAdminEmail(e.target.value)}
                           placeholder="name@example.com"
@@ -2039,7 +2039,7 @@ export const AdminDashboardModal = ({
                                 admin.active ? 'bg-emerald-400' : 'bg-slate-600'
                               }`}
                             />
-                            <span dir="ltr" className="flex-1 min-w-0 truncate text-xs text-slate-200 font-mono">
+                            <span className="flex-1 min-w-0 truncate text-xs text-slate-200 font-mono">
                               {admin.email}
                             </span>
 
@@ -2129,7 +2129,7 @@ export const AdminDashboardModal = ({
                               <span className="block text-xs font-semibold text-white truncate">
                                 {person.name ?? 'لم يسجّل الدخول بعد'}
                               </span>
-                              <span dir="ltr" className="block text-[11px] text-slate-400 font-mono truncate">
+                              <span className="block text-[11px] text-slate-400 font-mono truncate">
                                 {person.email}
                               </span>
                             </span>

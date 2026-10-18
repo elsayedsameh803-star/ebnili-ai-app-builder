@@ -62,7 +62,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 تفاصيل تقنية (للمطوّرين)
               </summary>
               <pre
-                dir="ltr"
+               
                 className="mt-3 max-h-40 overflow-auto rounded-xl bg-slate-950 border border-slate-800 p-3 text-[11px] font-mono text-rose-400 whitespace-pre-wrap text-left"
               >
                 {this.state.error.message || String(this.state.error)}

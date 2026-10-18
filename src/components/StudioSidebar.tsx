@@ -96,6 +96,11 @@ export interface StudioSidebarProps {
    * passes this when `authUser` exists, and the modal itself re-checks.
    */
   onOpenUserDashboard?: () => void;
+  /**
+   * Opens «إعدادات الموقع» — site settings with the custom-domain card.
+   * Rendered only when a session exists.
+   */
+  onOpenSiteSettings?: () => void;
   onOpenAdmin?: () => void;
   authUser?: AuthUser | null;
   onOpenAuth?: () => void;
@@ -490,6 +495,15 @@ export const StudioSidebar = ({
             title={ar ? 'باقتك ورصيدك واستهلاك الكوتة ومشاريعك' : 'Your plan, balance, quota and projects'}
           />
         )}
+        {authUser && onOpenSiteSettings && (
+          <Row
+            icon={Globe}
+            label={ar ? 'إعدادات الموقع' : 'Site settings'}
+            onClick={onOpenSiteSettings}
+            iconClass="text-sky-400"
+            title={ar ? 'إدارة الدومين الخاص وإعدادات الموقع' : 'Manage custom domain and site settings'}
+          />
+        )}
         {onOpenSubscription && (
           <Row
             icon={Crown}
@@ -524,7 +538,7 @@ export const StudioSidebar = ({
             <span className="min-w-0 flex-1 text-start">
               <span className="block text-[11px] font-bold text-slate-200 truncate">{authUser.name}</span>
               {authUser.email && (
-                <span className="block text-[9px] text-slate-500 truncate" dir="ltr">
+                <span className="block text-[9px] text-slate-500 truncate">
                   {authUser.email}
                 </span>
               )}
@@ -593,7 +607,7 @@ export const StudioSidebar = ({
               <div className="min-w-0">
                 <div className="text-xs font-bold text-white truncate">{authUser?.name}</div>
                 {authUser?.email && (
-                  <div className="text-[10px] text-slate-400 truncate" dir="ltr">
+                  <div className="text-[10px] text-slate-400 truncate">
                     {authUser.email}
                   </div>
                 )}

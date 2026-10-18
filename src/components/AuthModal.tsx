@@ -124,7 +124,7 @@ export const AuthModal = ({ isOpen, onClose, language, errorCode }: AuthModalPro
                     ? 'لم يتم إعداد تسجيل الدخول بجوجل أو جيت هاب بعد. أضف المفاتيح التالية في إعدادات Vercel:'
                     : 'Google and GitHub sign-in are not configured yet. Add these keys in your Vercel settings:'}
                 </p>
-                <code className="mt-2 block text-[10px] text-amber-300/90 font-mono break-all" dir="ltr">
+                <code className="mt-2 block text-[10px] text-amber-300/90 font-mono break-all">
                   GOOGLE_CLIENT_ID · GOOGLE_CLIENT_SECRET
                   <br />
                   GITHUB_CLIENT_ID · GITHUB_CLIENT_SECRET

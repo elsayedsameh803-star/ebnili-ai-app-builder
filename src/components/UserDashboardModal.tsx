@@ -13,7 +13,9 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import type { AuthUser, Language, UserSubscription } from '../types';
-import type { ProjectSummary } from '../lib/projects';
+import type { ProjectSummary, RemoteProject } from '../lib/projects';
+import { fetchRemoteProject } from '../lib/projects';
+import { CustomDomainCard } from './CustomDomainCard';
 
 /**
  * USER DASHBOARD — «لوحة المستخدم»
@@ -133,6 +135,8 @@ export const UserDashboardModal = ({
   const [credits, setCredits] = useState<number | null>(null);
   const [serverSubscription, setServerSubscription] = useState<UserSubscription | null>(null);
   const [refreshTick, setRefreshTick] = useState<number>(0);
+  const [selectedProject, setSelectedProject] = useState<RemoteProject | null>(null);
+  const [loadingProject, setLoadingProject] = useState<boolean>(false);
 
   const activeSubscription = serverSubscription ?? subscription ?? null;
   const tier = (quota?.tier || activeSubscription?.tier || 'free').toLowerCase();
@@ -190,6 +194,16 @@ export const UserDashboardModal = ({
     }
   }, [onRefreshProjects]);
 
+  const handleSelectProject = useCallback(async (id: string) => {
+    setLoadingProject(true);
+    try {
+      const project = await fetchRemoteProject(id);
+      if (project) setSelectedProject(project);
+    } finally {
+      setLoadingProject(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isOpen) return;
     void load();
@@ -241,7 +255,7 @@ export const UserDashboardModal = ({
             <h2 className="text-base sm:text-lg font-black text-white truncate">
               {ar ? 'لوحة المستخدم' : 'My dashboard'}
             </h2>
-            <p className="text-[11px] text-slate-400 truncate" dir="ltr">
+            <p className="text-[11px] text-slate-400 truncate">
               {authUser.email || authUser.name}
             </p>
           </div>
@@ -318,7 +332,7 @@ export const UserDashboardModal = ({
                 <Wallet className="w-4 h-4 text-emerald-400" aria-hidden="true" />
                 <span className="text-[11px] font-bold text-slate-400">{ar ? 'الرصيد' : 'Balance'}</span>
               </div>
-              <p className="text-lg font-black text-white" dir="ltr">
+              <p className="text-lg font-black text-white">
                 {credits === null ? '—' : credits}
                 <span className="text-xs font-bold text-slate-400 ms-1">{ar ? 'كريديت' : 'credits'}</span>
               </p>
@@ -332,7 +346,7 @@ export const UserDashboardModal = ({
                 <Gauge className="w-4 h-4 text-cyan-400" aria-hidden="true" />
                 <span className="text-[11px] font-bold text-slate-400">{ar ? 'مستهلك اليوم' : 'Used today'}</span>
               </div>
-              <p className="text-lg font-black text-white" dir="ltr">
+              <p className="text-lg font-black text-white">
                 {limit > 0 ? `${used}/${limit}` : used}
               </p>
               <p className="text-[10px] text-slate-500 mt-1">
@@ -345,7 +359,7 @@ export const UserDashboardModal = ({
                 <ArrowUpRight className="w-4 h-4 text-rose-400" aria-hidden="true" />
                 <span className="text-[11px] font-bold text-slate-400">{ar ? 'المتبقي من الكوتة' : 'Quota left'}</span>
               </div>
-              <p className="text-lg font-black text-white" dir="ltr">
+              <p className="text-lg font-black text-white">
                 {limit > 0 || quota ? remaining : '—'}
               </p>
               <p className="text-[10px] text-slate-500 mt-1 truncate">
@@ -371,7 +385,7 @@ export const UserDashboardModal = ({
                     : 'Deducted from your plan allowance on every generation and renewed automatically at midnight (UTC).'}
                 </p>
               </div>
-              <span className="text-xs font-black text-slate-300 shrink-0" dir="ltr">
+              <span className="text-xs font-black text-slate-300 shrink-0">
                 {usedPct}%
               </span>
             </div>
@@ -391,19 +405,19 @@ export const UserDashboardModal = ({
             <div className="flex items-center justify-between gap-3 flex-wrap mt-2 text-[11px]">
               <span className="text-slate-400">
                 {ar ? 'مستهلك' : 'Used'}:{' '}
-                <b className="text-white" dir="ltr">
+                <b className="text-white">
                   {used}
                 </b>
               </span>
               <span className="text-slate-400">
                 {ar ? 'الحد' : 'Limit'}:{' '}
-                <b className="text-white" dir="ltr">
+                <b className="text-white">
                   {limit || '—'}
                 </b>
               </span>
               <span className="text-slate-400">
                 {ar ? 'المتبقي' : 'Remaining'}:{' '}
-                <b className={remaining <= 0 ? 'text-rose-400' : 'text-emerald-300'} dir="ltr">
+                <b className={remaining <= 0 ? 'text-rose-400' : 'text-emerald-300'}>
                   {remaining}
                 </b>
               </span>
@@ -462,7 +476,7 @@ export const UserDashboardModal = ({
                   )}
                   <li>
                     {ar ? 'حد التوليد اليومي' : 'Daily generation limit'}:{' '}
-                    <b className="text-slate-200" dir="ltr">
+                    <b className="text-slate-200">
                       {limit || '—'}
                     </b>
                   </li>
@@ -492,7 +506,7 @@ export const UserDashboardModal = ({
               <h3 className="text-sm font-black text-white flex items-center gap-2">
                 <FolderTree className="w-4 h-4 text-rose-400" aria-hidden="true" />
                 {ar ? 'مشاريعي' : 'My projects'}
-                <span className="text-[11px] font-bold text-slate-500" dir="ltr">
+                <span className="text-[11px] font-bold text-slate-500">
                   ({projects.length})
                 </span>
               </h3>
@@ -512,7 +526,10 @@ export const UserDashboardModal = ({
                     key={p.id}
                     className="group flex items-center gap-2 rounded-lg border border-transparent hover:border-slate-800 hover:bg-slate-900 px-3 py-2 transition min-w-0"
                   >
-                    <span className="min-w-0 flex-1">
+                    <span
+                      className="min-w-0 flex-1 cursor-pointer hover:text-rose-300 transition"
+                      onClick={() => handleSelectProject(p.id)}
+                    >
                       <span className="block text-xs font-bold text-slate-200 truncate">{p.name}</span>
                       <span className="block text-[10px] text-slate-500 truncate">
                         {p.versionCount ?? 0} {ar ? 'نسخة' : 'versions'} · {relativeTime(p.updatedAt, ar)}
@@ -521,7 +538,7 @@ export const UserDashboardModal = ({
                     {onSelectProject && (
                       <button
                         type="button"
-                        onClick={() => onSelectProject(p.id)}
+                        onClick={(e) => { e.stopPropagation(); onSelectProject(p.id); }}
                         className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-rose-300 hover:bg-rose-500/15 transition cursor-pointer"
                       >
                         <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
@@ -533,6 +550,18 @@ export const UserDashboardModal = ({
               </div>
             )}
           </div>
+          {selectedProject && (
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+              <CustomDomainCard
+                project={selectedProject}
+                language={language}
+                onDomainChanged={() => {
+                  setSelectedProject(null);
+                  void onRefreshProjects?.();
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

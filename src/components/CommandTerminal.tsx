@@ -36,7 +36,7 @@ const CommandRow = ({ entry, language }: { entry: CommandEntry; language: Langua
     <div className="group rounded-lg border border-slate-800 bg-slate-950/70 overflow-hidden">
       <div className="flex items-start gap-2 px-3 pt-2.5 pb-1.5">
         <span className="font-mono text-emerald-400 select-none shrink-0" aria-hidden="true">$</span>
-        <code className="font-mono text-[11px] text-slate-200 break-all flex-1 select-all" dir="ltr">
+        <code className="font-mono text-[11px] text-slate-200 break-all flex-1 select-all">
           {entry.command}
         </code>
       </div>
@@ -153,7 +153,7 @@ export const CommandTerminal = ({ projectName, language }: CommandTerminalProps)
           value={repoInput}
           onChange={(e) => setRepoInput(e.target.value)}
           placeholder="owner/repository"
-          dir="ltr"
+         
           spellCheck={false}
           autoComplete="off"
           className="w-full rounded-md bg-slate-900 border border-slate-700 px-2.5 py-1.5 font-mono text-[11px] text-white outline-none focus:border-rose-500/50"
@@ -212,7 +212,7 @@ export const CommandTerminal = ({ projectName, language }: CommandTerminalProps)
             {ar ? 'نسخ الكل' : 'Copy all'}
           </button>
         </div>
-        <pre className="font-mono text-[10px] leading-relaxed text-slate-400 whitespace-pre-wrap break-all select-all" dir="ltr">
+        <pre className="font-mono text-[10px] leading-relaxed text-slate-400 whitespace-pre-wrap break-all select-all">
           {bundle.allScript}
         </pre>
       </div>

@@ -16,6 +16,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import crypto from "node:crypto";
+import { resolveCname, resolve4 } from "node:dns/promises";
 import {
   clientKey,
   corsGuard,
@@ -667,6 +668,9 @@ function toPublicProject(row: DbProject) {
     theme: row.theme ?? {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    custom_domain: row.custom_domain ?? null,
+    custom_domain_status: row.custom_domain_status ?? null,
+    custom_domain_error: row.custom_domain_error ?? null,
   };
 }
 
@@ -725,7 +729,7 @@ app.get("/api/projects", (req: Request, res: Response) => {
 
   void dbRequest<DbProject[]>(PROJECTS_TABLE, {
     query: {
-      select: "id,name,code,files,versions,theme,created_at,updated_at",
+      select: "id,name,code,files,versions,theme,created_at,updated_at,custom_domain,custom_domain_status,custom_domain_error",
       owner_id: `eq.${owner.id}`,
       order: "updated_at.desc",
     },
@@ -762,7 +766,7 @@ app.get("/api/projects/:id", (req: Request, res: Response) => {
   const id = String(req.params.id ?? "");
   void dbRequest<DbProject[]>(PROJECTS_TABLE, {
     query: {
-      select: "id,name,code,files,versions,theme,created_at,updated_at",
+      select: "id,name,code,files,versions,theme,created_at,updated_at,custom_domain,custom_domain_status,custom_domain_error",
       owner_id: `eq.${owner.id}`,
       id: `eq.${id}`,
       limit: "1",
@@ -3421,6 +3425,9 @@ interface DbProject {
   theme: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  custom_domain?: string | null;
+  custom_domain_status?: string | null;
+  custom_domain_error?: string | null;
 }
 
 const PROJECTS_TABLE = "ebnily_projects";
@@ -6112,6 +6119,152 @@ export default app;
  * every route here is already declared with its full `/api/...` path. Mounting
  * at `/api` would make Express look for `/api/api/health`.
  */
+// ═════════════════════════════════════════════════════════════════════════════════
+// Custom domains — link a user domain to a project + DNS verification
+// ══════════════════════════════════════════════════════════════════════════════════
+
+const DNS_TARGET_CNAME = "cname.ebnily.app";
+const DNS_TARGET_A = "76.76.21.21";
+
+type DomainStatus = "pending" | "verifying" | "active" | "failed";
+
+function normalizeDomain(raw: string): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\/$/, "");
+}
+
+function domainErrorArabic(code: string | undefined): string {
+  const map: Record<string, string> = {
+    ENOTFOUND: "الدومين غير موجود أو لا يمكن الوصول إليه — تأكد من كتابة الدومين بشكل صحيح.",
+    ENODATA: "لا يوجد سجل DNS للدومين — أضف سجل CNAME أو A record أولاً.",
+    CNAME_MISSING: "سجل CNAME مفقود — أشر الدومين إلى cname.ebnily.app.",
+    A_MISSING: "سجل A مفقود — أشر الدومين إلى 76.76.21.21 كبديل.",
+    CNAME_WRONG: "سجل CNAME لا يشير إلى cname.ebnily.app.",
+    A_WRONG: "سجل A لا يشير إلى 76.76.21.21.",
+    NOT_ACTIVE: "الدومين لم يتم تفعيله بعد.",
+  };
+  return code ? (map[code] ?? "فشل التحقق من الدومين — حاول مرة أخرى لاحقًا.") : "فشل التحقق من الدومين.";
+}
+
+/** POST /api/domains/add — save a custom domain as pending for a project. */
+app.post("/api/domains/add", limitWrites, async (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const body = (req.body as Record<string, unknown>) ?? {};
+  const projectId = String(body.projectId ?? "");
+  const domain = normalizeDomain(String(body.domain ?? ""));
+  if (!projectId || !domain) {
+    return res.status(400).json({ success: false, code: "BAD_REQUEST", message: "معرف المشروع والدومين مطلوبان." });
+  }
+
+  const existing = await dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${projectId}`, select: "id,name", limit: "1" },
+  });
+  if (!existing.ok || !existing.data?.[0]) {
+    return res.status(404).json({ success: false, code: "NOT_FOUND" });
+  }
+
+  const patch: Record<string, unknown> = {
+    custom_domain: domain,
+    custom_domain_status: "pending",
+    custom_domain_error: null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const updated = await dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    method: "PATCH",
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${projectId}` },
+    body: JSON.stringify(patch),
+  });
+  if (!updated.ok || !updated.data?.[0]) {
+    console.error("domain add failed:", updated.error);
+    return dbUnavailable(res, `WRITE ${PROJECTS_TABLE}: ${updated.error ?? "unknown"}`, updated.status);
+  }
+
+  res.json({
+    success: true,
+    domain,
+    status: "pending",
+    message: "تم حفظ الدومين. أضف سجلات DNS ثم تحقق من الربط.",
+  });
+});
+
+/** POST /api/domains/verify — DNS-check a custom domain and flip status to active/failed. */
+app.post("/api/domains/verify", limitWrites, async (req: Request, res: Response) => {
+  const owner = currentOwner(req);
+  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+
+  const body = (req.body as Record<string, unknown>) ?? {};
+  const projectId = String(body.projectId ?? "");
+  const domain = normalizeDomain(String(body.domain ?? ""));
+  if (!projectId || !domain) {
+    return res.status(400).json({ success: false, code: "BAD_REQUEST", message: "معرف المشروع والدومين مطلوبان." });
+  }
+
+  const row = await dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    query: {
+      owner_id: `eq.${owner.id}`,
+      id: `eq.${projectId}`,
+      select: "id,custom_domain,custom_domain_status",
+      limit: "1",
+    },
+  });
+  if (!row.ok || !row.data?.[0]) {
+    return res.status(404).json({ success: false, code: "NOT_FOUND" });
+  }
+  if (row.data[0].custom_domain !== domain) {
+    return res.status(400).json({ success: false, code: "BAD_REQUEST", message: "هذا الدومين غير مربوط بهذا المشروع." });
+  }
+
+  await dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    method: "PATCH",
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${projectId}` },
+    body: JSON.stringify({ custom_domain_status: "verifying", updated_at: new Date().toISOString() }),
+  });
+
+  let ok = false;
+  let errorCode: string | undefined;
+
+  try {
+    const records = await resolveCname(domain);
+    ok = records.some((r) => r.endsWith(DNS_TARGET_CNAME));
+    if (!ok) errorCode = "CNAME_WRONG";
+  } catch (err: any) {
+    const code = err?.code;
+    if (code === "ENOTFOUND" || code === "ENODATA") {
+      try {
+        const a = await resolve4(domain);
+        ok = a.includes(DNS_TARGET_A);
+        if (!ok) errorCode = "A_WRONG";
+      } catch (err2: any) {
+        errorCode = err2?.code ?? "ENOTFOUND";
+      }
+    } else {
+      errorCode = code;
+    }
+  }
+
+  const status: DomainStatus = ok ? "active" : "failed";
+  await dbRequest<DbProject[]>(PROJECTS_TABLE, {
+    method: "PATCH",
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${projectId}` },
+    body: JSON.stringify({
+      custom_domain_status: status,
+      custom_domain_error: ok ? null : domainErrorArabic(errorCode),
+      updated_at: new Date().toISOString(),
+    }),
+  });
+
+  res.json({ success: true, domain, status, error: ok ? undefined : domainErrorArabic(errorCode) });
+});
+
 export function mountApi(): express.Express {
   return app;
 }
