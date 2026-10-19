@@ -192,6 +192,7 @@ export const StudioSidebar = ({
   onOpenGeminiStudio,
   onOpenUserDashboard,
   onOpenAdmin,
+  onOpenSiteSettings = () => {},
   authUser = null,
   onOpenAuth,
   onLogout,
@@ -499,7 +500,7 @@ export const StudioSidebar = ({
           <Row
             icon={Globe}
             label={ar ? 'إعدادات الموقع' : 'Site settings'}
-            onClick={onOpenSiteSettings}
+            onClick={() => onOpenSiteSettings?.()}
             iconClass="text-sky-400"
             title={ar ? 'إدارة الدومين الخاص وإعدادات الموقع' : 'Manage custom domain and site settings'}
           />
