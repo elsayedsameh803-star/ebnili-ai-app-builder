@@ -618,8 +618,10 @@ export const StudioSidebar = ({
             {authUser?.provider && (
               <div className="mt-2 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
                 {authUser.provider === 'google' ? 'Google' : 'GitHub'}
+              </div>
+            )}
 
-{authUser && onOpenGitHubImport && (
+            {authUser && onOpenGitHubImport && (
   <button
     type="button"
     onClick={() => {
