@@ -5800,7 +5800,9 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
     const reloaded = await dbRequest<DbJob[]>(JOBS_TABLE, {
       query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
     });
-    return res.json({ success: true, job: toPublicJob(reloaded.data?.[0] ?? job) });
+    const reloadedJob = reloaded.data?.[0] ?? job;
+    if (!reloadedJob) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+    return res.json({ success: true, job: toPublicJob(reloadedJob) });
   }
 
   // Execute with the SAME generation primitive the synchronous routes use.
@@ -5813,7 +5815,8 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
         query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
         body: JSON.stringify({ status: "failed", error, progress: 100, updated_at: new Date().toISOString() }),
       });
-      return res.json({ success: true, job: toPublicJob(failed.data?.[0] ?? { ...job, status: "failed", error, progress: 100 }) });
+      const failedJob = failed.data?.[0] ?? { ...job, status: "failed", error, progress: 100 };
+      return res.json({ success: true, job: toPublicJob(failedJob) });
     };
     if (!html) return failPatch("no-usable-output");
     const done = await dbRequest<DbJob[]>(JOBS_TABLE, {
@@ -5822,7 +5825,8 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
       body: JSON.stringify({ status: "done", result: { html }, progress: 100, updated_at: new Date().toISOString() }),
     });
     if (!done.ok) return dbUnavailable(res);
-    res.json({ success: true, job: toPublicJob(done.data?.[0] ?? { ...job, status: "done", result: { html }, progress: 100 }) });
+    const doneJob = done.data?.[0] ?? { ...job, status: "done", result: { html }, progress: 100 };
+    res.json({ success: true, job: toPublicJob(doneJob) });
   } catch (e) {
     const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     const failed = await dbRequest<DbJob[]>(JOBS_TABLE, {
@@ -5830,7 +5834,8 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
       query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
       body: JSON.stringify({ status: "failed", error: msg, progress: 100, updated_at: new Date().toISOString() }),
     });
-    res.json({ success: true, job: toPublicJob(failed.data?.[0] ?? { ...job, status: "failed", error: msg, progress: 100 }) });
+    const catchFailed = failed.data?.[0] ?? { ...job, status: "failed", error: msg, progress: 100 };
+    res.json({ success: true, job: toPublicJob(catchFailed) });
   }
 });
 
