@@ -1604,6 +1604,7 @@ export default function App() {
             onNewProject={handleStartNewProject}
             onOpenExport={() => setShowExport(true)}
             onOpenDeploy={() => setShowDeploy(true)}
+            onOpenGitHubImport={() => setShowGitHubImport(true)}
             onOpenIntegrations={() => setShowIntegrations(true)}
             subscription={subscription}
             onOpenSubscription={() => setShowSubscription(true)}

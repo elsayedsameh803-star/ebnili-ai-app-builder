@@ -87,6 +87,7 @@ export interface StudioSidebarProps {
   onOpenExport: () => void;
   onOpenDeploy: () => void;
   onOpenIntegrations: () => void;
+  onOpenGitHubImport: () => void;
   subscription?: UserSubscription;
   onOpenSubscription?: () => void;
   onOpenGeminiStudio?: () => void;
@@ -617,6 +618,23 @@ export const StudioSidebar = ({
             {authUser?.provider && (
               <div className="mt-2 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
                 {authUser.provider === 'google' ? 'Google' : 'GitHub'}
+
+{authUser && onOpenGitHubImport && (
+  <button
+    type="button"
+    onClick={() => {
+      setShowUserMenu(false);
+      onOpenGitHubImport();
+    }}
+    className="w-full text-start px-2.5 py-2 rounded-lg text-xs font-bold text-white hover:bg-slate-800/70 flex items-center gap-2 transition cursor-pointer mt-1"
+  >
+    <Github className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+    <span className="truncate">{ar ? 'استيراد من GitHub' : 'Import from GitHub'}</span>
+  </button>
+)}
+
+{authUser && onOpenIntegrations && (
+  <div className="mt-1 pt-1 border-t border-slate-800">
               </div>
             )}
           </div>

@@ -957,6 +957,67 @@ app.post("/api/projects/export", (req: Request, res: Response) => {
 // READ-ONLY BY DESIGN: nothing here writes to GitHub, and `scope` asks only for
 // `read:user`, so this feature cannot push or delete anything.
 
+// ── GitHub OAuth routes ────────────────────────────────────────────────────────
+// WHY SERVER-SIDE ONLY: GitHub access tokens must NEVER reach the browser.
+// The browser only receives the `link` route result or user-friendly metadata.
+
+const GH_CALLBACK_URL = (req: AuthReq) => {
+  const base = requestBaseUrl(req);
+  return `${base}/api/github/callback`;
+};
+
+app.post("/api/github/link", (req: AuthReq, res: Response) => {
+  try {
+    if (!providerConfig("github").configured) {
+      return res.status(503).json({ success: false, error: "غير مُهيأ على الخادم. أضف مفاتيح GitHub من إعدادات Vercel." });
+    }
+    const state = ghStateNonce();
+    const verifier = crypto.randomBytes(32).toString("base64url");
+    res.cookie(GH_LINK_COOKIE, `${state}.${verifier}`, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 10 * 60_000 });
+    res.json({ success: true, redirect: `${providerConfig("github").authUrl}?client_id=${encodeURIComponent(providerConfig("github").clientId)}&redirect_uri=${encodeURIComponent(GH_CALLBACK_URL(req))}&state=${encodeURIComponent(state)}&scope=${GH_SCOPES}` });
+  } catch (e) { res.status(500).json({ success: false, error: "خطأ داخلي في الخادم." }); }
+app.get("/api/github/callback", async (req: AuthReq, res: Response) => {
+  try {
+    const needsSave = (readCookie(req, GH_LINK_COOKIE) || "").includes(".");
+    if (!needsSave) {
+      return res.redirect(`${requestBaseUrl(req)}/?github_import=skipped`);
+    }
+    const [state, verifier] = String(readCookie(req, GH_LINK_COOKIE) || "").split(".") ?? [];
+    if (!state || !verifier) return res.redirect(`${requestBaseUrl(req)}/?github_import=invalid_state`);
+    if (req.query.state !== state) return res.redirect(`${requestBaseUrl(req)}/?github_import=csrf`);
+    const code = String(req.query.code || "");
+    if (!code) return res.redirect(`${requestBaseUrl(req)}/?github_import=no_code`);
+    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({ client_id: providerConfig("github").clientId, client_secret: providerConfig("github").clientSecret, code, redirect_uri: GH_CALLBACK_URL(req), grant_type: "authorization_code" }),
+    });
+    const tokenJson = await tokenRes.json() as { access_token?: string; error?: string };
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      return res.redirect(`${requestBaseUrl(req)}/?github_import=token_failed`);
+    }
+    const userRes = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${tokenJson.access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Ebnili-App" } });
+    if (!userRes.ok) return res.redirect(`${requestBaseUrl(req)}/?github_import=user_failed`);
+    const ghUser = (await userRes.json()) as { id: number; login: string; name?: string; email?: string };
+    const ghEmail = await (await fetch("https://api.github.com/user/emails", { headers: { Authorization: `Bearer ${tokenJson.access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Ebnili-App" } })).json() as { email: string; primary: boolean }[];
+    const primaryEmail = ghEmail.find(e => e.primary)?.email || ghEmail[0]?.email;
+    const stored: StoredGhToken = { userId: String(ghUser.id), login: ghUser.login, accessToken: tokenJson.access_token, linkNonce: state };
+    res.cookie(GH_TOKEN_COOKIE, issueGhToken(stored), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 });
+    res.redirect(`${requestBaseUrl(req)}/?github_import=success`);
+  } catch (e) { res.redirect(`${requestBaseUrl(req)}/?github_import=server_error`); }
+});
+
+app.get("/api/github/repos", async (req: AuthReq, res: Response) => {
+  try {
+    const stored = readGhToken(req);
+    if (!stored) return res.json({ linked: false });
+    const ghRes = await fetch("https://api.github.com/user/repos", { headers: { Authorization: `Bearer ${stored.accessToken}`, Accept: "application/vnd.github+json", "User-Agent": "Ebnili-App" } });
+    if (!ghRes.ok) return res.json({ linked: true, error: "Failed to list repos" });
+    const repos = await ghRes.json() as { full_name: string; description: string | null; html_url: string; default_branch: string; private: boolean }[];
+    res.json({ linked: true, repos });
+  } catch (e) { res.json({ linked: false }); }
+});
+});
 const GH_TOKEN_COOKIE = "ebnili_gh_token";
 const GH_LINK_COOKIE = "ebnili_gh_link";
 const GH_SCOPES = "read:user";

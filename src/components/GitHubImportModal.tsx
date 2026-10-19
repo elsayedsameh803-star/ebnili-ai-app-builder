@@ -1,24 +1,6 @@
-import { Language } from '../types';
-
-interface GitHubImportModalProps {
-  onClose: () => void;
-  language: Language;
-  /** No-op after GitHub import was removed. */
-  onImported?: (result: { files: Record<string, string> }) => void;
-  /** No-op after GitHub import was removed. */
-  initialError?: string | null;
-}
-
-/**
- * GitHub import modal — retired (replaced by Supabase OAuth).
- * Kept as a no-op stub so nothing referencing it breaks at build time.
- */
-export const GitHubImportModal = ({
-  onClose,
-  language,
-  onImported,
-  initialError,
-}: GitHubImportModalProps) => {
-  onClose?.();
-  return null;
-};
+  {step === 'done' && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2"><h3 className="text-sm font-black text-white">تم الانتهاء</h3></div>
+            <p className="text-xs text-slate-400">الملفات تم استيرادها بنجاح.</p>
+          </div>
+        )}
