@@ -100,7 +100,8 @@ export function SiteSettings({
                   href={project.custom_domain ? `https://${project.custom_domain}` : undefined}
                   target="_blank"
                   rel="noopener noreferrer"
-                  disabled={!project.custom_domain}
+                  aria-disabled={!project.custom_domain}
+                  onClick={(e) => { if (!project.custom_domain) e.preventDefault(); }}
                   className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
                     project.custom_domain
                       ? 'bg-rose-600 text-white hover:bg-rose-500'

@@ -17,6 +17,8 @@
  * manage every owner surface — the server enforces the identical rule, so the
  * browser never gains a privilege it did not already have.
  */
+import type { AuthUser, AuthProviderId, AuthProviderInfo } from "../types";
+
 export function isOwnerAccount(user: AuthUser | null | undefined): boolean {
   return user?.isOwner === true || user?.canManageAdmins === true;
 }
