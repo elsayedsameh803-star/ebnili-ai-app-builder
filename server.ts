@@ -8,7 +8,7 @@ import crypto from "crypto";
 // `server.ts` mounts it instead of duplicating those routes — see the note
 // next to `mountApi()` further down.
 import { mountApi } from "./api/index";
-import { customDomainMiddleware, customDomainServe } from "./middleware";
+import { customDomainMiddleware, customDomainServe } from "./custom-domain-middleware";
 
 // The README tells users to create `.env.local`, while classic dotenv only
 // reads `.env` — load both so GEMINI_API_KEY is picked up either way.
