@@ -50,6 +50,7 @@ const SiteSettings = lazy(() => import('./components/SiteSettings').then((m) => 
 const PricingPage = lazy(() => import('./components/PricingPage').then((m) => ({ default: m.PricingPage })));
 const PayPage = lazy(() => import('./components/PayPage').then((m) => ({ default: m.PayPage })));
 const AuthModal = lazy(() => import('./components/AuthModal').then((m) => ({ default: m.AuthModal })));
+const GitHubImportModal = lazy(() => import('./components/GitHubImportModal').then((m) => ({ default: m.GitHubImportModal })));
 const NotFoundPage = lazy(() => import('./components/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
 import { 
   AppProject, 
@@ -196,6 +197,7 @@ export default function App() {
   const [showSiteSettings, setShowSiteSettings] = useState<boolean>(false);
   const [siteSettingsProjectId, setSiteSettingsProjectId] = useState<string>('');
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [showGitHubImport, setShowGitHubImport] = useState<boolean>(false);
   // Which of the site pages is open (About / Contact / Privacy / Terms).
   const [infoPage, setInfoPage] = useState<PageKey | null>(null);
 
@@ -1842,6 +1844,14 @@ export default function App() {
             projectId={projectId}
             onClose={() => setShowDeploy(false)}
             language={language}
+          />
+        )}
+
+        {showGitHubImport && (
+          <GitHubImportModal
+            language={language}
+            authUser={authUser}
+            onClose={() => setShowGitHubImport(false)}
           />
         )}
 

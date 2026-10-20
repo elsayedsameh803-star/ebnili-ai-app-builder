@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Github, Loader2, GithubLogoIcon } from 'lucide-react';
+import { Github, Loader2 } from 'lucide-react';
 
 interface GitHubImporterProps {
   language: 'ar' | 'en';
@@ -16,8 +16,9 @@ export function GitHubImporter({ language }: GitHubImporterProps) {
   const [step, setStep] = useState<'idle' | 'linking' | 'repos' | 'importing' | 'done'>('idle');
   const [loading, setLoading] = useState(false);
   const [repos, setRepos] = useState<{ full_name: string; description: string | null; html_url: string }[]>([]);
-  const [files, setFiles] = useState<{ path: string; type: string; size: number }[]>([]);
+  const [files, setFiles] = useState<{ path: string; type: string; size?: number }[]>([]);
   const [active, setActive] = useState<string | null>(null);
+  void active;
   const [error, setError] = useState<string | null>(null);
 
   const t = {
@@ -29,6 +30,7 @@ export function GitHubImporter({ language }: GitHubImporterProps) {
     files: 'الملفات المستوردة',
     importing: 'استيراد الملفات...',
     done: 'تم الانتهاء',
+    error: 'حدث خطأ، حاول مجددًا.',
   };
 
   const handleLink = async () => {
@@ -61,13 +63,13 @@ export function GitHubImporter({ language }: GitHubImporterProps) {
     } catch { setError(t.error); setLoading(false); }
   };
 
-  const t2 = { title: 'استيراد من GitHub', listTitle: 'المستودعات المتاحة', noRepos: 'لا توجد مستودعات مرئية.', noRepo: 'لم يتم العثور على أي مستودع.', files: 'الملفات المستوردة', importing: 'استيراد الملفات...', done: 'تم الانتهاء' };
-  const [copied, setCopied] = useState(false);
+  const [copied] = useState(false);
+  void copied;
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 sm:p-5" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <div className="flex items-center gap-3 mb-3">
-        <GithubLogoIcon className="w-5 h-5 text-rose-400 shrink-0" />
+        <Github className="w-5 h-5 text-rose-400 shrink-0" />
         <h3 className="text-sm font-black text-white">{t.title}</h3>
       </div>
 
@@ -75,7 +77,7 @@ export function GitHubImporter({ language }: GitHubImporterProps) {
         <div className="space-y-3">
           <p className="text-xs text-slate-400 leading-relaxed" dir="ltr">اربط حسابك بـ GitHub لاستيراد الملفات إلى استوديو إبنيلي.</p>
           <button type="button" onClick={handleLink} disabled={loading} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-bold hover:bg-rose-500 transition disabled:opacity-60">
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <GithubLogoIcon className="w-4 h-4" />}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Github className="w-4 h-4" />}
             {loading ? 'جاري الربط...' : t.btnLink}
           </button>
           {error && <p className="text-xs text-rose-400">{error}</p>}
@@ -89,7 +91,7 @@ export function GitHubImporter({ language }: GitHubImporterProps) {
             <div className="max-h-48 overflow-y-auto pe-1 space-y-1.5">
               {repos.map(r => (
                 <button key={r.full_name} type="button" onClick={() => handleImport(r.html_url)} className="w-full flex items-center gap-2.5 p-2.5 rounded-lg hover:bg-slate-800/60 transition text-left">
-                  <GithubLogoIcon className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <Github className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                   <span className="block text-xs font-bold text-white truncate">{r.full_name}</span>
                   <span className="block text-[10px] text-slate-500 truncate">{r.description || ''}</span>
                 </button>

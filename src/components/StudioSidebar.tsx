@@ -42,6 +42,7 @@ import {
   Pencil,
   Trash2,
   Plus,
+  Github,
   Globe,
   Sparkles,
   MousePointerClick,
@@ -193,6 +194,7 @@ export const StudioSidebar = ({
   onOpenGeminiStudio,
   onOpenUserDashboard,
   onOpenAdmin,
+  onOpenGitHubImport,
   onOpenSiteSettings = () => {},
   authUser = null,
   onOpenAuth,
@@ -621,22 +623,22 @@ export const StudioSidebar = ({
               </div>
             )}
 
-            {authUser && onOpenGitHubImport && (
-  <button
-    type="button"
-    onClick={() => {
-      setShowUserMenu(false);
-      onOpenGitHubImport();
-    }}
-    className="w-full text-start px-2.5 py-2 rounded-lg text-xs font-bold text-white hover:bg-slate-800/70 flex items-center gap-2 transition cursor-pointer mt-1"
-  >
-    <Github className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-    <span className="truncate">{ar ? 'استيراد من GitHub' : 'Import from GitHub'}</span>
-  </button>
-)}
+            {onOpenGitHubImport && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUserMenu(false);
+                  onOpenGitHubImport();
+                }}
+                className="w-full text-start px-2.5 py-2 rounded-lg text-xs font-bold text-white hover:bg-slate-800/70 flex items-center gap-2 transition cursor-pointer mt-1"
+              >
+                <Github className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span className="truncate">{ar ? 'استيراد من GitHub' : 'Import from GitHub'}</span>
+              </button>
+            )}
 
-{authUser && onOpenIntegrations && (
-  <div className="mt-1 pt-1 border-t border-slate-800">
+            {onOpenIntegrations && (
+              <div className="mt-1 pt-1 border-t border-slate-800">
               </div>
             )}
           </div>

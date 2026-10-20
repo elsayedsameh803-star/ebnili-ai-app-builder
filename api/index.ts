@@ -976,6 +976,7 @@ app.post("/api/github/link", (req: AuthReq, res: Response) => {
     res.cookie(GH_LINK_COOKIE, `${state}.${verifier}`, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 10 * 60_000 });
     res.json({ success: true, redirect: `${providerConfig("github").authUrl}?client_id=${encodeURIComponent(providerConfig("github").clientId)}&redirect_uri=${encodeURIComponent(GH_CALLBACK_URL(req))}&state=${encodeURIComponent(state)}&scope=${GH_SCOPES}` });
   } catch (e) { res.status(500).json({ success: false, error: "خطأ داخلي في الخادم." }); }
+});
 app.get("/api/github/callback", async (req: AuthReq, res: Response) => {
   try {
     const needsSave = (readCookie(req, GH_LINK_COOKIE) || "").includes(".");
@@ -1016,7 +1017,6 @@ app.get("/api/github/repos", async (req: AuthReq, res: Response) => {
     const repos = await ghRes.json() as { full_name: string; description: string | null; html_url: string; default_branch: string; private: boolean }[];
     res.json({ linked: true, repos });
   } catch (e) { res.json({ linked: false }); }
-});
 });
 const GH_TOKEN_COOKIE = "ebnili_gh_token";
 const GH_LINK_COOKIE = "ebnili_gh_link";
