@@ -7,9 +7,10 @@ import {
   AlertTriangle,
   Loader2,
   ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import type { RemoteProject } from '../lib/projects';
-import { fetchRemoteProject } from '../lib/projects';
+import { DbUnavailableError, fetchRemoteProject } from '../lib/projects';
 import { CustomDomainCard } from './CustomDomainCard';
 
 interface SiteSettingsProps {
@@ -30,21 +31,50 @@ export function SiteSettings({
   const ar = language === 'ar';
   const [project, setProject] = useState<RemoteProject | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchProject = useCallback(async () => {
+    // Guard: empty projectId means "no saved project yet" — never hit the API
+    // with `/api/projects/` (empty id) which returns 404/NOT_FOUND and shows
+    // the misleading "مشروع غير موجود".
+    if (!projectId?.trim()) {
+      setProject(null);
+      setError(ar ? 'لا يوجد مشروع محفوظ بعد — احفظ مشروعك أولاً ثم أعد فتح الإعدادات.' : 'No saved project yet — save your project first, then reopen settings.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError(null);
     try {
       const data = await fetchRemoteProject(projectId);
-      setProject(data);
-    } catch {
+      if (!data) {
+        setProject(null);
+        // fetchRemoteProject swallows NOT_FOUND → null, so distinguish here.
+        // The backend queries `ebnily_projects` filtered by owner_id — a null
+        // means wrong id OR not this account's row.
+        setError(ar ? 'لم نتمكن من العثور على المشروع المطلوب. تأكد أن المشروع محفوظ بنفس الحساب.' : 'We could not find the requested project. Make sure it is saved under this account.');
+      } else {
+        setProject(data);
+      }
+    } catch (e) {
       setProject(null);
+      const msg = e instanceof Error ? e.message : '';
+      if (msg === 'AUTH_REQUIRED') {
+        setError(ar ? 'انتهت الجلسة — سجّل الدخول ثم أعد فتح الإعدادات.' : 'Session expired — sign in again, then reopen settings.');
+      } else if (msg === 'DB_UNAVAILABLE' || e instanceof DbUnavailableError) {
+        setError(ar ? 'قاعدة البيانات غير متاحة حالياً — حاول بعد قليل.' : 'Database unavailable right now — try again shortly.');
+      } else {
+        setError(ar ? 'تعذّر تحميل المشروع — تحقق من الاتصال وحاول مجدداً.' : 'Could not load the project — check your connection and retry.');
+      }
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, ar]);
 
   useEffect(() => {
-    if (isOpen && projectId) {
+    // Run even when projectId is '' so the guard above sets the honest
+    // "no saved project" message instead of a blank modal.
+    if (isOpen) {
       fetchProject();
     }
   }, [isOpen, projectId, fetchProject]);
@@ -146,7 +176,16 @@ export function SiteSettings({
             <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-6 text-center">
               <AlertTriangle className="w-6 h-6 mx-auto text-rose-400 mb-3" aria-hidden="true" />
               <h3 className="text-sm font-black text-white mb-2">{ar ? 'مشروع غير موجود' : 'Project not found'}</h3>
-              <p className="text-xs text-slate-400">{ar ? 'لم نتمكن من العثور على المشروع المطلوب.' : 'We could not find the requested project.'}</p>
+              <p className="text-xs text-slate-400 mb-4">{error ?? (ar ? 'لم نتمكن من العثور على المشروع المطلوب.' : 'We could not find the requested project.')}</p>
+              <button
+                type="button"
+                onClick={() => void fetchProject()}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-rose-600 text-white text-xs font-bold hover:bg-rose-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+                {ar ? 'إعادة المحاولة' : 'Retry'}
+              </button>
             </div>
           )}
         </div>

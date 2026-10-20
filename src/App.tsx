@@ -1620,7 +1620,10 @@ export default function App() {
             }}
             onOpenSiteSettings={() => {
               setSidebarOpen(false);
-              setSiteSettingsProjectId(projectId ?? '');
+              // FIX: `projectId` is null for a brand-new draft that was never
+              // saved, so SiteSettings received '' and showed "مشروع غير موجود".
+              // Fall back to the newest saved project so the domain form loads.
+              setSiteSettingsProjectId(projectId ?? projectList[0]?.id ?? '');
               setShowSiteSettings(true);
             }}
             authUser={authUser}
