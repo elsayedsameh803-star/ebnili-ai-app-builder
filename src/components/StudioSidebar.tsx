@@ -212,6 +212,7 @@ export const StudioSidebar = ({
   const [showProjectsMenu, setShowProjectsMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const userButtonRef = useRef<HTMLButtonElement | null>(null);
   const projectsMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Owner-only controls stay hidden from ordinary users. `authUser.isOwner` is
@@ -230,15 +231,18 @@ export const StudioSidebar = ({
     setNameInput(projectName);
   }, [projectName]);
 
-  // Close both panels on any outside click. The panels are siblings AFTER the
-  // scroll area, so the check covers the triggers AND the panels themselves —
-  // otherwise the first click on an item would register as "outside" and close
-  // the panel before the click landed.
+  // Close both panels on any outside click. The account trigger BUTTON must be
+  // excluded too: it lives OUTSIDE `userMenuRef` (the panel div), so without
+  // this guard the opening mousedown bubbles to document, is classified as
+  // "outside", and closes the menu in the same tick the button opens it —
+  // the user sees "nothing happens" on every click.
   useEffect(() => {
     if (!showUserMenu && !showProjectsMenu) return;
     const onDocClick = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (userMenuRef.current && !userMenuRef.current.contains(target)) setShowUserMenu(false);
+      const inUserPanel = userMenuRef.current?.contains(target) ?? false;
+      const inUserButton = userButtonRef.current?.contains(target) ?? false;
+      if (!inUserPanel && !inUserButton) setShowUserMenu(false);
       if (projectsMenuRef.current && !projectsMenuRef.current.contains(target))
         setShowProjectsMenu(false);
     };
@@ -527,8 +531,11 @@ export const StudioSidebar = ({
       <div className="relative shrink-0 border-t border-slate-800 p-2 space-y-1">
         {authUser ? (
           <button
+            ref={userButtonRef}
             type="button"
             onClick={() => setShowUserMenu((v) => !v)}
+            aria-expanded={showUserMenu}
+            aria-haspopup="menu"
             className="w-full flex items-center gap-2.5 p-2 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 transition cursor-pointer min-w-0"
             title={authUser.name}
           >
@@ -597,7 +604,9 @@ export const StudioSidebar = ({
         {showUserMenu && (
           <div
             ref={userMenuRef}
-            className="absolute bottom-full left-1 right-1 mb-1 max-h-[70vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[60] p-1.5"
+            role="menu"
+            aria-label={ar ? 'قائمة الحساب' : 'Account menu'}
+            className="absolute bottom-full left-1 right-1 mb-1 max-h-[70vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[80] p-1.5"
           >
           <div className="px-2.5 py-2 border-b border-slate-800">
             <div className="flex items-center gap-2.5 min-w-0">
