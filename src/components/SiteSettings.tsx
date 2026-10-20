@@ -10,7 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { RemoteProject } from '../lib/projects';
-import { DbUnavailableError, fetchRemoteProject } from '../lib/projects';
+import { DbUnavailableError, fetchRemoteProject, fetchRemoteProjects } from '../lib/projects';
 import { CustomDomainCard } from './CustomDomainCard';
 
 interface SiteSettingsProps {
@@ -32,29 +32,70 @@ export function SiteSettings({
   const [project, setProject] = useState<RemoteProject | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // WHY A SEPARATE FLAG: the empty-state heading used to say "مشروع غير موجود"
+  // even when the account simply has no saved project yet — two very different
+  // situations that need two different messages.
+  const [noSavedProject, setNoSavedProject] = useState(false);
+  // Set when the requested id was stale and we fell back to another project,
+  // so the UI can say which project is actually being shown.
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
 
   const fetchProject = useCallback(async () => {
     // Guard: empty projectId means "no saved project yet" — never hit the API
     // with `/api/projects/` (empty id) which returns 404/NOT_FOUND and shows
     // the misleading "مشروع غير موجود".
+    setError(null);
+    setNoSavedProject(false);
+    setFallbackNotice(null);
+    // Set BEFORE the branches: otherwise the modal paints the "not found"
+    // empty state for one frame while the request is still in flight.
+    setLoading(true);
+
     if (!projectId?.trim()) {
+      // The id is missing. Before giving up, try the account's own list — the
+      // id may simply not have reached the modal yet (it is set on click).
+      const list = await fetchRemoteProjects().catch(() => [] as RemoteProject[]);
+      const newest = list[0] ?? null;
+      if (newest) {
+        setProject(newest);
+        setLoading(false);
+        return;
+      }
       setProject(null);
-      setError(ar ? 'لا يوجد مشروع محفوظ بعد — احفظ مشروعك أولاً ثم أعد فتح الإعدادات.' : 'No saved project yet — save your project first, then reopen settings.');
+      setNoSavedProject(true);
       setLoading(false);
       return;
     }
-    setLoading(true);
-    setError(null);
+
     try {
-      const data = await fetchRemoteProject(projectId);
-      if (!data) {
-        setProject(null);
-        // fetchRemoteProject swallows NOT_FOUND → null, so distinguish here.
-        // The backend queries `ebnily_projects` filtered by owner_id — a null
-        // means wrong id OR not this account's row.
-        setError(ar ? 'لم نتمكن من العثور على المشروع المطلوب. تأكد أن المشروع محفوظ بنفس الحساب.' : 'We could not find the requested project. Make sure it is saved under this account.');
+      const direct = await fetchRemoteProject(projectId);
+      if (direct) {
+        setProject(direct);
+        return;
+      }
+      // SELF-HEAL: the id is stale (guest-era local id, deleted row, or a row
+      // owned by another account — `GET /api/projects/:id` filters
+      // `ebnily_projects` by owner_id so all three come back NOT_FOUND → null).
+      // Fall back to the newest saved project so the domain form loads instead
+      // of the dead-end "مشروع غير موجود".
+      const list = await fetchRemoteProjects().catch(() => [] as RemoteProject[]);
+      const newest = list[0] ?? null;
+      if (newest) {
+        const full = await fetchRemoteProject(newest.id).catch(() => null);
+        setProject(full ?? newest);
+        setFallbackNotice(
+          ar
+            ? `المشروع المطلوب غير موجود، وتم فتح أحدث مشروع محفوظ لديك: ${newest.name}`
+            : `The requested project was not found; showing your most recently saved project: ${newest.name}`,
+        );
       } else {
-        setProject(data);
+        setProject(null);
+        setNoSavedProject(true);
+        setError(
+          ar
+            ? 'لم نتمكن من العثور على المشروع المطلوب. تأكد أن المشروع محفوظ بنفس الحساب.'
+            : 'We could not find the requested project. Make sure it is saved under this account.',
+        );
       }
     } catch (e) {
       setProject(null);
@@ -118,6 +159,14 @@ export function SiteSettings({
             </div>
           ) : project ? (
             <>
+              {fallbackNotice && (
+                <div
+                  role="status"
+                  className="mb-4 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200"
+                >
+                  {fallbackNotice}
+                </div>
+              )}
               <div className="flex items-center gap-3 mb-6 px-2">
                 <Globe className="w-5 h-5 text-slate-400" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
@@ -175,8 +224,20 @@ export function SiteSettings({
           ) : (
             <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-6 text-center">
               <AlertTriangle className="w-6 h-6 mx-auto text-rose-400 mb-3" aria-hidden="true" />
-              <h3 className="text-sm font-black text-white mb-2">{ar ? 'مشروع غير موجود' : 'Project not found'}</h3>
-              <p className="text-xs text-slate-400 mb-4">{error ?? (ar ? 'لم نتمكن من العثور على المشروع المطلوب.' : 'We could not find the requested project.')}</p>
+              <h3 className="text-sm font-black text-white mb-2">
+                {noSavedProject
+                  ? (ar ? 'لا يوجد مشروع محفوظ' : 'No saved project')
+                  : (ar ? 'مشروع غير موجود' : 'Project not found')}
+              </h3>
+              <p className="text-xs text-slate-400 mb-4">
+                {error ?? (
+                  noSavedProject
+                    ? (ar
+                        ? 'لم تحفظ أي مشروع على هذا الحساب بعد. أنشئ مشروعاً ثم احفظه لتتمكن من ربط دومين خاص.'
+                        : 'You have not saved a project on this account yet. Create and save a project to link a custom domain.')
+                    : (ar ? 'لم نتمكن من العثور على المشروع المطلوب.' : 'We could not find the requested project.')
+                )}
+              </p>
               <button
                 type="button"
                 onClick={() => void fetchProject()}

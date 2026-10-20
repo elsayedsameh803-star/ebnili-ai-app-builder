@@ -1620,10 +1620,16 @@ export default function App() {
             }}
             onOpenSiteSettings={() => {
               setSidebarOpen(false);
-              // FIX: `projectId` is null for a brand-new draft that was never
-              // saved, so SiteSettings received '' and showed "مشروع غير موجود".
-              // Fall back to the newest saved project so the domain form loads.
-              setSiteSettingsProjectId(projectId ?? projectList[0]?.id ?? '');
+              // FIX: `projectId` can be null (unsaved draft) or STALE (a guest-era
+              // local id like p_xxx with no row in `ebnily_projects` for this
+              // account → server 404 → "مشروع غير موجود"). Only trust the id when
+              // it exists in the loaded list; otherwise use the newest saved
+              // project. SiteSettings also self-heals on NOT_FOUND.
+              const valid =
+                projectId && projectList.some((p) => p.id === projectId)
+                  ? projectId
+                  : (projectList[0]?.id ?? '');
+              setSiteSettingsProjectId(valid);
               setShowSiteSettings(true);
             }}
             authUser={authUser}
