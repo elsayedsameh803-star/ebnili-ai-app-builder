@@ -310,9 +310,60 @@ export default function App() {
     }
   }, []);
 
+  // Returned from the GitHub import OAuth round-trip: the redirect URL is
+  // `/?github_import=success` (or =error). Re-open the import modal so the
+  // user can pick a repository, then scrub the query string exactly like the
+  // auth effect above does.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('github_import');
+    if (status && status !== 'skipped') {
+      setShowGitHubImport(true);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+
   // Returning from the GitHub link: `/?github=linked` or `/?github_error=<code>`.
   // The importer opens straight away so the user picks a repository next, and
   // the query string is scrubbed exactly like the auth one.
+
+
+  /**
+   * Apply a repository that the user just imported from GitHub into the active
+   * project slot, persist it, and mirror it to the server. `files` is keyed by
+   * repository-relative path; we pick `index.html` as the primary editor tab
+   * (falling back to the first entry) so a freshly imported repo opens on its
+   * entry point instead of an arbitrary asset.
+   */
+  const handleGitHubImport = useCallback(async (files: Record<string, string>, repoFullName: string) => {
+    setShowGitHubImport(false);
+    try {
+      const entries = Object.keys(files);
+      const activeFile = entries.includes('index.html') ? 'index.html' : (entries[0] ?? 'index.html');
+      const id = newProjectId();
+      const now = new Date().toISOString();
+      const imported: AppProject = {
+        id,
+        name: repoFullName,
+        description: '',
+        code: files[activeFile] ?? '',
+        files,
+        activeFile,
+        versions: [],
+        createdAt: now,
+        updatedAt: now,
+        theme: { primaryColor: '#2563eb', borderRadius: '12px', darkMode: true },
+      };
+      setProject(imported);
+      setActiveId(id);
+      void cacheProjectBody(id, imported);
+      void refreshProjectList().catch(() => {});
+      void createRemoteProject(imported);
+    } catch (e) {
+      console.error('GitHub import failed', e);
+    }
+  }, []);
 
 
   const handleLogout = useCallback(async () => {
@@ -1456,6 +1507,7 @@ export default function App() {
           // offers sign-in) is not mounted until a session exists, so the button
           // has to be wired here or a visitor has no visible way to sign in.
           onOpenAuth={() => setShowAuthModal(true)}
+          onOpenGitHubImport={() => setShowGitHubImport(true)}
           onOpenInfoPage={setInfoPage}
         />
 
@@ -1493,6 +1545,21 @@ export default function App() {
             initialPage={infoPage}
             onClose={() => setInfoPage(null)}
           />
+        )}
+
+        {/* The GitHub import dialog must also be reachable from the hero branch.
+            This return exits before the studio tree where the modal is mounted
+            further down, so a guest clicking the hero's Import button would
+            otherwise flip the flag and see nothing. Mount it here too. */}
+        {showGitHubImport && (
+          <Suspense fallback={null}>
+            <GitHubImportModal
+              language={language}
+              authUser={authUser}
+              onClose={() => setShowGitHubImport(false)}
+              onImported={(files, ref) => void handleGitHubImport(files, ref)}
+            />
+          </Suspense>
         )}
       </>
     );
@@ -1859,7 +1926,7 @@ export default function App() {
         {showGitHubImport && (
           <GitHubImportModal
             language={language}
-            authUser={authUser}
+            onImported={(files, ref) => void handleGitHubImport(files, ref)}            authUser={authUser}
             onClose={() => setShowGitHubImport(false)}
           />
         )}

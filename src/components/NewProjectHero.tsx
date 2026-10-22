@@ -265,6 +265,17 @@ export const NewProjectHero = ({
                 </span>
               </div>
 
+              {onOpenGitHubImport && (
+                <button
+                  type="button"
+                  onClick={onOpenGitHubImport}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-700 hover:border-slate-600 text-slate-300 hover:text-white text-xs font-bold transition cursor-pointer"
+                  title={language === 'ar' ? 'استيراد من GitHub' : 'Import from GitHub'}
+                >
+                  <Github className="w-4 h-4" />
+                  <span>{language === 'ar' ? 'استيراد من GitHub' : 'Import from GitHub'}</span>
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={!promptText.trim() || isGenerating}
@@ -300,26 +311,14 @@ export const NewProjectHero = ({
             )}
           </form>
 
-          {/* Import from GitHub — deliberately OUTSIDE the prompt form and
-              visually separate from it. Importing an existing repository is a
-              different action from describing a new one, and must never look
-              like part of the same submit. */}
+          {/* Import from GitHub hint — the button now sits directly beside
+              "Generate App" so both entry points are visible in one row. */}
           {onOpenGitHubImport && (
-            <div className="w-full pt-3">
-              <button
-                type="button"
-                onClick={onOpenGitHubImport}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-700 hover:border-slate-600 text-slate-300 hover:text-white text-xs font-bold transition cursor-pointer"
-              >
-                <Github className="w-4 h-4" />
-                <span>{language === 'ar' ? 'استيراد من GitHub' : 'Import from GitHub'}</span>
-              </button>
-              <p className="text-[11px] text-slate-500 mt-2">
-                {language === 'ar'
-                  ? 'عندك مشروع على GitHub؟ افتحه هنا وابدأ التعديل عليه مباشرة.'
-                  : 'Already have a project on GitHub? Open it here and start editing it.'}
-              </p>
-            </div>
+            <p className="text-[11px] text-slate-500 mt-2">
+              {language === 'ar'
+                ? 'عندك مشروع على GitHub؟ إضغط زر الاستيراد بجوار زر إنشاء التطبيق أعلاه.'
+                : 'Already have a project on GitHub? Click the Import button next to Generate App above.'}
+            </p>
           )}
         </div>
 

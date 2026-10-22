@@ -966,26 +966,44 @@ const GH_CALLBACK_URL = (req: AuthReq) => {
   return `${base}/api/github/callback`;
 };
 
+// GitHub's browser-approval endpoint. It is a FIXED platform URL, not a setting —
+// `providerConfig("github")` only carries credentials, so reading `.authUrl` off
+// it (as this route used to) evaluated to `undefined` and produced a redirect to
+// the literal string "undefined?client_id=...", which GitHub rejects. The link
+// step therefore never worked at all.
+const GH_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
+
+// Account binding for a linked GitHub token.
+//
+// The token cookie is HMAC-signed and httpOnly, so it cannot be forged — but it
+// is still a bearer credential living on the browser. Without a binding to the
+// APP session, a GitHub link made by one account stays usable by whichever other
+// account signs in on the same browser (the old check compared the GitHub
+// numeric user id against the app session id, which can never match, so it
+// rejected everything INCLUDING the rightful owner). The account id is stamped
+// into the payload at callback time, where the app session cookie is present.
 app.post("/api/github/link", (req: AuthReq, res: Response) => {
   try {
     if (!providerConfig("github").configured) {
       return res.status(503).json({ success: false, error: "غير مُهيأ على الخادم. أضف مفاتيح GitHub من إعدادات Vercel." });
     }
     const state = ghStateNonce();
-    const verifier = crypto.randomBytes(32).toString("base64url");
-    res.cookie(GH_LINK_COOKIE, `${state}.${verifier}`, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 10 * 60_000 });
-    res.json({ success: true, redirect: `${providerConfig("github").authUrl}?client_id=${encodeURIComponent(providerConfig("github").clientId)}&redirect_uri=${encodeURIComponent(GH_CALLBACK_URL(req))}&state=${encodeURIComponent(state)}&scope=${GH_SCOPES}` });
+    res.cookie(GH_LINK_COOKIE, state, { httpOnly: true, secure: cookiesAreSecure(req), sameSite: "lax", maxAge: 10 * 60_000 });
+    res.json({ success: true, redirect: `${GH_AUTHORIZE_URL}?client_id=${encodeURIComponent(providerConfig("github").clientId)}&redirect_uri=${encodeURIComponent(GH_CALLBACK_URL(req))}&state=${encodeURIComponent(state)}&scope=${GH_SCOPES}` });
   } catch (e) { res.status(500).json({ success: false, error: "خطأ داخلي في الخادم." }); }
 });
 app.get("/api/github/callback", async (req: AuthReq, res: Response) => {
   try {
-    const needsSave = (readCookie(req, GH_LINK_COOKIE) || "").includes(".");
-    if (!needsSave) {
+    // The link cookie is single-use CSRF state, not a credential: it carries the
+    // `state` minted by /link and nothing else. (It used to be `state.verifier`,
+    // with a verifier that was never used, so it only added a spurious mismatch.)
+    const state = readCookie(req, GH_LINK_COOKIE);
+    if (!state) {
       return res.redirect(`${requestBaseUrl(req)}/?github_import=skipped`);
     }
-    const [state, verifier] = String(readCookie(req, GH_LINK_COOKIE) || "").split(".") ?? [];
-    if (!state || !verifier) return res.redirect(`${requestBaseUrl(req)}/?github_import=invalid_state`);
-    if (req.query.state !== state) return res.redirect(`${requestBaseUrl(req)}/?github_import=csrf`);
+    if (!req.query.state || req.query.state !== state) {
+      return res.redirect(`${requestBaseUrl(req)}/?github_import=csrf`);
+    }
     const code = String(req.query.code || "");
     if (!code) return res.redirect(`${requestBaseUrl(req)}/?github_import=no_code`);
     const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
@@ -1000,23 +1018,40 @@ app.get("/api/github/callback", async (req: AuthReq, res: Response) => {
     const userRes = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${tokenJson.access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Ebnili-App" } });
     if (!userRes.ok) return res.redirect(`${requestBaseUrl(req)}/?github_import=user_failed`);
     const ghUser = (await userRes.json()) as { id: number; login: string; name?: string; email?: string };
-    const ghEmail = await (await fetch("https://api.github.com/user/emails", { headers: { Authorization: `Bearer ${tokenJson.access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Ebnili-App" } })).json() as { email: string; primary: boolean }[];
-    const primaryEmail = ghEmail.find(e => e.primary)?.email || ghEmail[0]?.email;
-    const stored: StoredGhToken = { userId: String(ghUser.id), login: ghUser.login, accessToken: tokenJson.access_token, linkNonce: state };
-    res.cookie(GH_TOKEN_COOKIE, issueGhToken(stored), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 });
+    // Bind the token to the APP session that asked for the link, so a GitHub
+    // token linked by one account can never be used by another account signed in
+    // on this same browser. The app session cookie IS present on this callback.
+    const session = readAuthSession(req);
+    if (!session) return res.redirect(`${requestBaseUrl(req)}/?github_import=not_signed_in`);
+    const stored: StoredGhToken = { userId: String(ghUser.id), login: ghUser.login, accessToken: tokenJson.access_token, accountId: session.id };
+    res.cookie(GH_TOKEN_COOKIE, issueGhToken(stored), { httpOnly: true, secure: cookiesAreSecure(req), sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 });
+    // Single use: the CSRF nonce must not survive the round trip.
+    clearAuthCookie(res, GH_LINK_COOKIE, req);
     res.redirect(`${requestBaseUrl(req)}/?github_import=success`);
   } catch (e) { res.redirect(`${requestBaseUrl(req)}/?github_import=server_error`); }
 });
 
+// The account's repository list. Returns `linked: false` (never an error) when no
+// token bound to THIS session exists — that is the dialog's cue to offer the link
+// step, or a public-repo URL import which needs no token at all.
 app.get("/api/github/repos", async (req: AuthReq, res: Response) => {
   try {
-    const stored = readGhToken(req);
+    const session = readAuthSession(req);
+    const stored = session ? ghTokenForSession(req, session) : null;
     if (!stored) return res.json({ linked: false });
-    const ghRes = await fetch("https://api.github.com/user/repos", { headers: { Authorization: `Bearer ${stored.accessToken}`, Accept: "application/vnd.github+json", "User-Agent": "Ebnili-App" } });
-    if (!ghRes.ok) return res.json({ linked: true, error: "Failed to list repos" });
-    const repos = await ghRes.json() as { full_name: string; description: string | null; html_url: string; default_branch: string; private: boolean }[];
+    const ghRes = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated", { headers: ghHeaders(stored.accessToken) });
+    if (!ghRes.ok) return res.status(502).json({ linked: true, error: "تعذّر جلب المستودعات من GitHub." });
+    const rows = await ghRes.json() as { full_name: string; description: string | null; html_url: string; default_branch: string; private: boolean }[];
+    const repos = (Array.isArray(rows) ? rows : []).map(r => ({ full_name: r.full_name, description: r.description ?? null, html_url: r.html_url, default_branch: r.default_branch, private: r.private }));
     res.json({ linked: true, repos });
   } catch (e) { res.json({ linked: false }); }
+});
+
+// Where the browser returns from GitHub. The import dialog reads it so nobody has
+// to guess the URL (README documents this route).
+app.get("/api/github/config", (req: AuthReq, res: Response) => {
+  const cfg = providerConfig("github");
+  res.json({ configured: cfg.configured, callbackUrl: cfg.configured ? GH_CALLBACK_URL(req) : null });
 });
 const GH_TOKEN_COOKIE = "ebnili_gh_token";
 const GH_LINK_COOKIE = "ebnili_gh_link";
@@ -1026,7 +1061,17 @@ interface StoredGhToken {
   userId: string;
   login: string;
   accessToken: string;
-  linkNonce: string;
+  /**
+   * The APP account that asked for the link (stamped at callback time).
+   *
+   * This is what makes the token usable at all: the old field was `linkNonce`,
+   * and `ghTokenForSession` compared it against a cookie that expired after 10
+   * minutes while the token cookie lives 30 days — so every call after the first
+   * 10 minutes returned null and the repository list silently came back empty.
+   * A session binding is the property we actually want (the token must not
+   * outlive its owner's session context), and it survives the round trip.
+   */
+  accountId: string;
 }
 
 function ghStateNonce(): string {
@@ -1097,11 +1142,102 @@ function parseRepoRef(input: string): { owner: string; repo: string } | null {
  */
 function ghTokenForSession(req: AuthReq, session: AuthUser): StoredGhToken | null {
   const stored = readGhToken(req);
-  const linkNonce = readCookie(req, GH_LINK_COOKIE);
-  if (!stored || !linkNonce) return null;
-  if (!safeEqual(stored.linkNonce, linkNonce)) return null;
-  return stored.userId === session.id ? stored : null;
+  if (!stored) return null;
+  // The token belongs to whoever asked for the link. Anything else — including a
+  // token left over from a different account that signed in on this browser —
+  // must be treated as absent.
+  return stored.accountId === session.id ? stored : null;
 }
+
+// ── Repository read ───────────────────────────────────────────────────────────
+// Reads one repository's file tree AND the contents of each importable file, in a
+// single call.
+//
+// WHY THIS ROUTE EXISTS: the browser cannot talk to GitHub with a token in the
+// frontend (it would be readable by anyone), and the importer has always called
+// `/api/github/read` — the route simply never existed, so every import 404'd on
+// its first request. This is the only place a GitHub token is used to read, and it
+// is READ-ONLY: nothing here can push, and `GH_SCOPES` asks only for `read:user`.
+//
+// TWO ACCESS PATHS, both deliberate:
+//   • linked account → the session-bound token, so PRIVATE repos work;
+//   • nobody linked  → an UNAUTHENTICATED GitHub call, which still reads a PUBLIC
+//     repo. That is what lets a Google-only user import a public project without
+//     connecting GitHub at all (the contract the route comment above documents).
+//
+// BOUNDED ON PURPOSE: file count, per-file size and total bytes are all capped,
+// and the tree is filtered to text files — so one click on a huge or hostile
+// repository cannot become an OOM or a runaway fan-out of GitHub calls.
+const GH_IMPORT_MAX_FILES = 120;
+const GH_IMPORT_MAX_FILE_BYTES = 512 * 1024; // per file
+const GH_IMPORT_MAX_TOTAL_BYTES = 2 * 1024 * 1024; // across the whole import
+
+/** Directories never worth importing — they would swamp the quota instantly. */
+const GH_IMPORT_SKIP_DIRS = /(^|\/)(node_modules|\.git|dist|build|\.next|\.venv|vendor|coverage)\//;
+
+/** Extensions treated as text (importable). Anything else is skipped. */
+const GH_IMPORT_TEXT_EXT = /\.(html?|css|scss|js|mjs|cjs|jsx|ts|tsx|json|md|txt|svg|xml|ya?ml|toml|sql|gitignore)$/i;
+
+app.get("/api/github/read", async (req: AuthReq, res: Response) => {
+  try {
+    const owner = String(req.query.owner || "").trim();
+    const repo = String(req.query.repo || "").trim();
+    const ref = parseRepoRef(`${owner}/${repo}`);
+    if (!ref) return res.status(400).json({ success: false, error: "مسار مستودع غير صالح." });
+
+    const session = readAuthSession(req);
+    const token = session ? ghTokenForSession(req, session)?.accessToken : undefined;
+
+    // 1) Resolve the default branch, so an import never silently depends on the
+    //    repository still calling its branch "main".
+    const metaRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`, { headers: ghHeaders(token) });
+    if (metaRes.status === 404) return res.status(404).json({ success: false, error: "المستودع غير موجود أو ليس عاماً." });
+    if (!metaRes.ok) return res.status(502).json({ success: false, error: "تعذّر الوصول إلى المستودع." });
+    const meta = (await metaRes.json()) as { default_branch?: string };
+    const branch = (meta.default_branch || "main").trim() || "main";
+
+    // 2) The tree. `recursive=1` walks the whole repository in ONE call.
+    const treeRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`, { headers: ghHeaders(token) });
+    if (!treeRes.ok) return res.status(502).json({ success: false, error: "تعذّر قراءة شجرة الملفات." });
+    const treeJson = (await treeRes.json()) as { tree?: { path: string; type: string; size?: number }[] };
+    const rawTree = Array.isArray(treeJson.tree) ? treeJson.tree : [];
+
+    const blobs = rawTree.filter(f =>
+      f.type === "blob" &&
+      !GH_IMPORT_SKIP_DIRS.test(f.path) &&
+      GH_IMPORT_TEXT_EXT.test(f.path) &&
+      (f.size ?? 0) <= GH_IMPORT_MAX_FILE_BYTES,
+    ).slice(0, GH_IMPORT_MAX_FILES);
+
+    // 3) Contents. Sequential and budgeted: GitHub throttles bursts, and the
+    //    budget is what stops a repository of large files from being pulled whole.
+    const files: Record<string, string> = {};
+    let used = 0;
+    for (const blob of blobs) {
+      if (used > GH_IMPORT_MAX_TOTAL_BYTES) break;
+      const fileRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/contents/${blob.path}?ref=${encodeURIComponent(branch)}`, { headers: ghHeaders(token) });
+      if (!fileRes.ok) continue;
+      const body = (await fileRes.json()) as { content?: string; encoding?: string };
+      if (body.encoding !== "base64" || typeof body.content !== "string") continue;
+      const text = Buffer.from(body.content, "base64").toString("utf-8");
+      // A NUL byte means this was binary despite its extension — skip rather than
+      // fill the editor with replacement characters.
+      if (text.includes("\u0000")) continue;
+      used += blob.path.length + text.length;
+      files[blob.path] = text;
+    }
+
+    res.json({
+      success: true,
+      owner: ref.owner,
+      repo: ref.repo,
+      branch,
+      tree: blobs.map(b => ({ path: b.path, type: b.type, size: b.size ?? 0 })),
+      files,
+      truncated: rawTree.length > blobs.length,
+    });
+  } catch (e) { res.status(500).json({ success: false, error: "خطأ داخلي في الخادم." }); }
+});
 
 
 

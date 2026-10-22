@@ -462,6 +462,16 @@ export const StudioSidebar = ({
       {/* ── The rail ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2 space-y-0.5">
         <Row icon={Plus} label={ar ? 'مشروع جديد' : 'New project'} onClick={onNewProject} iconClass="text-rose-400" />
+        {/* GitHub Connect — visible to everyone (guests + signed-in). Placed
+            directly under the site-building entry point, not hidden in the
+            account menu, so it's reachable in one tap from the rail. */}
+        <Row
+          icon={Github}
+          label={ar ? 'استيراد من GitHub' : 'Import from GitHub'}
+          onClick={onOpenGitHubImport}
+          iconClass="text-rose-400"
+          title={ar ? 'استيراد ملفات من مستودع GitHub أو ربط الحساب' : 'Import files from a GitHub repo or link your account'}
+        />
 
         <SectionLabel>{ar ? 'طريقة العرض' : 'View'}</SectionLabel>
         <Row icon={Eye} label={ar ? 'معاينة' : 'Preview'} onClick={() => onViewModeChange('preview')} active={viewMode === 'preview'} />
