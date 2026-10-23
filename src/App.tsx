@@ -128,8 +128,8 @@ function createBlankProject(): AppProject {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #050e1a;
-      color: #e9f1f9;
+      background: #ffffff;
+      color: #1e293b;
       font-family: "Cairo", system-ui, -apple-system, sans-serif;
       padding: 24px;
       text-align: center;
@@ -139,16 +139,16 @@ function createBlankProject(): AppProject {
       display: inline-block;
       font-size: 11px;
       letter-spacing: .08em;
-      color: #7dd3fc;
+      color: #0284c7;
       border: 1px solid #38bdf8;
-      background: rgba(56,189,248,.1);
+      background: rgba(56,189,248,.10);
       border-radius: 999px;
       padding: 4px 12px;
       margin-bottom: 18px;
     }
     h1 { font-size: 26px; font-weight: 800; margin-bottom: 12px; }
-    p { font-size: 14px; line-height: 1.9; color: #7d97b3; }
-    .hint { margin-top: 18px; font-size: 12px; color: #4a6884; }
+    p { font-size: 14px; line-height: 1.9; color: #475569; }
+    .hint { margin-top: 18px; font-size: 12px; color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -1578,10 +1578,10 @@ export default function App() {
   // deadline-bounded (see AUTH_WATCHDOG_MS) and can never stay on screen.
   if (!authChecked) {
     return (
-      <div className="h-screen bg-slate-950 flex items-center justify-center">
+      <div className="h-screen bg-canvas-snow flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-400 via-cyan-300 to-violet-500 flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-white" />
+            <Sparkles className="w-5 h-5 text-slate-900" />
           </div>
           <div className="w-6 h-6 rounded-full border-2 border-slate-800 border-t-sky-400 animate-spin" />
         </div>
@@ -1633,7 +1633,7 @@ export default function App() {
 
   return (
     <div
-      className={`h-screen flex flex-col bg-canvas-purple text-slate-900 overflow-hidden ${
+      className={`h-screen flex flex-col bg-canvas-snow text-slate-900 overflow-hidden ${
         language === 'ar' ? 'font-sans' : 'font-sans'
       }`}
       dir={language === 'ar' ? 'rtl' : 'ltr'}

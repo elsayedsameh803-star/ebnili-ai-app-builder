@@ -136,15 +136,45 @@ body {
       radial-gradient(720px 360px at 98% 110%, rgba(139, 92, 246, 0.12), transparent 60%);
   }
 
-  /* Modern purple canvas: snow-white base with soft violet/magenta rays.
-     Applied to the root page background so the whole site feels "lit" from
-     within without touching any panel/card colors. */
-  .bg-canvas-purple {
-    background-color: #fafafa;
+  /* Snowy white canvas: pure bright white base with subtle icy-blue rays that
+     gently shimmer like light on fresh snow. A whisper-soft "snow sparkle"
+     texture (repeating radial gradient) adds the frosty feel without any
+     distracting animation. Applied to the root page background so the whole
+     site feels crisp and clean like newly fallen snow.
+     Reduced-motion users get the texture but not the pulse. */
+  .bg-canvas-snow {
+    background-color: #ffffff;
     background-image:
-      radial-gradient(900px 450px at 15% 0%, rgba(139, 92, 246, 0.08), transparent 55%),
-      radial-gradient(800px 400px at 110% 110%, rgba(236, 72, 153, 0.06), transparent 55%),
-      radial-gradient(560px 280px at 45% 45%, rgba(168, 85, 247, 0.04), transparent 50%);
+      radial-gradient(900px 450px at 15% 0%, rgba(56, 189, 248, 0.05), transparent 55%),
+      radial-gradient(800px 400px at 110% 110%, rgba(236, 72, 153, 0.035), transparent 55%),
+      radial-gradient(560px 280px at 45% 45%, rgba(168, 85, 247, 0.03), transparent 50%),
+      repeating-radial-gradient(circle, rgba(56, 189, 248, 0.06) 0.5px, transparent 1.5px);
+    background-size: 32px 32px;
+    background-attachment: fixed;
+    animation: snow-glow 16s ease-in-out infinite alternate;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bg-canvas-snow {
+      animation: none;
+    }
+  }
+
+  @keyframes snow-glow {
+    0% {
+      background-image:
+        radial-gradient(900px 450px at 15% 0%, rgba(56, 189, 248, 0.04), transparent 55%),
+        radial-gradient(800px 400px at 110% 110%, rgba(236, 72, 153, 0.03), transparent 55%),
+        radial-gradient(560px 280px at 45% 45%, rgba(168, 85, 247, 0.025), transparent 50%),
+        repeating-radial-gradient(circle, rgba(56, 189, 248, 0.05) 0.5px, transparent 1.5px);
+    }
+    100% {
+      background-image:
+        radial-gradient(900px 450px at 18% 5%, rgba(56, 189, 248, 0.07), transparent 60%),
+        radial-gradient(800px 400px at 105% 105%, rgba(236, 72, 153, 0.045), transparent 60%),
+        radial-gradient(560px 280px at 48% 48%, rgba(168, 85, 247, 0.045), transparent 55%),
+        repeating-radial-gradient(circle, rgba(56, 189, 248, 0.08) 0.5px, transparent 1.5px);
+    }
   }
 
   /* Halo shadows for primary buttons / active nav. */
