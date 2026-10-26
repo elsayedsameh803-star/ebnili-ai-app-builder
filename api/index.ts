@@ -4984,6 +4984,7 @@ FUNCTIONALITY REQUIREMENTS (non-negotiable):
 - Forms: inputs must be controlled; submit must validate (required fields, email format), prevent default, show success/error feedback, and persist data to localStorage when appropriate.
 - State must be the single source of truth (in-memory JS state + localStorage for persistence); re-render on every change. No fake success messages without state change.
 - Search/filter/sort must actually filter the rendered list. Modals must open/close with ESC and backdrop click. Accordions/tabs must toggle real content.
+- File uploads: <input type="file"> must open the native picker; selected images must render in a real preview (FileReader/dataURL) and be removable; if no backend storage is available, show a clear message instead of faking upload success.
 - Never label a feature as working if it is not implemented. If an API/credential is unavailable, state that clearly in the UI instead of faking success.`;
 
 const REFINE_SYSTEM = `You are Ebnily AI's precision code refiner. Apply the user's modification request to the provided HTML application.
