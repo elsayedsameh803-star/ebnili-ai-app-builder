@@ -2056,14 +2056,16 @@ export default function App() {
           errorCode={authError}
         />
       </Suspense>
-      <InteractiveTerminal language={language} open={showTerminal} onClose={() => setShowTerminal(false)} />
-      <button
-        onClick={() => setShowTerminal((v) => !v)}
-        className="fixed bottom-4 right-4 z-[61] rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs font-mono text-slate-200 shadow-lg hover:bg-slate-800"
-        title={language === 'ar' ? 'التيرمينال التفاعلي' : 'Interactive Terminal'}
-      >
-        {'>_'}
-      </button>
+      {hasStarted && <InteractiveTerminal language={language} open={showTerminal} onClose={() => setShowTerminal(false)} />}
+      {hasStarted && (
+        <button
+          onClick={() => setShowTerminal((v) => !v)}
+          className="fixed bottom-4 right-4 z-[61] rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs font-mono text-slate-200 shadow-lg hover:bg-slate-800"
+          title={language === 'ar' ? 'التيرمينال التفاعلي' : 'Interactive Terminal'}
+        >
+          {'>_'}
+        </button>
+      )}
     </div>
   );
 }
