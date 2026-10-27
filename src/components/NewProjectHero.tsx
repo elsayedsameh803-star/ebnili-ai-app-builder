@@ -10,7 +10,9 @@ import {
   Play,
   Crown,
   Github,
-  LogIn
+  LogIn,
+  Paperclip,
+  FileImage
 } from 'lucide-react';
 import { StarterTemplate, Language, UserSubscription } from '../types';
 import { STARTER_TEMPLATES } from '../data/templates';
@@ -66,6 +68,28 @@ export const NewProjectHero = ({
    * mic button lives.
    */
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const parts: string[] = [];
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) {
+        parts.push(`[صورة مرفقة: ${file.name}]`);
+      } else {
+        try {
+          const text = await file.text();
+          parts.push(`--- ملف: ${file.name} ---\n${text}\n--- نهاية ${file.name} ---`);
+        } catch {
+          parts.push(`[ملف مرفق: ${file.name}]`);
+        }
+      }
+    }
+    setPromptText((prev) => (prev ? prev + '\n\n' : '') + parts.join('\n\n'));
+    // reset so same file can be re-selected
+    e.target.value = '';
+  };
 
   const toggleSpeech = () => {
     if (isListening) {
@@ -259,6 +283,24 @@ export const NewProjectHero = ({
                 >
                   {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label={language === 'ar' ? 'رفع صورة أو ملف' : 'Upload image or file'}
+                  className="p-2 rounded-xl text-xs transition cursor-pointer text-slate-400 hover:text-white hover:bg-slate-800"
+                  title={language === 'ar' ? 'رفع صورة أو ملف' : 'Upload image or file'}
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,.txt,.md,.json,.csv,.pdf,.doc,.docx"
+                  onChange={handleFilesSelected}
+                  className="hidden"
+                />
 
                 <span className="hidden sm:inline text-xs text-slate-500 font-mono bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
                   ⚡ {language === 'ar' ? 'إبنيلي AI' : 'Ebnili AI'}
