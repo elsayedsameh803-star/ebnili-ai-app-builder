@@ -5,6 +5,7 @@ import { ChatSidebar } from './components/ChatSidebar';
 import { PreviewFrame } from './components/PreviewFrame';
 import { CodeEditor } from './components/CodeEditor';
 import { NewProjectHero } from './components/NewProjectHero';
+import { InteractiveTerminal } from './components/InteractiveTerminal';
 import { LandingPage } from './components/LandingPage';
 import { InfoPagesModal, type PageKey } from './components/InfoPagesModal';
 import { getDeviceFingerprint } from './utils/fingerprint';
@@ -180,6 +181,18 @@ export default function App() {
   const [hasStarted, setHasStarted] = useState<boolean>(true); // start right into the working studio or hero
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
+  const [showTerminal, setShowTerminal] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === '`' || e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setShowTerminal((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>('desktop');
   const [isInspectMode, setIsInspectMode] = useState<boolean>(false);
 
@@ -2043,6 +2056,7 @@ export default function App() {
           errorCode={authError}
         />
       </Suspense>
+      <InteractiveTerminal language={language} open={showTerminal} onClose={() => setShowTerminal(false)} />
     </div>
   );
 }
