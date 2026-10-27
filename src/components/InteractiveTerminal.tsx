@@ -106,15 +106,16 @@ export const InteractiveTerminal = ({ language, open, onClose }: Props) => {
           <div key={i} className={l.kind === 'error' ? 'text-rose-400' : l.kind === 'info' ? 'text-sky-400' : l.kind === 'input' ? 'text-emerald-400' : 'text-slate-200'}>{l.text}</div>
         ))}
       </div>
-      <form onSubmit={submit} className="flex items-center gap-2 px-3 py-2 border-t border-slate-800">
-        <span className="text-emerald-400 font-mono">$</span>
+      <form onSubmit={submit} className="flex items-center gap-2 px-3 py-3 border-t border-slate-700 bg-slate-900">
+        <span className="text-emerald-400 font-mono text-base">$</span>
         <input
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          className="flex-1 bg-transparent outline-none text-slate-200 font-mono text-xs"
+          className="flex-1 bg-slate-800 border border-slate-600 rounded-md px-3 py-2 outline-none text-white font-mono text-base placeholder-slate-500"
           spellCheck={false}
           autoComplete="off"
+          placeholder={ar ? 'اكتب أمرًا...' : 'Type a command...'}
         />
       </form>
     </div>
