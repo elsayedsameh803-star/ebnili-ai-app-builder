@@ -104,7 +104,7 @@ const limitPayments = rateLimit(
  * that this account skips the subscription gate, nothing more; admin access is
  * decided separately by `requireAdmin`.
  */
-app.use((req: Request, _res: Response, next: NextFunction) => {
+app.use((req: Request, res: Response, next: NextFunction) => {
   const session = readAuthSession(req as AuthReq);
   const tagged = req as Request & { authEmail?: string; accountTier?: Tier; subscriptionBypassed?: boolean };
 
@@ -115,6 +115,12 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
       tagged.accountTier = "business";
       tagged.subscriptionBypassed = true;
     }
+    // Sliding session: renew the long-lived cookie on every authenticated
+    // request so an active user is never asked to log in again.
+    try {
+      const renewed = issueAuthSession(session);
+      if (renewed) res.cookie(AUTH_COOKIE_NAME, renewed, authCookieOptions(AUTH_SESSION_TTL_MS, req));
+    } catch {}
   }
   next();
 });
@@ -3395,7 +3401,7 @@ const AUTH_COOKIE_NAME = "ebnili_user_session";
 const AUTH_STATE_COOKIE = "ebnili_oauth_state";
 /** PKCE verifier/challenge, so the browser never carries a usable credential. */
 const AUTH_PKCE_COOKIE = "ebnili_oauth_pkce";
-const AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const AUTH_SESSION_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000; // 10 years (login once)
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
