@@ -15,6 +15,7 @@ import { CustomDomainCard } from './CustomDomainCard';
 
 interface SiteSettingsProps {
   isOpen: boolean;
+
   onClose: () => void;
   language: 'ar' | 'en';
   projectId: string;
