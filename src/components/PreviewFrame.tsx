@@ -358,6 +358,17 @@ export const PreviewFrame = ({
             sandbox="allow-scripts allow-forms allow-modals"
           />
 
+           {/* Hide partial HTML text ("html" etc.) that leaks while streaming. */}
+           {isStreaming && (
+             <div className="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm flex items-center justify-center">
+               <div className="flex flex-col items-center gap-2 text-slate-500 text-sm">
+                 <span className="w-3 h-3 rounded-full bg-rose-400 animate-pulse" />
+                 <span>{language === 'ar' ? 'يتم بناء المعاينة…' : 'Building preview…'}</span>
+               </div>
+             </div>
+           )}
+
+
           {/* Live "writing" ribbon over the preview while tokens stream in. */}
           {isStreaming && (
             <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-slate-950/90 border border-rose-500/40 shadow-2xl px-3 py-1.5 rounded-full text-[11px] font-bold text-rose-200 backdrop-blur-md">
