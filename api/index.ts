@@ -4469,12 +4469,11 @@ function getGeminiClient(): GoogleGenAI | null {
 // Anything the key cannot reach answers 404 and is dropped immediately
 // (classifyModelError → "permanent"), so listing extra candidates is free.
 const CANDIDATE_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-flash-latest",
-  "gemini-3.8-flash",
-  "gemini-3.7-flash",
-  "gemini-3.6-flash",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b",
+  "gemini-1.5-pro",
 ];
 
 // TIME BUDGETS — this is what made "big prompts" fail 100% of the time.
