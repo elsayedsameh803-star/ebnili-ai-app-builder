@@ -343,16 +343,15 @@ function getGeminiClient(): GoogleGenAI | null {
 
 // Resilient Gemini Generator with Gemini 3.8 Flash priority & high-availability fallbacks
 async function generateWithGeminiResilient(ai: GoogleGenAI, options: { contents: any; config?: any }) {
-  // Gemini candidates verified against ai.google.dev (2026-09-23):
+  // Gemini candidates verified against ai.google.dev (2026):
   // gemini-3.8-flash (newest stable Flash for software engineering),
-  // gemini-flash-latest (official alias), gemini-3.7/3.6-flash (stable),
-  // gemini-2.5-flash (older stable last resort). Shut-down models excluded.
+  // gemini-flash-latest (official alias), gemini-3.7/3.6-flash (stable).
+  // gemini-2.5 and older models are EXCLUDED per policy.
   const candidateModels = [
     "gemini-3.8-flash",
     "gemini-flash-latest",
     "gemini-3.7-flash",
     "gemini-3.6-flash",
-    "gemini-2.5-flash",
   ];
   let lastError: any = null;
 
