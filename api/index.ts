@@ -16,7 +16,6 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import crypto from "node:crypto";
-import { resolveCname, resolve4 } from "node:dns/promises";
 import {
   clientKey,
   corsGuard,
@@ -39,7 +38,6 @@ import {
   TIER_DAILY_QUOTA as SECURITY_TIER_DAILY_QUOTA,
   AI_ABSOLUTE_DAILY_CEILING,
   quotaForTier,
-  quotaWindowFor,
 } from "./security.js";
 
 const app = express();
@@ -104,7 +102,7 @@ const limitPayments = rateLimit(
  * that this account skips the subscription gate, nothing more; admin access is
  * decided separately by `requireAdmin`.
  */
-app.use((req: Request, res: Response, next: NextFunction) => {
+app.use((req: Request, _res: Response, next: NextFunction) => {
   const session = readAuthSession(req as AuthReq);
   const tagged = req as Request & { authEmail?: string; accountTier?: Tier; subscriptionBypassed?: boolean };
 
@@ -115,12 +113,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       tagged.accountTier = "business";
       tagged.subscriptionBypassed = true;
     }
-    // Sliding session: renew the long-lived cookie on every authenticated
-    // request so an active user is never asked to log in again.
-    try {
-      const renewed = issueAuthSession(session);
-      if (renewed) res.cookie(AUTH_COOKIE_NAME, renewed, authCookieOptions(AUTH_SESSION_TTL_MS, req));
-    } catch {}
   }
   next();
 });
@@ -133,7 +125,7 @@ app.use("/api", sameOriginGuard);
 // SECURITY: this was `Access-Control-Allow-Origin: *`, which let any website read
 // this API's responses from a visitor's browser. A non-allowlisted origin now
 // receives NO CORS header at all, so the browser refuses the read.
-app.use((req, res, next) => corsGuard(resolveAllowedOrigins(req), req)(req, res, next));
+app.use((req, res, next) => corsGuard(resolveAllowedOrigins(req))(req, res, next));
 
 // ── Health & status ─────────────────────────────────────────────────────────
 // NOTE: getApiKey is defined in the Gemini section below (function hoisting
@@ -195,7 +187,7 @@ const DEFAULT_SUBSCRIPTION = {
   status: "active",
   planName: "Starter Free",
   generationsUsedToday: 0,
-  generationsLimitToday: SECURITY_TIER_DAILY_QUOTA.free,
+  generationsLimitToday: 5,
   canExportZip: false,
   canDeployCustomDomain: false,
   canUseVisualInspector: true,
@@ -233,40 +225,6 @@ function isOwnerAccount(session: AuthUser | null): boolean {
   return normalizeEmail(session.email) === OWNER_EMAIL;
 }
 
-/**
- * Full-privilege administrators declared in the environment (ADMIN_EMAILS).
- *
- * These are OWNER-EQUIVALENT. Unlike a database-backed delegate — who can open
- * the console but never manage the admin list — an address here can do
- * everything the owner can: open the console AND manage it (settings,
- * integrations, database console, and the admin list itself).
- *
- * WHY THIS EXISTS: the delegate list lives in Supabase. With the database not
- * configured, `readStoredAdmins()` can only ever return [], so no delegate can
- * be recognised and "add admin" silently fails with 503. Declaring the co-admin
- * here grants full access with no database at all.
- *
- * Comma-separated, case-insensitive, same shape as STAFF_EMAILS. Ownership
- * still comes from OWNER_EMAIL alone — `isOwnerAccount()` is unchanged.
- */
-const ADMIN_EMAILS = new Set(
-  (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((entry) => normalizeEmail(entry))
-    .filter(Boolean),
-);
-
-/**
- * Owner OR an environment-declared full admin. This is what `requireAdmin`,
- * `requireOwner` and the admin PIN gate accept, so a full admin is
- * interchangeable with the owner everywhere it matters.
- */
-function isFullAdmin(session: AuthUser | null): boolean {
-  if (!session) return false;
-  if (isOwnerAccount(session)) return true;
-  return ADMIN_EMAILS.has(normalizeEmail(session.email));
-}
-
 // ── Staff accounts: automatic Business tier ───────────────────────────────────
 // The list, the matcher and the reasoning all live in `api/security.ts`:
 //   • `isStaffEmail()` decides the SUBSCRIPTION tier only.
@@ -283,33 +241,11 @@ function isFullAdmin(session: AuthUser | null): boolean {
  * customers keep being told to transfer to a number that is no longer active.
  * Read lazily and fail soft: a storage hiccup must never block a page render.
  */
-/**
- * The wallet / WhatsApp numbers the pay screens show.
- *
- * CORRECTNESS: these used to be hard-coded, which contradicted the comment
- * above — the owner CAN change the wallet from the dashboard and the settings
- * row is written there, so customers were told to transfer to a number the
- * owner had already replaced. The stored value is now served, with the
- * hard-coded pair only as a fail-soft fallback when the row is unreadable.
- */
-async function contactDefaults(): Promise<{ orangeWalletNumber: string; supportWhatsappNumber: string }> {
-  const fallback = { orangeWalletNumber: "01207782741", supportWhatsappNumber: "01207782741" };
-  try {
-    const stored = await readRawSettings();
-    const pick = (key: keyof typeof fallback): string => {
-      const raw = stored[key];
-      return typeof raw === "string" && raw.trim() ? raw.trim() : fallback[key];
-    };
-    return { orangeWalletNumber: pick("orangeWalletNumber"), supportWhatsappNumber: pick("supportWhatsappNumber") };
-  } catch {
-    return fallback;
-  }
+function contactDefaults(): { orangeWalletNumber: string; supportWhatsappNumber: string } {
+  return { orangeWalletNumber: "01207782741", supportWhatsappNumber: "01207782741" };
 }
 
-function subscriptionPayload(
-  grant: { email: string; tier: "pro" | "business"; expiresAt: string } | null,
-  contact: { orangeWalletNumber: string; supportWhatsappNumber: string },
-) {
+function subscriptionPayload(grant: { email: string; tier: "pro" | "business"; expiresAt: string } | null) {
   const paid = grant
     ? {
         ...DEFAULT_SUBSCRIPTION,
@@ -330,7 +266,8 @@ function subscriptionPayload(
   return {
     success: true,
     subscription: { ...paid, activatedAt: new Date().toISOString() },
-    ...contact,
+    orangeWalletNumber: "01207782741",
+    supportWhatsappNumber: "01207782741",
   };
 }
 
@@ -368,7 +305,7 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
     res.json({
       success: true,
       subscription: ownerSubscription(),
-      ...(await contactDefaults()),
+      ...contactDefaults(),
     });
     return;
   }
@@ -384,7 +321,7 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
     res.json({
       success: true,
       subscription: ownerSubscription(),
-      ...(await contactDefaults()),
+      ...contactDefaults(),
     });
     return;
   }
@@ -425,7 +362,7 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
     entitled = grant;
   }
 
-  res.json(subscriptionPayload(entitled, await contactDefaults()));
+  res.json(subscriptionPayload(entitled));
 });
 
 /** Only a logged-in (Google/GitHub) user may open a payment review request. */
@@ -496,13 +433,7 @@ async function queuePaymentReview(req: Request, res: Response) {
 
   const write = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
     method: "POST",
-    // CORRECTNESS: `on_conflict` must NAME the conflict target (the `id`
-    // primary key). Passing the bare resolution keyword here made PostgREST
-    // search for a column literally called "ignore", so EVERY payment submit
-    // answered 400 and the row was never written — the dashboard's pending
-    // list stayed empty and a paying customer's transfer was never recorded.
-    query: { on_conflict: "id" },
-    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    query: { on_conflict: "ignore" },
     body: JSON.stringify({
       id,
       account_email: session?.email ?? "",
@@ -674,23 +605,15 @@ function toPublicProject(row: DbProject) {
     theme: row.theme ?? {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    custom_domain: row.custom_domain ?? null,
-    custom_domain_status: row.custom_domain_status ?? null,
-    custom_domain_error: row.custom_domain_error ?? null,
   };
 }
 
-/** 503 with the ACTUAL database reason, never a generic fallback. */
-function dbUnavailable(res: Response, detail?: string, dbStatus?: number) {
-  const reason = (detail || "").trim();
-  if (reason) console.error("dbUnavailable:", reason, dbStatus ? `(postgrest_status=${dbStatus})` : "");
+/** 503 with a readable reason instead of pretending the data exists. */
+function dbUnavailable(res: Response) {
   return res.status(503).json({
     success: false,
     code: "DB_UNAVAILABLE",
-    message: reason || "قاعدة بيانات المشاريع غير مهيأة على الخادم.",
-    // Exact PostgREST / fetch error so DevTools shows the real cause.
-    error: reason || "database_not_configured",
-    ...(typeof dbStatus === "number" ? { dbStatus } : {}),
+    message: "قاعدة بيانات المشاريع غير مهيأة على الخادم.",
   });
 }
 
@@ -735,7 +658,7 @@ app.get("/api/projects", (req: Request, res: Response) => {
 
   void dbRequest<DbProject[]>(PROJECTS_TABLE, {
     query: {
-      select: "id,name,code,files,versions,theme,created_at,updated_at,custom_domain,custom_domain_status,custom_domain_error",
+      select: "id,name,code,files,versions,theme,created_at,updated_at",
       owner_id: `eq.${owner.id}`,
       order: "updated_at.desc",
     },
@@ -757,9 +680,6 @@ app.get("/api/projects", (req: Request, res: Response) => {
         .slice(0, 160),
     }));
     res.json({ success: true, projects: rows });
-  }).catch((err) => {
-    console.error("projects list failed:", err);
-    return dbUnavailable(res);
   });
 });
 
@@ -772,7 +692,7 @@ app.get("/api/projects/:id", (req: Request, res: Response) => {
   const id = String(req.params.id ?? "");
   void dbRequest<DbProject[]>(PROJECTS_TABLE, {
     query: {
-      select: "id,name,code,files,versions,theme,created_at,updated_at,custom_domain,custom_domain_status,custom_domain_error",
+      select: "id,name,code,files,versions,theme,created_at,updated_at",
       owner_id: `eq.${owner.id}`,
       id: `eq.${id}`,
       limit: "1",
@@ -787,9 +707,6 @@ app.get("/api/projects/:id", (req: Request, res: Response) => {
     // that does not exist.
     if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
     res.json({ success: true, project: toPublicProject(row) });
-  }).catch((err) => {
-    console.error("project read failed:", err);
-    return dbUnavailable(res);
   });
 });
 
@@ -821,9 +738,6 @@ app.post("/api/projects", limitWrites, (req: Request, res: Response) => {
       return dbUnavailable(res);
     }
     res.status(201).json({ success: true, project: toPublicProject(result.data[0]) });
-  }).catch((err) => {
-    console.error("project create failed:", err);
-    return dbUnavailable(res);
   });
 });
 
@@ -855,9 +769,6 @@ app.patch("/api/projects/:id", limitWrites, (req: Request, res: Response) => {
     const row = result.data?.[0];
     if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
     res.json({ success: true, project: toPublicProject(row) });
-  }).catch((err) => {
-    console.error("project update failed:", err);
-    return dbUnavailable(res);
   });
 });
 
@@ -879,9 +790,6 @@ app.delete("/api/projects/:id", (req: Request, res: Response) => {
       return res.status(404).json({ success: false, code: "NOT_FOUND" });
     }
     res.json({ success: true, deleted: id });
-  }).catch((err) => {
-    console.error("project delete failed:", err);
-    return dbUnavailable(res);
   });
 });
 
@@ -897,43 +805,13 @@ app.post("/api/projects/export", (req: Request, res: Response) => {
   if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
 
   const tier = serverTierFor(req, session);
-
-  // FREE = PREVIEW ONLY. No source, no ZIP, no features — enforced here, on the
-  // server, so a tampered client cannot export by calling this route directly.
-  // The tier is resolved above from the signed session, never from the request
-  // body, so a body claiming `pro` changes nothing. The client UI hides these
-  // buttons too, but that is only a courtesy — this 403 is the real boundary.
-  if (!isPaidTier(tier)) {
-    return res.status(403).json({
-      success: false,
-      code: "FREE_PREVIEW_ONLY",
-      message:
-        "خطة مجانية = معاينة فقط. قم بالترقية إلى Pro أو Business لتحميل الكود أو ملف ZIP.",
-    });
-  }
-
   const body = (req.body as { files?: Record<string, string> }) ?? {};
   const files = body.files && typeof body.files === "object" ? body.files : {};
 
-  // SERVER-SIDE SANITISATION (mirror of the ExportModal guards): names are
-  // untrusted, so drop absolute paths and `..` escapes, cap entries and
-  // bytes. Prevents Zip-Slip archives and OOM payloads from a crafted call.
-  const entries = Object.entries(files);
-  if (entries.length > 500) {
-    return res.status(413).json({ success: false, code: "EXPORT_TOO_MANY_FILES" });
-  }
-  let exportBytes = 0;
   const marked: Record<string, string> = {};
-  for (const [rawPath, content] of entries) {
-    const safeName = String(rawPath ?? "").replace(/\\/g, "/").trim();
-    if (!safeName || safeName.startsWith("/") || /(^|\/)\.\.(\/|$)/.test(safeName)) continue;
-    const text = String(content ?? "");
-    exportBytes += safeName.length + text.length;
-    if (exportBytes > 20 * 1024 * 1024) {
-      return res.status(413).json({ success: false, code: "EXPORT_TOO_LARGE" });
-    }
+  for (const [path, content] of Object.entries(files)) {
     // Only the executable page carries a mark; README/JSON/SQL are not documents.
-    marked[safeName] = /\.html?$/i.test(safeName) ? applyWatermark(text, tier) : text;
+    marked[path] = /\.html?$/i.test(path) ? applyWatermark(String(content), tier) : String(content);
   }
 
   res.json({
@@ -963,102 +841,6 @@ app.post("/api/projects/export", (req: Request, res: Response) => {
 // READ-ONLY BY DESIGN: nothing here writes to GitHub, and `scope` asks only for
 // `read:user`, so this feature cannot push or delete anything.
 
-// ── GitHub OAuth routes ────────────────────────────────────────────────────────
-// WHY SERVER-SIDE ONLY: GitHub access tokens must NEVER reach the browser.
-// The browser only receives the `link` route result or user-friendly metadata.
-
-const GH_CALLBACK_URL = (req: AuthReq) => {
-  const base = requestBaseUrl(req);
-  return `${base}/api/github/callback`;
-};
-
-// GitHub's browser-approval endpoint. It is a FIXED platform URL, not a setting —
-// `providerConfig("github")` only carries credentials, so reading `.authUrl` off
-// it (as this route used to) evaluated to `undefined` and produced a redirect to
-// the literal string "undefined?client_id=...", which GitHub rejects. The link
-// step therefore never worked at all.
-const GH_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
-
-// Account binding for a linked GitHub token.
-//
-// The token cookie is HMAC-signed and httpOnly, so it cannot be forged — but it
-// is still a bearer credential living on the browser. Without a binding to the
-// APP session, a GitHub link made by one account stays usable by whichever other
-// account signs in on the same browser (the old check compared the GitHub
-// numeric user id against the app session id, which can never match, so it
-// rejected everything INCLUDING the rightful owner). The account id is stamped
-// into the payload at callback time, where the app session cookie is present.
-app.post("/api/github/link", (req: AuthReq, res: Response) => {
-  try {
-    if (!providerConfig("github").configured) {
-      return res.status(503).json({ success: false, error: "غير مُهيأ على الخادم. أضف مفاتيح GitHub من إعدادات Vercel." });
-    }
-    const state = ghStateNonce();
-    res.cookie(GH_LINK_COOKIE, state, { httpOnly: true, secure: cookiesAreSecure(req), sameSite: "lax", maxAge: 10 * 60_000 });
-    res.json({ success: true, redirect: `${GH_AUTHORIZE_URL}?client_id=${encodeURIComponent(providerConfig("github").clientId)}&redirect_uri=${encodeURIComponent(GH_CALLBACK_URL(req))}&state=${encodeURIComponent(state)}&scope=${GH_SCOPES}` });
-  } catch (e) { res.status(500).json({ success: false, error: "خطأ داخلي في الخادم." }); }
-});
-app.get("/api/github/callback", async (req: AuthReq, res: Response) => {
-  try {
-    // The link cookie is single-use CSRF state, not a credential: it carries the
-    // `state` minted by /link and nothing else. (It used to be `state.verifier`,
-    // with a verifier that was never used, so it only added a spurious mismatch.)
-    const state = readCookie(req, GH_LINK_COOKIE);
-    if (!state) {
-      return res.redirect(`${requestBaseUrl(req)}/?github_import=skipped`);
-    }
-    if (!req.query.state || req.query.state !== state) {
-      return res.redirect(`${requestBaseUrl(req)}/?github_import=csrf`);
-    }
-    const code = String(req.query.code || "");
-    if (!code) return res.redirect(`${requestBaseUrl(req)}/?github_import=no_code`);
-    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: new URLSearchParams({ client_id: providerConfig("github").clientId, client_secret: providerConfig("github").clientSecret, code, redirect_uri: GH_CALLBACK_URL(req), grant_type: "authorization_code" }),
-    });
-    const tokenJson = await tokenRes.json() as { access_token?: string; error?: string };
-    if (!tokenRes.ok || !tokenJson.access_token) {
-      return res.redirect(`${requestBaseUrl(req)}/?github_import=token_failed`);
-    }
-    const userRes = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${tokenJson.access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Ebnili-App" } });
-    if (!userRes.ok) return res.redirect(`${requestBaseUrl(req)}/?github_import=user_failed`);
-    const ghUser = (await userRes.json()) as { id: number; login: string; name?: string; email?: string };
-    // Bind the token to the APP session that asked for the link, so a GitHub
-    // token linked by one account can never be used by another account signed in
-    // on this same browser. The app session cookie IS present on this callback.
-    const session = readAuthSession(req);
-    if (!session) return res.redirect(`${requestBaseUrl(req)}/?github_import=not_signed_in`);
-    const stored: StoredGhToken = { userId: String(ghUser.id), login: ghUser.login, accessToken: tokenJson.access_token, accountId: session.id };
-    res.cookie(GH_TOKEN_COOKIE, issueGhToken(stored), { httpOnly: true, secure: cookiesAreSecure(req), sameSite: "lax", maxAge: 30 * 24 * 60 * 60 * 1000 });
-    // Single use: the CSRF nonce must not survive the round trip.
-    clearAuthCookie(res, GH_LINK_COOKIE, req);
-    res.redirect(`${requestBaseUrl(req)}/?github_import=success`);
-  } catch (e) { res.redirect(`${requestBaseUrl(req)}/?github_import=server_error`); }
-});
-
-// The account's repository list. Returns `linked: false` (never an error) when no
-// token bound to THIS session exists — that is the dialog's cue to offer the link
-// step, or a public-repo URL import which needs no token at all.
-app.get("/api/github/repos", async (req: AuthReq, res: Response) => {
-  try {
-    const session = readAuthSession(req);
-    const stored = session ? ghTokenForSession(req, session) : null;
-    if (!stored) return res.json({ linked: false });
-    const ghRes = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated", { headers: ghHeaders(stored.accessToken) });
-    if (!ghRes.ok) return res.status(502).json({ linked: true, error: "تعذّر جلب المستودعات من GitHub." });
-    const rows = await ghRes.json() as { full_name: string; description: string | null; html_url: string; default_branch: string; private: boolean }[];
-    const repos = (Array.isArray(rows) ? rows : []).map(r => ({ full_name: r.full_name, description: r.description ?? null, html_url: r.html_url, default_branch: r.default_branch, private: r.private }));
-    res.json({ linked: true, repos });
-  } catch (e) { res.json({ linked: false }); }
-});
-
-// Where the browser returns from GitHub. The import dialog reads it so nobody has
-// to guess the URL (README documents this route).
-app.get("/api/github/config", (req: AuthReq, res: Response) => {
-  const cfg = providerConfig("github");
-  res.json({ configured: cfg.configured, callbackUrl: cfg.configured ? GH_CALLBACK_URL(req) : null });
-});
 const GH_TOKEN_COOKIE = "ebnili_gh_token";
 const GH_LINK_COOKIE = "ebnili_gh_link";
 const GH_SCOPES = "read:user";
@@ -1067,17 +849,7 @@ interface StoredGhToken {
   userId: string;
   login: string;
   accessToken: string;
-  /**
-   * The APP account that asked for the link (stamped at callback time).
-   *
-   * This is what makes the token usable at all: the old field was `linkNonce`,
-   * and `ghTokenForSession` compared it against a cookie that expired after 10
-   * minutes while the token cookie lives 30 days — so every call after the first
-   * 10 minutes returned null and the repository list silently came back empty.
-   * A session binding is the property we actually want (the token must not
-   * outlive its owner's session context), and it survives the round trip.
-   */
-  accountId: string;
+  linkNonce: string;
 }
 
 function ghStateNonce(): string {
@@ -1148,116 +920,358 @@ function parseRepoRef(input: string): { owner: string; repo: string } | null {
  */
 function ghTokenForSession(req: AuthReq, session: AuthUser): StoredGhToken | null {
   const stored = readGhToken(req);
-  if (!stored) return null;
-  // The token belongs to whoever asked for the link. Anything else — including a
-  // token left over from a different account that signed in on this browser —
-  // must be treated as absent.
-  return stored.accountId === session.id ? stored : null;
+  const linkNonce = readCookie(req, GH_LINK_COOKIE);
+  if (!stored || !linkNonce) return null;
+  if (!safeEqual(stored.linkNonce, linkNonce)) return null;
+  return stored.userId === session.id ? stored : null;
 }
 
-// ── Repository read ───────────────────────────────────────────────────────────
-// Reads one repository's file tree AND the contents of each importable file, in a
-// single call.
-//
-// WHY THIS ROUTE EXISTS: the browser cannot talk to GitHub with a token in the
-// frontend (it would be readable by anyone), and the importer has always called
-// `/api/github/read` — the route simply never existed, so every import 404'd on
-// its first request. This is the only place a GitHub token is used to read, and it
-// is READ-ONLY: nothing here can push, and `GH_SCOPES` asks only for `read:user`.
-//
-// TWO ACCESS PATHS, both deliberate:
-//   • linked account → the session-bound token, so PRIVATE repos work;
-//   • nobody linked  → an UNAUTHENTICATED GitHub call, which still reads a PUBLIC
-//     repo. That is what lets a Google-only user import a public project without
-//     connecting GitHub at all (the contract the route comment above documents).
-//
-// BOUNDED ON PURPOSE: file count, per-file size and total bytes are all capped,
-// and the tree is filtered to text files — so one click on a huge or hostile
-// repository cannot become an OOM or a runaway fan-out of GitHub calls.
-const GH_IMPORT_MAX_FILES = 120;
-const GH_IMPORT_MAX_FILE_BYTES = 512 * 1024; // per file
-const GH_IMPORT_MAX_TOTAL_BYTES = 2 * 1024 * 1024; // across the whole import
+/** Is GitHub connected for this session? */
+app.get("/api/github/status", (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  const stored = ghTokenForSession(req, session);
+  res.json({
+    success: true,
+    linked: Boolean(stored),
+    login: stored?.login ?? "",
+    // A public repo is importable with no GitHub connection at all.
+    publicImportAvailable: true,
+    provider: session.provider,
+  });
+});
 
-/** Directories never worth importing — they would swamp the quota instantly. */
-const GH_IMPORT_SKIP_DIRS = /(^|\/)(node_modules|\.git|dist|build|\.next|\.venv|vendor|coverage)\//;
+/**
+ * The exact callback URL this server sends to GitHub.
+ *
+ * WHY this exists: GitHub rejects the authorisation screen with "The
+ * redirect_uri is not associated with this application" when the URL we send is
+ * not registered on the OAuth app — character for character, host included. That
+ * used to be unguessable: the value depends on `APP_URL`, and nothing in the UI
+ * displayed it, so the only way to find it was to read the source.
+ *
+ * It is derived from the SAME helper `/api/github/connect` uses, so the string
+ * shown here is guaranteed to be the string GitHub will compare against. Copy it
+ * into the OAuth app's "Callback URL" field.
+ */
+app.get("/api/github/config", (req: AuthReq, res: AuthRes) => {
+  const cfg = providerConfig("github");
+  const base = requestBaseUrl(req);
+  res.json({
+    success: true,
+    configured: cfg.configured,
+    clientId: cfg.configured ? `${cfg.clientId.slice(0, 4)}…${cfg.clientId.slice(-4)}` : "",
+    callbackUrl: `${base}/api/github/callback`,
+    // Surfaced so a misconfigured APP_URL is visible instead of mysterious: if
+    // this does not match the domain the visitor is on, that is the bug.
+    baseUrl: base,
+    appUrlConfigured: Boolean((process.env.APP_URL || "").trim()),
+    scopes: GH_SCOPES,
+  });
+});
 
-/** Extensions treated as text (importable). Anything else is skipped. */
-const GH_IMPORT_TEXT_EXT = /\.(html?|css|scss|js|mjs|cjs|jsx|ts|tsx|json|md|txt|svg|xml|ya?ml|toml|sql|gitignore)$/i;
+/** Step 1 — send the browser to GitHub to authorise a read-only link. */
+app.get("/api/github/connect", (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  const cfg = providerConfig("github");
+  if (!cfg.configured) {
+    return res.status(503).json({ success: false, message: "GitHub OAuth is not configured." });
+  }
+  const nonce = ghStateNonce();
+  res.cookie(AUTH_STATE_COOKIE, `ghlink.${nonce}`, authCookieOptions(AUTH_STATE_TTL_MS, req));
 
-app.get("/api/github/read", async (req: AuthReq, res: Response) => {
+  const url = new URL("https://github.com/login/oauth/authorize");
+  url.searchParams.set("client_id", cfg.clientId);
+  url.searchParams.set("redirect_uri", `${requestBaseUrl(req)}/api/github/callback`);
+  url.searchParams.set("scope", GH_SCOPES);
+  url.searchParams.set("state", nonce);
+  url.searchParams.set("allow_signup", "false");
+  res.redirect(url.toString());
+});
+
+/** Step 2 — GitHub calls back; exchange the code and store the token. */
+app.get("/api/github/callback", async (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  const home = requestBaseUrl(req);
+  const fail = (reason: string) => res.redirect(`${home}/?github_error=${encodeURIComponent(reason)}`);
+  if (!session) return fail("auth_required");
+
+  // Single-use nonce, as with the sign-in callback — a replayed callback URL
+  // cannot mint a second link.
+  const expected = readCookie(req, AUTH_STATE_COOKIE);
+  clearAuthCookie(res, AUTH_STATE_COOKIE, req);
+  if (!expected || !expected.startsWith("ghlink.")) return fail("state_cookie_missing");
+  const nonce = expected.slice("ghlink.".length);
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  if (!safeEqual(nonce, state)) return fail("state_mismatch");
+
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  if (!code) return fail("missing_code");
+
+  const cfg = providerConfig("github");
+  if (!cfg.configured) return fail("not_configured");
+
   try {
-    const owner = String(req.query.owner || "").trim();
-    const repo = String(req.query.repo || "").trim();
-    const ref = parseRepoRef(`${owner}/${repo}`);
-    if (!ref) return res.status(400).json({ success: false, error: "مسار مستودع غير صالح." });
+    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        client_id: cfg.clientId,
+        client_secret: cfg.clientSecret,
+        code,
+        redirect_uri: `${home}/api/github/callback`,
+      }).toString(),
+    });
+    const tokenJson = (await tokenRes.json()) as { access_token?: string; error?: string };
+    if (!tokenJson.access_token) return fail(tokenJson.error || "exchange_failed");
 
-    const session = readAuthSession(req);
-    const token = session ? ghTokenForSession(req, session)?.accessToken : undefined;
+    // Read the login so the UI can confirm which account was linked.
+    let login = "";
+    try {
+      const profile = await fetch("https://api.github.com/user", {
+        headers: ghHeaders(tokenJson.access_token),
+      });
+      if (profile.ok) {
+        const me = (await profile.json()) as { login?: string };
+        login = String(me.login || "");
+      }
+    } catch {
+      /* the link still works; the label is cosmetic */
+    }
 
-    // 1) Resolve the default branch, so an import never silently depends on the
-    //    repository still calling its branch "main".
-    const metaRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`, { headers: ghHeaders(token) });
-    if (metaRes.status === 404) return res.status(404).json({ success: false, error: "المستودع غير موجود أو ليس عاماً." });
-    if (!metaRes.ok) return res.status(502).json({ success: false, error: "تعذّر الوصول إلى المستودع." });
-    const meta = (await metaRes.json()) as { default_branch?: string };
-    const branch = (meta.default_branch || "main").trim() || "main";
+    // One nonce in BOTH cookies: ghTokenForSession requires them to match, so a
+    // token copied without its partner cookie is worthless.
+    const linkNonce = ghStateNonce();
+    res.cookie(GH_LINK_COOKIE, linkNonce, authCookieOptions(AUTH_SESSION_TTL_MS, req));
+    res.cookie(
+      GH_TOKEN_COOKIE,
+      issueGhToken({
+        userId: session.id,
+        login,
+        accessToken: tokenJson.access_token,
+        linkNonce,
+      }),
+      authCookieOptions(AUTH_SESSION_TTL_MS, req),
+    );
+    return res.redirect(`${home}/?github=linked`);
+  } catch (e) {
+    console.error("github link failed:", e instanceof Error ? e.message : String(e));
+    return fail("exchange_failed");
+  }
+});
 
-    // 2) The tree. `recursive=1` walks the whole repository in ONE call.
-    const treeRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`, { headers: ghHeaders(token) });
-    if (!treeRes.ok) return res.status(502).json({ success: false, error: "تعذّر قراءة شجرة الملفات." });
-    const treeJson = (await treeRes.json()) as { tree?: { path: string; type: string; size?: number }[] };
-    const rawTree = Array.isArray(treeJson.tree) ? treeJson.tree : [];
+/** Disconnect GitHub — the stored token is destroyed, not merely ignored. */
+app.post("/api/github/disconnect", (req: AuthReq, res: AuthRes) => {
+  if (!readAuthSession(req)) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  clearAuthCookie(res, GH_TOKEN_COOKIE, req);
+  clearAuthCookie(res, GH_LINK_COOKIE, req);
+  res.json({ success: true, linked: false });
+});
 
-    const blobs = rawTree.filter(f =>
-      f.type === "blob" &&
-      !GH_IMPORT_SKIP_DIRS.test(f.path) &&
-      GH_IMPORT_TEXT_EXT.test(f.path) &&
-      (f.size ?? 0) <= GH_IMPORT_MAX_FILE_BYTES,
-    ).slice(0, GH_IMPORT_MAX_FILES);
+/**
+ * The user's own repositories. A GitHub link is required because private
+ * repositories are impossible to list without a token; a PUBLIC repo stays
+ * importable through /api/github/tree for any signed-in user.
+ */
+app.get("/api/github/repos", async (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+  const stored = ghTokenForSession(req, session);
+  if (!stored) {
+    return res.status(403).json({
+      success: false,
+      code: "GITHUB_NOT_LINKED",
+      message: "اربط حساب GitHub لعرض مستودعاتك.",
+    });
+  }
 
-    // 3) Contents. Sequential and budgeted: GitHub throttles bursts, and the
-    //    budget is what stops a repository of large files from being pulled whole.
+  try {
+    const page = Math.min(Math.max(Number(req.query.page) || 1, 1), 5);
+    const listRes = await fetch(
+      `https://api.github.com/user/repos?per_page=30&sort=updated&page=${page}` +
+        "&affiliation=owner,collaborator,organization_member",
+      { headers: ghHeaders(stored.accessToken) },
+    );
+    if (listRes.status === 401) {
+      return res.status(403).json({
+        success: false,
+        code: "GITHUB_TOKEN_EXPIRED",
+        message: "انتهت صلاحية الربط مع GitHub. أعد الربط من جديد.",
+      });
+    }
+    if (!listRes.ok) return res.status(502).json({ success: false, message: "GitHub did not answer." });
+
+    const repos = (await listRes.json()) as Array<{
+      id: number;
+      name: string;
+      full_name: string;
+      description: string | null;
+      private: boolean;
+      default_branch: string;
+      language: string | null;
+      stargazers_count: number;
+      updated_at: string;
+    }>;
+
+    res.json({
+      success: true,
+      login: stored.login,
+      repos: repos.map((r) => ({
+        id: r.id,
+        name: r.name,
+        fullName: r.full_name,
+        description: r.description || "",
+        private: r.private,
+        defaultBranch: r.default_branch,
+        language: r.language || "",
+        stars: r.stargazers_count,
+        updatedAt: r.updated_at,
+      })),
+    });
+  } catch (e) {
+    console.error("github repos failed:", e instanceof Error ? e.message : String(e));
+    res.status(502).json({ success: false, message: "تعذر الوصول إلى GitHub." });
+  }
+});
+
+/** Extensions worth opening in an editor; the rest would only bloat the project. */
+const IMPORTABLE_EXT =
+  /\.(html?|css|jsx?|tsx?|mjs|cjs|json|md|svg|txt|vue|svelte|astro|ya?ml|toml|sql|sh)$/i;
+/** Never read these: dependencies, build output, secrets and heavy lockfiles. */
+const SKIP_PATH =
+  /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.vercel|vendor|coverage|\.cache|__pycache__)(\/|$)/i;
+const SKIP_FILE =
+  /(^|\/)(\.env(\..*)?|\.gitignore|\.npmrc|\.DS_Store)$|package-lock\.json$|yarn\.lock$|pnpm-lock\.yaml$|\.(png|jpe?g|gif|webp|avif|ico|bmp|pdf|zip|gz|tar|woff2?|ttf|eot|mp4|mp3|wasm|so|dll|exe|bin)$/i;
+
+const MAX_IMPORT_FILES = 60;
+const MAX_FILE_BYTES = 400_000;
+const MAX_TOTAL_BYTES = 2_500_000;
+
+/**
+ * Import a repository's files through the Git Trees API.
+ *
+ * One `?recursive=1` tree request lists every blob (path, SHA, size) in a single
+ * call, then each blob is fetched as base64. Walking the contents API per
+ * directory instead would cost a request per folder and blow GitHub's rate
+ * limit on any real repository.
+ *
+ * A linked token unlocks private repositories; without one GitHub serves public
+ * ones (rate-limited, but enough for the fallback path). Nothing is written.
+ */
+app.post("/api/github/tree", async (req: AuthReq, res: AuthRes) => {
+  const session = readAuthSession(req);
+  if (!session) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
+
+  const body = (req.body as { owner?: string; repo?: string; ref?: string }) ?? {};
+  const ref = parseRepoRef(`${body.owner ?? ""}/${body.repo ?? ""}`);
+  if (!ref) return res.status(400).json({ success: false, message: "اسم المستودع غير صحيح." });
+
+  const branch = String(body.ref ?? "").trim() || "HEAD";
+  const token = ghTokenForSession(req, session)?.accessToken;
+
+  try {
+    const repoRes = await fetch(`https://api.github.com/repos/${ref.owner}/${ref.repo}`, {
+      headers: ghHeaders(token),
+    });
+    if (repoRes.status === 404) {
+      return res.status(404).json({
+        success: false,
+        message: token
+          ? "المستودع غير موجود أو لا تملك صلاحية الوصول إليه."
+          : "المستودع غير موجود أو خاص. اربط GitHub لاستيراد المستودعات الخاصة.",
+      });
+    }
+    if (!repoRes.ok) {
+      return res.status(502).json({ success: false, message: "تعذر قراءة بيانات المستودع." });
+    }
+    const meta = (await repoRes.json()) as { default_branch?: string; name?: string };
+
+    const target = branch === "HEAD" ? meta.default_branch || "main" : branch;
+    const treeRes = await fetch(
+      `https://api.github.com/repos/${ref.owner}/${ref.repo}/git/trees/` +
+        `${encodeURIComponent(target)}?recursive=1`,
+      { headers: ghHeaders(token) },
+    );
+    if (!treeRes.ok) return res.status(502).json({ success: false, message: "تعذر قراءة شجرة الملفات." });
+    const tree = (await treeRes.json()) as {
+      tree?: Array<{ path: string; type: string; sha: string; size?: number }>;
+      truncated?: boolean;
+    };
+
+    const all = (tree.tree ?? []).filter((n) => n.type === "blob");
+    const wanted = all
+      .filter((n) => !SKIP_PATH.test(n.path) && !SKIP_FILE.test(n.path) && IMPORTABLE_EXT.test(n.path))
+      .filter((n) => (n.size ?? 0) <= MAX_FILE_BYTES)
+      .sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+
+    // Open the entry point first when there is one.
+    const entry = wanted.find((n) => /(^|\/)(index|app|main)\.(html?|jsx?|tsx?)$/i.test(n.path));
+    const picked = (entry ? [entry, ...wanted.filter((n) => n !== entry)] : wanted).slice(
+      0,
+      MAX_IMPORT_FILES,
+    );
+
+    const unsupported = all.length - wanted.length;
+    let totalBytes = 0;
+    let fetched = 0;
+    let skippedTooLarge = 0;
     const files: Record<string, string> = {};
-    let used = 0;
-    for (const blob of blobs) {
-      if (used > GH_IMPORT_MAX_TOTAL_BYTES) break;
-      const fileRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}/contents/${blob.path}?ref=${encodeURIComponent(branch)}`, { headers: ghHeaders(token) });
-      if (!fileRes.ok) continue;
-      const body = (await fileRes.json()) as { content?: string; encoding?: string };
-      if (body.encoding !== "base64" || typeof body.content !== "string") continue;
-      const text = Buffer.from(body.content, "base64").toString("utf-8");
-      // A NUL byte means this was binary despite its extension — skip rather than
-      // fill the editor with replacement characters.
-      if (text.includes("\u0000")) continue;
-      used += blob.path.length + text.length;
-      files[blob.path] = text;
+
+    for (const node of picked) {
+      if (totalBytes >= MAX_TOTAL_BYTES) {
+        skippedTooLarge = picked.length - fetched;
+        break;
+      }
+      try {
+        const blobRes = await fetch(
+          `https://api.github.com/repos/${ref.owner}/${ref.repo}/git/blobs/${node.sha}`,
+          { headers: ghHeaders(token) },
+        );
+        if (!blobRes.ok) continue;
+        const blob = (await blobRes.json()) as { content?: string; encoding?: string };
+        if (blob.encoding !== "base64" || !blob.content) continue;
+        const text = Buffer.from(blob.content.replace(/\s/g, ""), "base64").toString("utf-8");
+        // A blob can decode larger than its reported size; re-check for real.
+        const size = Buffer.byteLength(text, "utf-8");
+        if (size > MAX_FILE_BYTES) continue;
+        files[node.path] = text;
+        totalBytes += size;
+        fetched += 1;
+      } catch {
+        // One unreadable file must not abort the whole import.
+      }
+    }
+
+    if (Object.keys(files).length === 0) {
+      return res.status(422).json({
+        success: false,
+        message: "لم يتم العثور على ملفات قابلة للعرض في هذا المستودع.",
+      });
     }
 
     res.json({
       success: true,
-      owner: ref.owner,
-      repo: ref.repo,
-      branch,
-      tree: blobs.map(b => ({ path: b.path, type: b.type, size: b.size ?? 0 })),
+      repo: {
+        owner: ref.owner,
+        name: meta.name || ref.repo,
+        fullName: `${ref.owner}/${meta.name || ref.repo}`,
+        branch: target,
+      },
       files,
-      truncated: rawTree.length > blobs.length,
+      // An honest account of what did not make it in.
+      stats: {
+        imported: Object.keys(files).length,
+        skippedBinaryOrUnsupported: unsupported,
+        skippedTooLarge,
+        truncated: Boolean(tree.truncated),
+      },
     });
-  } catch (e) { res.status(500).json({ success: false, error: "خطأ داخلي في الخادم." }); }
+  } catch (e) {
+    console.error("github tree failed:", e instanceof Error ? e.message : String(e));
+    res.status(502).json({ success: false, message: "تعذر الاتصال بـ GitHub." });
+  }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Response) => {
   if (!requireSignedIn(req, res)) return;
@@ -1267,17 +1281,6 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
   if (planId !== "pro" && planId !== "business") {
     return res.status(400).json({ success: false, message: "خطة الاشتراك غير صحيحة." });
   }
-  // SERVER-TRUSTED PRICING: the EGP/USD amounts are DERIVED here from the
-  // canonical plan table — never from the request body. A caller submitting
-  // amountEgp: 1 for a Business plan gets the real price stored instead.
-  const cycle = String(body.cycle ?? body.billingCycle ?? "monthly") === "yearly" ? "yearly" : "monthly";
-  const PLAN_PRICES = {
-    pro: { monthlyEgp: 500, yearlyEgp: 4995, monthlyUsd: 9.99, yearlyUsd: 99.9 },
-    business: { monthlyEgp: 750, yearlyEgp: 7495, monthlyUsd: 14.99, yearlyUsd: 149.9 },
-  } as const;
-  const price = PLAN_PRICES[planId as "pro" | "business"];
-  const amountEgp = cycle === "yearly" ? price.yearlyEgp : price.monthlyEgp;
-  const amountUsd = cycle === "yearly" ? price.yearlyUsd : price.monthlyUsd;
   const reference = String(body.transactionReference ?? "").trim();
   const senderPhone = String(body.senderPhone ?? "").trim();
   if (senderPhone.length < 8 || reference.length < 3) {
@@ -1292,54 +1295,12 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
   const fileData = typeof body.fileData === "string" ? body.fileData : "";
 
   if (!fileData) {
-    // Nothing attached — record the transfer details as a durable
-    // `awaiting_receipt` row FIRST, then report success. Previously this path
-    // returned `pending` WITHOUT writing any row, so a receipt-less payment
-    // vanished: the dashboard never listed it and nobody could approve it.
-    // The row is the reviewable record; the receipt image (if later attached)
-    // only annotates it — an image alone is never proof of payment.
-    if (!supabaseConfig().dbConfigured) {
-      return res.status(503).json({
-        success: false,
-        code: "DB_UNAVAILABLE",
-        error: "تعذّر تسجيل طلب الدفع على الخادم. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
-      });
-    }
-    const pendingId = `pay_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
-    const pendingSession = readAuthSession(req as AuthReq);
-    const pendingWrite = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
-      method: "POST",
-      query: { on_conflict: "id" },
-      headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
-      body: JSON.stringify({
-        id: pendingId,
-        account_email: pendingSession?.email ?? "",
-        account_id: pendingSession?.id ?? "",
-        plan_id: planId,
-        billing_cycle: cycle,
-        amount_egp: amountEgp,
-        amount_usd: amountUsd,
-        sender_phone: senderPhone,
-        transaction_ref: reference,
-        receipt_path: null,
-        receipt_file_name: null,
-        status: "pending",
-      }),
-    });
-    if (!pendingWrite.ok || !pendingWrite.data?.[0]) {
-      console.error("payment row insert failed (no receipt):", pendingWrite.error);
-      return res.status(503).json({
-        success: false,
-        code: "PAYMENT_STORE_FAILED",
-        error: "تعذّر حفظ طلب الاشتراك الآن. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
-      });
-    }
+    // Nothing attached — the transfer details alone are still worth recording.
     return res.json({
       success: true,
       receiptStored: false,
-      referenceId: pendingId,
-      status: "awaiting_receipt",
-      message: "تم تسجيل بيانات التحويل بانتظار الإيصال. أرفق صورة الإشعار أو أرسلها على واتساب مع المرجع.",
+      status: "pending",
+      message: "تم استلام بيانات التحويل. سنتحقق منها ونفعّل اشتراكك.",
     });
   }
 
@@ -1386,10 +1347,9 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
   const record = {
     id: `pay_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
     planId,
-    cycle,
-    // Server-derived (see PLAN_PRICES above) — the caller's amount is ignored.
-    amountEgp,
-    amountUsd,
+    cycle: String(body.cycle ?? "monthly"),
+    amountEgp: Number(body.amountEgp ?? 0),
+    amountUsd: Number(body.amountUsd ?? 0),
     senderPhone,
     transactionReference: reference,
     account: session?.email ?? "",
@@ -1423,11 +1383,7 @@ app.post("/api/payments/receipt", limitPayments, async (req: Request, res: Respo
   if (supabaseConfig().dbConfigured) {
     const write = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
       method: "POST",
-      // Same fix as `queuePaymentReview`: name the conflict target (`id`) and
-      // put the resolution in `Prefer` — `on_conflict=ignore` alone is read as
-      // a COLUMN name and answers 400, so receipt uploads were never recorded.
-      query: { on_conflict: "id" },
-      headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+      query: { on_conflict: "ignore" },
       body: JSON.stringify({
         id: record.id,
         account_email: session?.email ?? "",
@@ -1632,7 +1588,7 @@ function dailyQuotaFor(tier: Tier | undefined): number {
  */
 async function consumeAiAllowance(
   req: Request,
-): Promise<{ allowed: boolean; used: number; limit: number; window?: string; reason?: string }> {
+): Promise<{ allowed: boolean; used: number; limit: number; reason?: string }> {
   const session = readAuthSession(req as AuthReq);
   // No session cannot happen (requireAiSession guards the route), but if it
   // ever does the free allowance is the safe answer.
@@ -1648,17 +1604,9 @@ async function consumeAiAllowance(
     return { allowed: false, used: 0, limit: TIER_DAILY_QUOTA.free, reason: "db_unavailable" };
   }
 
-  const lookup = await lookupAccountByEmail(session.email);
-  // DB failure must NEVER look like "no account" (free tier). `null` here
-  // means: account missing OR email invalid — both safely resolve to the
-  // request tier. A db_error keeps `lookup.account` absent but is logged
-  // above; the RPC below still runs and will itself fail closed.
-  const account = lookup.found ? lookup.account : null;
+  const account = await findAccountByEmail(session.email);
   const tier: Tier = account ? tierOf(account.tier) : tierOf((req as Request & { accountTier?: Tier }).accountTier);
   const limit = dailyQuotaFor(tier);
-  // FREE resets daily; PRO/BUSINESS reset monthly (see api/security.ts). The
-  // window travels with the request so the database spends the right counter.
-  const window = quotaWindowFor(tier);
 
   // THE SINGLE SPEND PATH. `ebnily_consume_ai_credit` takes a row lock, so the
   // check and the increment cannot interleave with another request. Every AI
@@ -1666,7 +1614,7 @@ async function consumeAiAllowance(
   // place that writes `ai_used`, which is what makes the guarantee hold.
   const rpc = await dbRequest<RpcConsumeResult[]>(RPC_CONSUME_AI, {
     method: "POST",
-    body: JSON.stringify({ p_account_id: session.id, p_limit: limit, p_window: window }),
+    body: JSON.stringify({ p_account_id: session.id, p_limit: limit }),
   });
 
   if (!rpc.ok) {
@@ -1683,7 +1631,7 @@ async function consumeAiAllowance(
 
   const used = toNumber(row.used);
   const ceiling = toNumber(row.limit_value, limit);
-  return { allowed: row.allowed === true, used, limit: ceiling, window, reason: row.allowed === true ? undefined : "daily" };
+  return { allowed: row.allowed === true, used, limit: ceiling, reason: row.allowed === true ? undefined : "daily" };
 }
 
 /** The JSON a `rpc/<fn>` call returns: a single-element array of the row. */
@@ -1710,74 +1658,14 @@ function tierOf(value: unknown): Tier {
   return value === "pro" || value === "business" || value === "free" ? value : "free";
 }
 
-/** Discriminated account lookup: never confuse DB failure with "no account". */
-export type AccountLookup =
-  | {
-      found: true;
-      account: DbAccount;
-      reason?: string;
-      error?: string;
-      status?: number;
-    }
-  | {
-      found: false;
-      reason: "not_found" | "db_error" | "invalid_email";
-      error?: string;
-      status?: number;
-    };
-
 /** The account row for an address, or null. Used by the quota and the session. */
 async function findAccountByEmail(email: string): Promise<DbAccount | null> {
-  const result = await lookupAccountByEmail(email);
-  return result.found ? result.account : null;
-}
-
-/**
- * Exact lookup with the failure reason preserved.
- *
- * SCHEMA TRUTH (`supabase/projects.sql`): `ebnily_accounts.email` is the
- * address column. There is NO `account_email` column on this table (that name
- * lives on `ebnily_payments` / `ebnily_devices`). Querying `account_email`
- * here made PostgREST answer 400 "column does not exist" for EVERY lookup,
- * which callers read as "no account" and silently downgraded paid users to
- * the free allowance. The filter below MUST stay `email`.
- */
-async function lookupAccountByEmail(email: string): Promise<AccountLookup> {
   const normalized = normalizeEmail(email);
-  if (!normalized) return { found: false, reason: "invalid_email" };
+  if (!normalized) return null;
   const rows = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
-    query: { select: ACCOUNT_QUOTA_COLUMNS, email: `eq.${normalized}`, limit: "1" },
+    query: { select: ACCOUNT_QUOTA_COLUMNS, account_email: `eq.${normalized}`, limit: "1" },
   });
-  if (rows.ok && Array.isArray(rows.data) && rows.data[0]) return { found: true, account: rows.data[0] };
-  if (!rows.ok) {
-    // A database created before the Phase 6 migration has no `referral_code`
-    // column, and PostgREST rejects the WHOLE select with a 400. Retry with
-    // the columns the quota path actually needs — but ONLY when the error
-    // looks like a missing column; any other DB error is returned as db_error
-    // so callers never mistake it for "account missing".
-    const errText = String(rows.error ?? "");
-    const looksLikeMissingColumn =
-      /referral_code/i.test(errText) || /column .* does not exist/i.test(errText);
-    if (!looksLikeMissingColumn) {
-      console.error("lookupAccountByEmail db_error:", rows.status, rows.error);
-      return { found: false, reason: "db_error", error: rows.error, status: rows.status };
-    }
-    const basic = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
-      query: {
-        select: "account_id,email,tier,ai_used,ai_day",
-        email: `eq.${normalized}`,
-        limit: "1",
-      },
-    });
-    if (basic.ok && Array.isArray(basic.data) && basic.data[0])
-      return { found: true, account: basic.data[0] };
-    if (!basic.ok) {
-      console.error("lookupAccountByEmail retry db_error:", basic.status, basic.error);
-      return { found: false, reason: "db_error", error: basic.error, status: basic.status };
-    }
-    return { found: false, reason: "not_found" };
-  }
-  return { found: false, reason: "not_found" };
+  return rows.ok && Array.isArray(rows.data) && rows.data[0] ? rows.data[0] : null;
 }
 
 /**
@@ -1790,20 +1678,12 @@ async function lookupAccountByEmail(email: string): Promise<AccountLookup> {
  */
 function aiQuotaRefusal(
   res: Response,
-  quota: { used: number; limit: number; reason?: string; window?: string },
+  quota: { used: number; limit: number; reason?: string },
 ): Response {
   res.setHeader("X-RateLimit-Limit", String(quota.limit));
   res.setHeader("X-RateLimit-Remaining", "0");
-  // The wording must match the window: a paid plan resets NEXT MONTH, not
-  // "tomorrow" — telling a Pro user it resets tomorrow, when it does not, is a
-  // broken promise that reads as a bug. FREE is the only plan that resets daily.
-  const monthly = quota.window === "monthly";
-  const ar = monthly
-    ? `وصلت للحد الأقصى لتوليدات هذا الشهر في باقتك (${quota.used}/${quota.limit}). يتجدّد الحد تلقائياً في أول الشهر القادم، أو رقِّ باقتك عبر أورانج كاش لمضاعفته.`
-    : `وصلت للحد الأقصى لتوليدات اليوم في باقتك (${quota.used}/${quota.limit}). يتجدّد الحد غداً تلقائياً، أو رقِّ باقتك عبر أورانج كاش لمضاعفته.`;
-  const en = monthly
-    ? `You have used this month's full allowance (${quota.used}/${quota.limit}). It resets automatically on the first of next month, or upgrade via Orange Cash to raise it.`
-    : `You have used today's full allowance (${quota.used}/${quota.limit}). It resets tomorrow automatically, or upgrade via Orange Cash to raise it.`;
+  const ar = `وصلت للحد الأقصى لتوليدات اليوم في باقتك (${quota.used}/${quota.limit}). يتجدّد الحد غداً تلقائياً، أو رقِّ باقتك عبر أورانج كاش لمضاعفته.`;
+  const en = `You have used today's full allowance (${quota.used}/${quota.limit}). It resets tomorrow automatically, or upgrade via Orange Cash to raise it.`;
   // The request's own language hint decides the wording. `Accept-Language` is the
   // browser's real signal; the header is only a fallback for fetch calls that do
   // not send one.
@@ -1816,18 +1696,8 @@ function aiQuotaRefusal(
     used: quota.used,
     limit: quota.limit,
     remaining: 0,
-    resetsAt: monthly ? nextUtcMonthIso() : nextUtcMidnightIso(),
-    window: monthly ? "monthly" : "daily",
+    resetsAt: nextUtcMidnightIso(),
   });
-}
-
-/** When the current UTC month ends — the reset boundary for a paid (monthly) plan. */
-function nextUtcMonthIso(): string {
-  const next = new Date();
-  // First day of next month, 00:00:00 UTC.
-  next.setUTCMonth(next.getUTCMonth() + 1, 1);
-  next.setUTCHours(0, 0, 0, 0);
-  return next.toISOString();
 }
 
 /** When the current UTC day ends — the allowance boundary, for the client. */
@@ -1844,27 +1714,25 @@ function nextUtcMidnightIso(): string {
  * It must never increment: a polling UI would otherwise burn the whole allowance
  * by watching it.
  */
-async function readAiAllowance(req: Request): Promise<{ used: number; limit: number; tier: Tier; window: string }> {
+async function readAiAllowance(req: Request): Promise<{ used: number; limit: number; tier: Tier }> {
   const session = readAuthSession(req as AuthReq);
   const tagged = req as Request & { accountTier?: Tier };
   if (!session || !supabaseConfig().dbConfigured) {
     const tier: Tier = session ? tierOf(tagged.accountTier) : "free";
-    return { used: 0, limit: dailyQuotaFor(tier), tier, window: quotaWindowFor(tier) };
+    return { used: 0, limit: dailyQuotaFor(tier), tier };
   }
-  const readLookup = await lookupAccountByEmail(session.email);
-  const account = readLookup.found ? readLookup.account : null;
+  const account = await findAccountByEmail(session.email);
   const tier: Tier = account ? tierOf(account.tier) : tierOf(tagged.accountTier);
   const limit = dailyQuotaFor(tier);
   // Read-only, and spent by nobody: the same function the spend path uses, but
   // its read-only sibling, so the number the meter shows is the number the
-  // database holds — not a recomputation that could drift from it. The window
-  // must match the spend path, or the meter would read a different counter.
+  // database holds — not a recomputation that could drift from it.
   const rpc = await dbRequest<RpcConsumeResult[]>(RPC_READ_AI, {
     method: "POST",
-    body: JSON.stringify({ p_account_id: session.id, p_window: quotaWindowFor(tier) }),
+    body: JSON.stringify({ p_account_id: session.id }),
   });
   const used = rpc.ok && Array.isArray(rpc.data) && rpc.data[0] ? toNumber(rpc.data[0].used) : 0;
-  return { used, limit, tier, window: quotaWindowFor(tier) };
+  return { used, limit, tier };
 }
 
 /**
@@ -1899,28 +1767,6 @@ async function requireAiAllowance(req: Request, res: Response, next: NextFunctio
 }
 
 /**
- * Refuse an AI request when the server has NO Gemini key configured — BEFORE
- * `requireAiAllowance` spends a credit.
- *
- * WHY: the allowance middleware runs first on every AI route, so a missing
- * `GEMINI_API_KEY` used to burn one of the customer's limited credits and then
- * fail anyway with "GEMINI_API_KEY غير مُعد". A configuration problem on the
- * server must never be paid for by the customer's quota.
- */
-function requireGeminiKey(_req: Request, res: Response, next: NextFunction) {
-  if (getGeminiClients().length === 0) {
-    console.error("requireGeminiKey: no GEMINI_API_KEY configured — refusing WITHOUT spending a credit");
-    return res.status(503).json({
-      success: false,
-      code: "GEMINI_KEY_MISSING",
-      message:
-        "محرك الذكاء الاصطناعي غير مُهيّأ على الخادم (متغيّر GEMINI_API_KEY غير مضبوط). تواصل مع إدارة المنصة — لم يُخصم من رصيدك.",
-    });
-  }
-  return next();
-}
-
-/**
  * The signed-in account's remaining daily allowance.
  *
  * WHY THIS EXISTS: until now a customer could only discover their limit by
@@ -1933,8 +1779,7 @@ function requireGeminiKey(_req: Request, res: Response, next: NextFunction) {
  * that polls must not consume the thing it is measuring.
  */
 app.get("/api/ai/quota", requireAiSession, async (req: Request, res: Response) => {
-  const { used, limit, tier, window } = await readAiAllowance(req);
-  const monthly = window === "monthly";
+  const { used, limit, tier } = await readAiAllowance(req);
   res.setHeader("X-RateLimit-Limit", String(limit));
   res.setHeader("X-RateLimit-Remaining", String(Math.max(0, limit - used)));
   res.json({
@@ -1943,10 +1788,7 @@ app.get("/api/ai/quota", requireAiSession, async (req: Request, res: Response) =
     used,
     limit,
     remaining: Math.max(0, limit - used),
-    // The reset boundary matches the plan's window: a paid plan refills at the
-    // start of next month, a free one at the next UTC midnight.
-    window,
-    resetsAt: monthly ? nextUtcMonthIso() : nextUtcMidnightIso(),
+    resetsAt: nextUtcMidnightIso(),
   });
 });
 
@@ -2262,7 +2104,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
       message: "أدخل رمز دخول لوحة الإدارة للمتابعة.",
     });
   }
-  if (isFullAdmin(session)) return next();
+  if (isOwnerAccount(session)) return next();
 
   // A delegate needs an async lookup, so the guard cannot be a plain middleware.
   // The route list is short and this only runs for non-owners, who are rare.
@@ -2275,14 +2117,12 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 }
 
 /**
- * OWNER-OR-FULL-ADMIN guard: managing the admin list itself.
+ * OWNER-ONLY guard: managing the admin list itself.
  *
- * A database-backed delegate passes `requireAdmin` and can run the console, but
- * must never reach these routes — otherwise one co-admin could promote a friend,
- * suspend the real owner, or lock themselves back out. `isOwnerAccount()` reads
- * `OWNER_EMAIL` from the environment; `isFullAdmin()` additionally accepts the
- * addresses declared in `ADMIN_EMAILS`, which is the point of declaring them:
- * full access, including this list, with no database row involved.
+ * A delegate passes `requireAdmin` and can run the console, but must never reach
+ * these routes — otherwise one co-admin could promote a friend, suspend the real
+ * owner, or lock themselves back out. `isOwnerAccount()` reads `OWNER_EMAIL`
+ * from the environment and nothing else, so no stored row can satisfy it.
  */
 function requireOwner(req: Request, res: Response, next: NextFunction) {
   const session = readAuthSession(req as AuthReq);
@@ -2300,7 +2140,7 @@ function requireOwner(req: Request, res: Response, next: NextFunction) {
       message: "أدخل رمز دخول لوحة الإدارة للمتابعة.",
     });
   }
-  if (!isFullAdmin(session)) {
+  if (!isOwnerAccount(session)) {
     // A signed-in admin session that is NOT the owner: keep the 404 so the
     // owner-only surface stays invisible from the outside.
     return res.status(404).json({ success: false, message: "Not found" });
@@ -2323,10 +2163,10 @@ app.get("/api/admin/auth", (req: Request, res: Response) => {
 });
 
 app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "محاولات كثيرة جداً. انتظر قليلاً ثم أعد المحاولة."), async (req: Request, res: Response) => {
-  // Admin is the site owner OR an environment-declared full admin OR an active
-  // delegate. The PIN is a second factor, not the identity: without a signed-in
-  // account this endpoint answers 404 exactly like every other admin route, so a
-  // stranger cannot even obtain a session to try elsewhere with.
+  // Admin is the site owner OR an active delegate. The PIN is a second factor,
+  // not the identity: without a signed-in account this endpoint answers 404
+  // exactly like every other admin route, so a stranger cannot even obtain a
+  // session to try elsewhere with.
   const session = readAuthSession(req as AuthReq);
   if (!session) {
     // The ONE exception to the bare 404: a browser that reached this route from
@@ -2338,10 +2178,9 @@ app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "�
       message: "سجّل الدخول أولاً بنفس البريد المضاف كمسؤول، ثم أعد إدخال رمز الدخول.",
     });
   }
-  // `isFullAdmin` covers the owner AND the addresses declared in ADMIN_EMAILS, so
-  // a full admin can unlock the console with NO database row — the whole point of
-  // declaring them in the environment.
-  if (!isFullAdmin(session)) {
+  // Delegates need an async lookup, so the check is inline rather than a guard.
+  const isOwner = isOwnerAccount(session);
+  if (!isOwner) {
     try {
       const delegates = await loadDelegateAdmins();
       if (!isActiveAdmin(delegates, session.email)) {
@@ -2605,8 +2444,8 @@ app.get("/api/admin/overview", requireAdmin, async (_req: Request, res: Response
 async function notifyNewAdmin(email: string): Promise<boolean> {
   const apiKey = (process.env.RESEND_API_KEY ?? "").trim();
   // `SITE_URL` keeps the button correct on preview deployments; the production
-  // domain (ebnily.app) is the fallback so the mail is never sent with a dead link.
-  const siteUrl = (process.env.SITE_URL ?? "https://ebnily.app").trim().replace(/\/+$/, "");
+  // domain is the fallback so the mail is never sent with a dead link.
+  const siteUrl = (process.env.SITE_URL ?? "https://ebnily.vercel.app").trim().replace(/\/+$/, "");
   const from = (process.env.MAIL_FROM ?? "Ebnili <onboarding@resend.dev>").trim();
 
   if (!apiKey) {
@@ -3295,42 +3134,20 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
 
   const reviewed = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
     method: "PATCH",
-    // ATOMIC: the `status=eq.pending` filter makes the decision conditional —
-    // two concurrent approvals race on the SAME row, and PostgREST applies the
-    // write only where status is still pending. The loser gets zero rows back
-    // and answers 409 instead of minting a second entitlement.
-    query: { id: `eq.${transactionId}`, status: "eq.pending" },
+    query: { id: `eq.${transactionId}` },
     body: JSON.stringify({
       status,
       reviewed_at: new Date().toISOString(),
       reviewed_by: OWNER_EMAIL || "owner",
     }),
   });
-  if (!reviewed.ok) {
+  if (!reviewed.ok || !Array.isArray(reviewed.data) || reviewed.data.length === 0) {
     console.error("payment review write failed:", reviewed.error);
     return res.status(503).json({ success: false, error: "تعذّر حفظ قرار المراجعة. أعد المحاولة." });
-  }
-  if (!Array.isArray(reviewed.data) || reviewed.data.length === 0) {
-    // Lost the race: someone else decided this payment between our read and
-    // our write. Re-read to report the actual outcome, never a silent success.
-    const reread = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
-      query: { select: "status", id: `eq.${transactionId}`, limit: "1" },
-    });
-    const actual = reread.ok && Array.isArray(reread.data) && reread.data[0] ? String(reread.data[0].status) : "unknown";
-    return res.status(409).json({
-      success: false,
-      error: `تمت مراجعة هذه المعاملة مسبقاً (${actual === "confirmed" ? "مؤكدة" : actual === "rejected" ? "مرفوضة" : actual}).`,
-    });
   }
 
   // Confirmations grant nothing extra here: the row now says "confirmed", and
   // `/api/subscriptions/current` turns that into a real tier for the account.
-  // AUDIT: every decision is logged with reviewer identity, time and outcome —
-  // the payments table itself is the audit trail (reviewed_at/reviewed_by).
-  const reviewer = readAuthSession(req as AuthReq)?.email ?? "unknown-admin";
-  console.error(
-    `payment ${status}: id=${transactionId} account=${payment.account_email} plan=${payment.plan_id} by=${reviewer} at=${new Date().toISOString()}`,
-  );
   if (status === "confirmed" && payment.account_email) {
     // Fast path for the owner's own browser only. The durable entitlement is the
     // status written above — never this cookie.
@@ -3401,7 +3218,7 @@ const AUTH_COOKIE_NAME = "ebnili_user_session";
 const AUTH_STATE_COOKIE = "ebnili_oauth_state";
 /** PKCE verifier/challenge, so the browser never carries a usable credential. */
 const AUTH_PKCE_COOKIE = "ebnili_oauth_pkce";
-const AUTH_SESSION_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000; // 10 years (login once)
+const AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
@@ -3628,9 +3445,6 @@ interface DbProject {
   theme: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-  custom_domain?: string | null;
-  custom_domain_status?: string | null;
-  custom_domain_error?: string | null;
 }
 
 const PROJECTS_TABLE = "ebnily_projects";
@@ -3704,12 +3518,10 @@ interface DbAccount {
 }
 
 /**
- * The columns the quota read needs, plus `referral_code` so `/api/referral`
- * can read the stored code from the same cheap lookup. `findAccountByEmail`
- * retries WITHOUT the last column when an older database predates the Phase 6
- * migration, so one missing column can never break the quota path.
+ * The columns the quota read needs. Kept as one constant so the (cheap) counter
+ * read never pulls the whole account row, avatar URLs and all.
  */
-const ACCOUNT_QUOTA_COLUMNS = "account_id,email,tier,ai_used,ai_day,referral_code";
+const ACCOUNT_QUOTA_COLUMNS = "account_id,email,tier,ai_used,ai_day";
 
 /** The single settings row key. */
 const SETTINGS_ROW_KEY = "platform";
@@ -4357,24 +4169,14 @@ app.get("/api/auth/me", async (req: AuthReq, res: AuthRes) => {
   // route re-checks server-side (`requireAdmin` / `requireOwner`), so a tampered
   // flag in the browser buys nothing.
   const isOwner = isOwnerAccount(user);
-  // A full admin (declared via `ADMIN_EMAILS`) must reach the console even with no
-  // database delegate row — that is the entire reason they are declared in the
-  // environment. `isFullAdmin` folds the owner in, so this stays owner ⊇ delegate.
-  const isAdmin =
-    Boolean(user) &&
-    (isFullAdmin(user) || isActiveAdmin(await readStoredAdmins(), user?.email));
-  // `canManageAdmins` is owner-equivalent: the owner OR an environment-declared
-  // full admin. The admin-list UI is gated on this, so a full admin can manage
-  // the list the same way the owner can.
-  const canManageAdmins = isFullAdmin(user);
+  const isAdmin = Boolean(user) && (isOwner || isActiveAdmin(await readStoredAdmins(), user?.email));
 
   res.json({
     success: true,
     authenticated: Boolean(user),
-    user: user ? { ...user, isOwner, isAdmin, canManageAdmins } : null,
+    user: user ? { ...user, isOwner, isAdmin } : null,
     isOwner,
     isAdmin,
-    canManageAdmins,
     ...(account
       ? {
           credits: toNumber(account.credits),
@@ -4464,17 +4266,7 @@ app.get("/api/auth/:provider", (req: AuthReq, res: AuthRes) => {
     url.searchParams.set("redirect_to", `${home}/api/auth/callback/supabase`);
     url.searchParams.set("code_challenge", challenge);
     url.searchParams.set("code_challenge_method", "s256");
-    // SECURITY-FLOW FIX — `skip_http_redirect` must NOT be sent here.
-    //
-    // That flag exists for SPA clients that FETCH /authorize themselves, read
-    // the JSON body (`{ url }` / `{ code }`) and exchange the code in JS.
-    // The browser, however, navigates to this URL as a top-level redirect, and
-    // with skip_http_redirect set, GoTrue answers the final leg with a JSON
-    // body instead of a 302 to `redirect_to` — so after a successful Google
-    // consent the visitor was left staring at raw JSON and the session was
-    // never minted. Removing it restores the normal browser round trip:
-    // GoTrue 302-redirects to `${home}/api/auth/callback/supabase?code=…`,
-    // which is exactly the shape the callback route below expects.
+    url.searchParams.set("skip_http_redirect", "true");
     // The anon key is public by design. Sending it as a query param keeps the
     // authorize call valid even when Supabase's gateway is configured to demand
     // an API key on this route.
@@ -4540,18 +4332,11 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
   const sb = supabaseConfig();
   if (!sb.configured) return fail("supabase_not_configured");
 
-  // Supabase reports its own errors (e.g. a user denied consent, a redirect-URI
-  // mismatch, or a provider that is not enabled) in the query. Log the REAL
-  // description so it surfaces in the Vercel Runtime Logs, and forward it to the
-  // browser as `auth_detail` so the generic "denied" toast never hides the true
-  // cause again.
+  // Supabase reports its own errors (e.g. a user denied consent) in the query.
   const errDesc = typeof req.query.error_description === "string" ? req.query.error_description : "";
+  if (errDesc) return fail("oauth_denied");
   const errCode = typeof req.query.error === "string" ? req.query.error : "";
-  if (errDesc || errCode) {
-    console.error("supabase auth callback error:", JSON.stringify({ errCode, errDesc }));
-    const detail = (errDesc || errCode).slice(0, 200);
-    return res.redirect(`${home}/?auth_error=oauth_denied&auth_detail=${encodeURIComponent(detail)}`);
-  }
+  if (errCode) return fail("oauth_denied");
 
   // Single-use: clear the verifier cookie on read so a replayed callback fails.
   const stored = readCookie(req, AUTH_PKCE_COOKIE);
@@ -4563,10 +4348,8 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
   const verifier = stored.slice(sep + 1);
   if (provider !== "google" && provider !== "github") return fail("pkce_invalid");
 
-  // The code comes back in the query string: without `skip_http_redirect`
-  // GoTrue performs a plain 302 to `redirect_to?code=…` (PKCE flow), so the
-  // code reliably reaches the server here. The old `skip_http_redirect=true`
-  // variant never redirected at all — it returned JSON to the browser.
+  // The code comes back in the query string (skip_http_redirect) or, for some
+  // providers, in the URL fragment — which never reaches the server.
   const code = typeof req.query.code === "string" ? req.query.code : "";
   if (!code) return fail("missing_code");
 
@@ -4655,51 +4438,21 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
 
 // ── Gemini AI proxy ─────────────────────────────────────────────────────────
 // Accepts GEMINI_API_KEY plus common aliases so the function works no matter
-// which exact variable name was configured in the Vercel dashboard. ANY of them
-// may hold SEVERAL keys separated by commas — a free-tier key next to a
-// paid-tier key — so this returns the whole set, de-duplicated and in order.
-//
-// PAID_GEMINI_API_KEY is also read as its own source: the owner keeps the free
-// key in GEMINI_API_KEY and the paid key in PAID_GEMINI_API_KEY, and the
-// rotation below tries the free one first and falls through to the paid one the
-// moment the free quota is spent — no comma-splicing the owner has to remember.
-function getApiKeys(): string[] {
-  const keys: string[] = [];
-  const seen = new Set<string>();
-  // SERVER-ONLY sources. `VITE_*` values are embedded in the browser bundle by
-  // Vite, so they can NEVER be a secret source — reading one here would bless
-  // a public value as a server credential. Only GEMINI_API_KEY (+ aliases and
-  // the paid rotation key) are honoured.
-  const sources = [
-    process.env.GEMINI_API_KEY,
-    process.env.GOOGLE_API_KEY,
-    process.env.GOOGLE_GEMINI_API_KEY,
-    process.env.PAID_GEMINI_API_KEY,
-  ];
-  for (const source of sources) {
-    if (!source) continue;
-    for (const part of source.split(",")) {
-      const key = part.trim();
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        keys.push(key);
-      }
-    }
-  }
-  return keys;
+// which exact variable name was configured in the Vercel dashboard.
+function getApiKey(): string {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    ""
+  ).trim();
 }
 
-// One client per configured key. When the free key's quota is spent (429) the
-// next call uses the paid key instead of retrying the same dead one.
-function getGeminiClients(): GoogleGenAI[] {
-  return getApiKeys().map((apiKey) => new GoogleGenAI({ apiKey }));
-}
-
-// Whether any usable key is present. Kept as its own predicate so the health
-// route and the model-capability probe report the same truth the generator uses:
-// if `getApiKeys()` is empty, generation cannot possibly succeed.
-function getApiKey(): string | null {
-  return getApiKeys()[0] ?? null;
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = getApiKey();
+  if (!apiKey) return null;
+  return new GoogleGenAI({ apiKey });
 }
 
 // Model priority is based on the official Gemini model catalogue and live
@@ -4737,15 +4490,10 @@ const CANDIDATE_MODELS = [
 // allowed to run (see `maxDuration` in vercel.json), leaving room for a real
 // answer plus a second attempt, and the text-only studio endpoints keep a
 // shorter slice because they never return a document.
-const GENERATE_BUDGET_MS = 180_000; // 3 min, headroom under the Vercel function cap
-// Per-model attempt ceiling: when the provider is busy, 429/503 come back fast,
-// so a tight per-model budget means the route fails EARLY and offers retry
-// instead of holding the browser hostage for minutes. Keep ≥15s so a healthy
-// model still gets real time to produce a 40-110s document.
-const GENERATE_ATTEMPT_TIMEOUT_MS = 45_000;
-// Refine (edit existing code) handles smaller payloads; keep it tighter.
-const REFINE_BUDGET_MS = 120_000;
-const REFINE_ATTEMPT_TIMEOUT_MS = 45_000;
+const GENERATE_BUDGET_MS = 240_000;
+const GENERATE_ATTEMPT_TIMEOUT_MS = 75_000;
+const REFINE_BUDGET_MS = 180_000;
+const REFINE_ATTEMPT_TIMEOUT_MS = 70_000;
 const STUDIO_BUDGET_MS = 120_000;
 const STUDIO_ATTEMPT_TIMEOUT_MS = 45_000;
 
@@ -4799,20 +4547,6 @@ function classifyModelError(raw: string): "permanent" | "timeout" | "transient" 
   return "transient";
 }
 
-/**
- * True when the failure is about the KEY, not the model: a spent daily quota, a
- * rate limit, an invalid/unauthorised key. These are the errors key rotation
- * exists to survive — when the free key is exhausted the very next key (the
- * paid one) can still produce the answer, so retrying the same key is pointless
- * and only burns the time budget (the reported "generation took forever then
- * produced nothing" symptom).
- */
-function isKeyLevelError(raw: string): boolean {
-  return /\b429\b|\b401\b|\b403\b|quota|exceeded your current|rate limit|rate-limit|resource_exhausted|resource has been exhausted|API key not valid|API_KEY_INVALID|permission|billing/i.test(
-    raw,
-  );
-}
-
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 interface GeminiCallOptions {
@@ -4825,45 +4559,30 @@ interface GeminiCallOptions {
 }
 
 async function generateWithGemini(
-  clients: GoogleGenAI[],
+  ai: GoogleGenAI,
   prompt: string,
   systemInstruction?: string,
   options: GeminiCallOptions = {},
 ) {
-  if (clients.length === 0) {
-    throw new Error("GEMINI_API_KEY غير مُعد على الخادم");
-  }
   const budgetMs = options.budgetMs ?? GENERATE_BUDGET_MS;
   const attemptTimeoutMs = options.attemptTimeoutMs ?? GENERATE_ATTEMPT_TIMEOUT_MS;
-  // ONE shared deadline across every key. Total time never grows just because
-  // there are several keys, so a Vercel function timeout is never reached by
-  // "try free key, then paid key" — the second key inherits whatever is left.
   const deadline = Date.now() + budgetMs;
   const failures: string[] = [];
+  const deadModels = new Set<string>();
+  const retryableModels = new Set<string>();
+  const attempts = new Map<string, number>();
   let lastError: unknown = null;
 
-  // Retry only short-lived capacity failures WITHIN a key. Repeating a 404 or a
+  // Retry only short-lived quota/capacity failures. Repeating a 404 or a
   // timed-out request cannot make this response arrive any faster.
   const MAX_PASSES = 2;
   const MAX_ATTEMPTS_PER_MODEL = 2;
 
-  // KEY is the OUTER loop. When a key is spent (429/quota/invalid) every model
-  // on it fails identically, so retrying models on a dead key only burns the
-  // budget — the reported "generation took forever then produced nothing"
-  // symptom. Drop straight to the next key (free → paid) instead.
-  for (let keyIndex = 0; keyIndex < clients.length; keyIndex++) {
-    const ai = clients[keyIndex];
-    const deadModels = new Set<string>();
-    const retryableModels = new Set<string>();
-    const attempts = new Map<string, number>();
-    let keyExhausted = false;
+  for (let pass = 1; pass <= MAX_PASSES; pass++) {
+    let attempted = false;
 
-    for (let pass = 1; pass <= MAX_PASSES; pass++) {
-      let attempted = false;
-
-      for (const model of CANDIDATE_MODELS) {
-        if (keyExhausted) break;
-        if (deadModels.has(model) || (attempts.get(model) ?? 0) >= MAX_ATTEMPTS_PER_MODEL) continue;
+    for (const model of CANDIDATE_MODELS) {
+      if (deadModels.has(model) || (attempts.get(model) ?? 0) >= MAX_ATTEMPTS_PER_MODEL) continue;
       if (pass > 1 && !retryableModels.has(model)) continue;
 
       const remaining = deadline - Date.now();
@@ -4914,21 +4633,13 @@ async function generateWithGemini(
       } catch (e) {
         lastError = e;
         const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ");
-        // A spent/invalid KEY must NOT be retried on the same key: abandon this
-        // key immediately so the next key (free → paid) gets the remaining time.
-        if (isKeyLevelError(raw)) {
-          keyExhausted = true;
-          failures.push(`k${keyIndex} key-level ${model}: ${raw.slice(0, 160)}`);
-          break;
-        }
         const errorKind = classifyModelError(raw);
         if (errorKind === "permanent") deadModels.add(model);
         if (errorKind === "transient") retryableModels.add(model);
-        failures.push(`k${keyIndex} p${pass} ${model}: ${raw.slice(0, 160)}`);
+        failures.push(`p${pass} ${model}: ${raw.slice(0, 160)}`);
       }
     }
 
-    if (keyExhausted) break;
     const canRetry = CANDIDATE_MODELS.some(
       (model) =>
         !deadModels.has(model) &&
@@ -4937,26 +4648,19 @@ async function generateWithGemini(
     );
     if (!attempted || !canRetry || deadline - Date.now() <= 2_000) break;
 
-    // A 503 "high demand" clears on its own within seconds. Rushing the second
-    // pass used to burn the whole budget and fail anyway; a short,
+    // A 429/503 "high demand" clears on its own within seconds. Rushing the
+    // second pass used to burn the whole budget and fail anyway; a short,
     // deadline-aware pause is what actually makes the retry worth taking.
     // Two seconds are always left for JSON serialization and the Vercel reply.
     const pause = Math.min(2_500 * pass, Math.max(0, deadline - Date.now() - 2_000));
     if (pause > 0) await sleep(pause);
-    }
-
-    // Out of time for the whole request? Stop trying further keys too.
-    if (deadline - Date.now() <= 2_000) break;
-    // Otherwise: this key could not produce an answer — try the next one. A
-    // per-model 404 on one key may be reachable on another, so rotation helps
-    // even for non-quota failures.
   }
 
   const detail = failures.join(" | ").slice(0, 1800);
-  console.error(`generateWithGemini: all keys/models failed — ${detail}`);
+  console.error(`generateWithGemini: all models failed — ${detail}`);
   throw lastError
     ? new Error(`${lastError instanceof Error ? lastError.message : String(lastError)} [per-model: ${detail}]`)
-    : new Error(`All candidate Gemini keys/models are currently unavailable [per-model: ${detail}]`);
+    : new Error(`All candidate Gemini models are currently unavailable [per-model: ${detail}]`);
 }
 
 // The @google/genai SDK returns `response.text` as a *getter property*, not a
@@ -4980,25 +4684,13 @@ const CORE_RULES = `NON-NEGOTIABLE STANDARDS:
 3. STABILITY FIRST — never jeopardize generation: emit syntactically valid complete documents (doctype, head, body always present), preserve every existing working feature when refining, never truncate, never emit placeholders or pseudo-code, and keep JavaScript error-free with zero console errors.`;
 
 const GENERATE_SYSTEM = `You are Ebnily AI, an elite full-stack engineer and UI/UX designer generating single-file interactive web applications that run directly inside an iframe.
-Return ONLY one complete standalone HTML document beginning with <!DOCTYPE html> and ending with </html>, including the Tailwind CDN (https://cdn.tailwindcss.com), an icon library, Google Fonts (Cairo font with dir="rtl" when Arabic is requested), full state management in an inline <script>, interactive forms, search and filtering, modals, and mobile responsiveness.
+Return ONLY one complete standalone HTML document beginning with <!DOCTYPE html> and ending with </html>, including the Tailwind CDN (https://cdn.tailwindcss.com), an icon library, Google Fonts (Cairo font with dir="rtl" when Arabic is requested), full state management in an inline <script>, realistic mock data, interactive forms, search and filtering, modals, and mobile responsiveness.
 No markdown fences, no JSON, no prose before or after the document.
-${CORE_RULES}
-FUNCTIONALITY REQUIREMENTS (non-negotiable):
-- Every button, link, form, and interactive element MUST perform a real action tied to its stated purpose. No decorative-only controls.
-- Navigation: anchor links and buttons must actually move between sections/pages (smooth scroll, hash routing, or show/hide views) and update active state.
-- E-commerce: "Add to cart" must push the item into a real cart state; quantity +/− buttons must change qty; remove must delete; cart total/subtotal/tax/shipping must be computed live from cart state.
-- Forms: inputs must be controlled; submit must validate (required fields, email format), prevent default, show success/error feedback, and persist data to localStorage when appropriate.
-- State must be the single source of truth (in-memory JS state + localStorage for persistence); re-render on every change. No fake success messages without state change.
-- Search/filter/sort must actually filter the rendered list. Modals must open/close with ESC and backdrop click. Accordions/tabs must toggle real content.
-- File uploads: <input type="file"> must open the native picker; selected images must render in a real preview (FileReader/dataURL) and be removable; if no backend storage is available, show a clear message instead of faking upload success.
-- Never label a feature as working if it is not implemented. If an API/credential is unavailable, state that clearly in the UI instead of faking success.`;
+${CORE_RULES}`;
 
 const REFINE_SYSTEM = `You are Ebnily AI's precision code refiner. Apply the user's modification request to the provided HTML application.
 Return ONLY the complete updated HTML document (from <!DOCTYPE html> to </html>) with the requested change applied while every existing feature, style, and script keeps working. No explanations, no diffs, no markdown fences, no prose.
-${CORE_RULES}
-FUNCTIONALITY REQUIREMENTS (non-negotiable):
-- Preserve and fix real functionality: every button, link, form must perform its stated action; navigation, cart, quantities, totals, validation, persistence must remain working.
-- Never convert a working feature into a decorative placeholder, and never claim a feature works if it does not.`;
+${CORE_RULES}`;
 
 // ── JSON extraction for the studio endpoints ────────────────────────────────
 // WHY: the studio asks the model for a strict JSON object, but models still
@@ -5171,10 +4863,10 @@ function friendlyAiError(raw: string, language: string): string {
     : "فشل توليد التطبيق. حاول مرة أخرى.";
 }
 
-app.post("/api/ai/generate-app", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/generate-app", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const ai = getGeminiClients();
-    if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const ai = getGeminiClient();
+    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const { prompt, language = "ar" } = (req.body as { prompt?: string; language?: string }) ?? {};
     if (!prompt || !String(prompt).trim())
       return res.status(400).json({ success: false, message: "prompt مطلوب" });
@@ -5220,10 +4912,10 @@ app.post("/api/ai/generate-app", requireAiSession, requireGeminiKey, requireAiAl
 // the model is still writing. Same models, same system rules, same fallbacks —
 // only the transport changes. On any model-level failure the client silently
 // falls back to the non-streaming /api/ai/generate-app above.
-app.post("/api/ai/generate-app/stream", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   const language = String((req.body as { language?: string })?.language ?? "ar");
   const promptRaw = String((req.body as { prompt?: string })?.prompt ?? "");
-  const clients = getGeminiClients();
+  const ai = getGeminiClient();
 
   // SECURITY / COST: this route had NO quota check at all — it inherited only the
   // per-minute limiter from `requireAiSession`. A single signed-in account could
@@ -5235,13 +4927,8 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireGeminiKey, requ
   // on the wire the status code is already sent, and a refusal could no longer
   // be expressed as a 429 — the customer would just see a broken stream.
 
-  if (clients.length === 0 || !promptRaw.trim()) {
-    // 503 for a server-side config problem (not the client's fault), 400 for a
-    // missing prompt. The `requireGeminiKey` guard normally catches the no-key
-    // case before spending a credit; this is defence-in-depth.
-    return res
-      .status(clients.length === 0 ? 503 : 400)
-      .json({ success: false, message: clients.length === 0 ? "GEMINI_API_KEY غير مُعد" : "prompt مطلوب" });
+  if (!ai || !promptRaw.trim()) {
+    return res.status(400).json({ success: false, message: !ai ? "GEMINI_API_KEY غير مُعد" : "prompt مطلوب" });
   }
 
   // SSE needs an unbuffered text/event-stream; Vercel otherwise holds the body
@@ -5264,16 +4951,7 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireGeminiKey, requ
   // after the first token.
   send("open", { ok: true });
 
-  // KEY is the outer loop here too. A spent free key (429/quota) makes every
-  // model on it fail identically, so retrying models on it only burns the
-  // budget — the "stream spun forever then produced nothing" symptom. Drop
-  // straight to the paid key instead.
-  for (let keyIndex = 0; keyIndex < clients.length; keyIndex++) {
-    const ai = clients[keyIndex];
-    let keyExhausted = false;
-
   for (const model of CANDIDATE_MODELS) {
-    if (keyExhausted) break;
     if (deadModels.has(model)) continue;
     const remaining = deadline - Date.now();
     if (remaining <= 2_000) break;
@@ -5310,14 +4988,8 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireGeminiKey, requ
       throw new Error(`Gemini model "${model}" produced no text`);
     } catch (e) {
       const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ");
-      failures.push(`k${keyIndex} ${model}: ${raw.slice(0, 140)}`);
+      failures.push(`${model}: ${raw.slice(0, 140)}`);
       console.error(`stream ${model} failed:`, raw);
-      // A spent/invalid key must not be retried on the same key — abandon it so
-      // the next key (free → paid) gets the remaining time.
-      if (isKeyLevelError(raw)) {
-        keyExhausted = true;
-        break;
-      }
       // A 404/invalid-key model is dead for this key; a 429/503 is transient
       // and simply moves to the next candidate.
       if (classifyModelError(raw) === "permanent") deadModels.add(model);
@@ -5325,10 +4997,6 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireGeminiKey, requ
       // mid-stream — stop and let the client fall back for a clean result.
       if (sentAny) break;
     }
-  }
-
-    if (sentAny) break;
-    if (deadline - Date.now() <= 2_000) break;
   }
 
   send("failed", { message: friendlyAiError(failures.join(" | "), language), debug: failures.join(" | ").slice(0, 800) });
@@ -5340,7 +5008,7 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireGeminiKey, requ
 // the initial generate — so it was a full-cost Gemini call that the old flat
 // cap never touched. `refine-app` now spends from the same plan allowance as
 // every other AI route.
-app.post("/api/ai/refine-app", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/refine-app", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as {
     prompt?: string;
     currentCode?: string;
@@ -5377,8 +5045,8 @@ app.post("/api/ai/refine-app", requireAiSession, requireGeminiKey, requireAiAllo
   };
 
   try {
-    const ai = getGeminiClients();
-    if (ai.length === 0) return fallback("no-api-key");
+    const ai = getGeminiClient();
+    if (!ai) return fallback("no-api-key");
     // The visual inspector posts the element under the cursor — passing it to
     // the model is what makes "make this button green" edit the right node.
     const target = selectedElement
@@ -5417,10 +5085,10 @@ app.post("/api/ai/refine-app", requireAiSession, requireGeminiKey, requireAiAllo
 // `improvements` in the doctor. The keys never matched, so all three buttons
 // silently did nothing. Each handler below asks the model for its own JSON
 // contract and maps the answer onto the exact keys the UI already reads.
-app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const ai = getGeminiClients();
-    if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const ai = getGeminiClient();
+    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { prompt?: string; category?: string; language?: string };
     const language = String(body.language ?? "ar");
     const original = String(body.prompt ?? "").trim();
@@ -5473,10 +5141,10 @@ app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireGeminiKey, re
   }
 });
 
-app.post("/api/ai/gemini-architect", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-architect", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const ai = getGeminiClients();
-    if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const ai = getGeminiClient();
+    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { prompt?: string; language?: string };
     const language = String(body.language ?? "ar");
     const original = String(body.prompt ?? "").trim();
@@ -5535,10 +5203,10 @@ app.post("/api/ai/gemini-architect", requireAiSession, requireGeminiKey, require
   }
 });
 
-app.post("/api/ai/gemini-code-doctor", requireAiSession, requireGeminiKey, requireAiAllowance, async (req: Request, res: Response) => {
+app.post("/api/ai/gemini-code-doctor", requireAiSession, requireAiAllowance, async (req: Request, res: Response) => {
   try {
-    const ai = getGeminiClients();
-    if (ai.length === 0) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
+    const ai = getGeminiClient();
+    if (!ai) return res.status(503).json({ success: false, message: "GEMINI_API_KEY غير مُعد على الخادم" });
     const body = (req.body ?? {}) as { code?: string; issueDescription?: string; language?: string };
     const language = String(body.language ?? "ar");
     const code = String(body.code ?? "");
@@ -5716,81 +5384,48 @@ function randomReferralCode(): string {
 // FROZEN snapshot taken at publish time, so later edits to the draft do not
 // change the public link until an explicit re-publish.
 
-app.post("/api/projects/:id/publish", limitWrites, async (req: Request, res: Response) => {
+app.post("/api/projects/:id/publish", limitWrites, (req: Request, res: Response) => {
   const owner = currentOwner(req);
   if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
 
-  // PLAN GATE (advertised matrix in src/data/plans.ts): Free = preview only,
-  // publishing is a PAID feature. The tier is resolved server-side from the
-  // session — a direct API call from a free account gets 403, not a page.
-  const publishTier = serverTierFor(req, readAuthSession(req as AuthReq));
-  if (!isPaidTier(publishTier)) {
-    return res.status(403).json({
-      success: false,
-      code: "FREE_PREVIEW_ONLY",
-      message: "النشر ميزة مدفوعة. قم بالترقية إلى Pro أو Business لنشر موقعك على رابط عام.",
-    });
-  }
-
   const id = String(req.params.id ?? "");
-  try {
-    const existing = await dbRequest<PublishRow[]>(PROJECTS_TABLE, {
-      query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
-    });
-    if (!existing.ok) {
-      const detail = `publish READ failed: postgrest_status=${existing.status} error=${existing.error ?? "unknown"}`;
-      console.error(detail, { projectId: id, ownerId: owner.id });
-      return dbUnavailable(res, `READ ${PROJECTS_TABLE}: ${existing.error ?? "unknown"}`, existing.status);
-    }
-    const row = existing.data?.[0];
-    if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
+  void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
+  })
+    .then(async (existing) => {
+      const row = existing.ok ? existing.data?.[0] : undefined;
+      if (!row) return res.status(404).json({ success: false, code: "NOT_FOUND" });
 
-    // Keep an existing slug across re-publishes so old links stay alive; mint
-    // one only the first time.
-    let slug = row.slug && String(row.slug).trim() ? String(row.slug) : "";
-    if (!slug) {
-      try {
-        slug = await mintPublishSlug();
-      } catch (err) {
-        const detail = `publish SLUG mint failed: ${err instanceof Error ? err.stack || err.message : String(err)}`;
-        console.error(detail, { projectId: id, ownerId: owner.id });
-        return dbUnavailable(res, `SLUG mint failed: ${err instanceof Error ? err.message : String(err)}`);
+      // Keep an existing slug across re-publishes so old links stay alive; mint
+      // one only the first time.
+      const slug =
+        row.slug && String(row.slug).trim() ? String(row.slug) : await mintPublishSlug();
+      const html = primaryHtml(row);
+      if (!html.trim()) {
+        return res.status(400).json({
+          success: false,
+          code: "NOTHING_TO_PUBLISH",
+          message: "لا يوجد محتوى HTML للنشر في هذا المشروع.",
+        });
       }
-    }
-    const html = primaryHtml(row);
-    if (!html.trim()) {
-      return res.status(400).json({
-        success: false,
-        code: "NOTHING_TO_PUBLISH",
-        message: "لا يوجد محتوى HTML للنشر في هذا المشروع.",
-      });
-    }
 
-    const updated = await dbRequest<PublishRow[]>(PROJECTS_TABLE, {
-      method: "PATCH",
-      query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
-      body: JSON.stringify({
-        published: true,
-        slug,
-        published_html: html,
-        published_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }),
-    });
-    if (!updated.ok || !updated.data?.[0]) {
-      const detail = `publish WRITE failed: postgrest_status=${updated.status} error=${updated.error ?? "unknown"}`;
-      console.error(detail, { projectId: id, ownerId: owner.id, slug });
-      return dbUnavailable(res, `WRITE ${PROJECTS_TABLE}: ${updated.error ?? "unknown"}`, updated.status);
-    }
-    const fresh = updated.data[0];
-    res.json({ success: true, slug: fresh.slug, publishedAt: fresh.published_at });
-  } catch (err) {
-    // The EXACT internal error — printed to server logs AND returned in JSON.
-    const detail = `publish handler threw: ${err instanceof Error ? err.stack || err.message : String(err)}`;
-    console.error(detail, { projectId: id });
-    return dbUnavailable(res, detail);
-  }
+      const updated = await dbRequest<PublishRow[]>(PROJECTS_TABLE, {
+        method: "PATCH",
+        query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
+        body: JSON.stringify({
+          published: true,
+          slug,
+          published_html: html,
+          published_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      const fresh = updated.ok ? updated.data?.[0] : undefined;
+      if (!fresh) return dbUnavailable(res);
+      res.json({ success: true, slug: fresh.slug, publishedAt: fresh.published_at });
+    })
+    .catch(() => dbUnavailable(res));
 });
 
 app.post("/api/projects/:id/unpublish", limitWrites, (req: Request, res: Response) => {
@@ -5806,88 +5441,30 @@ app.post("/api/projects/:id/unpublish", limitWrites, (req: Request, res: Respons
     query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
     body: JSON.stringify({ published: false, updated_at: new Date().toISOString() }),
   }).then((result) => {
-    if (!result.ok) {
-      console.error("unpublish failed:", result.error, { projectId: id, ownerId: owner.id });
-      return dbUnavailable(res, `WRITE ${PROJECTS_TABLE}: ${result.error ?? "unknown"}`, result.status);
-    }
+    if (!result.ok) return dbUnavailable(res);
     if (!result.data?.[0]) return res.status(404).json({ success: false, code: "NOT_FOUND" });
     res.json({ success: true, published: false });
-  }).catch((err) => {
-    const detail = `unpublish handler threw: ${err instanceof Error ? err.stack || err.message : String(err)}`;
-    console.error(detail, { projectId: id });
-    return dbUnavailable(res, detail);
   });
 });
 
 // Public, sessionless read of a published page. Registered before the /api 404
 // catch-all so it is actually reachable. Serves the frozen snapshot only — never
 // the live draft — and a stranger's slug is indistinguishable from a missing one.
-//
-// TWO PATHS, ONE HANDLER. `vercel.json` rewrites `/preview/:slug` to this
-// function (that is the pretty public URL the UI shows), and `/api/s/:slug` is
-// the original short path kept for any old links. Both serve the exact same
-// snapshot, so there is one source of truth and neither can drift.
-function servePublishedPage(req: Request, res: Response): void {
+app.get("/api/s/:slug", (req: Request, res: Response) => {
   const slug = String(req.params.slug ?? "");
-  if (!slug) return void res.status(404).send("Not found");
-  if (!supabaseConfig().dbConfigured) return void res.status(503).send("Publishing is not configured");
+  if (!slug) return res.status(404).send("Not found");
+  if (!supabaseConfig().dbConfigured) return res.status(503).send("Publishing is not configured");
 
   void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
     query: { slug: `eq.${slug}`, published: `eq.true`, select: "published_html", limit: "1" },
   }).then((result) => {
-    if (!result.ok) {
-      console.error("servePublishedPage failed:", result.error, { slug });
-      return void res.status(503).json({ success: false, code: "DB_UNAVAILABLE", error: `READ ${PROJECTS_TABLE}: ${result.error ?? "unknown"}`, dbStatus: result.status });
-    }
-    const row = result.data?.[0];
-    if (!row || !row.published_html) return void res.status(404).send("Not found");
+    const row = result.ok ? result.data?.[0] : undefined;
+    if (!row || !row.published_html) return res.status(404).send("Not found");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=60");
     res.status(200).send(row.published_html);
-  }).catch((err) => {
-    const detail = `servePublishedPage threw: ${err instanceof Error ? err.stack || err.message : String(err)}`;
-    console.error(detail, { slug });
-    return void res.status(503).json({ success: false, code: "DB_UNAVAILABLE", error: detail });
-  });
-}
-app.get("/api/s/:slug", servePublishedPage);
-app.get("/preview/:slug", servePublishedPage);
-
-/**
- * The caller's OWN publish state for one project.
- *
- * WHY THIS EXISTS: the publish button needs to know, on load, whether the
- * project is already live and what its public slug is — without spending a
- * publish to find out. The read is owner-scoped exactly like the write, so a
- * stranger asking for someone else's project id gets a 404, never a slug.
- */
-app.get("/api/projects/:id/publish", (req: Request, res: Response) => {
-  const owner = currentOwner(req);
-  if (!owner) return void res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
-  if (!supabaseConfig().dbConfigured) return void dbUnavailable(res);
-
-  const id = String(req.params.id ?? "");
-  void dbRequest<PublishRow[]>(PROJECTS_TABLE, {
-    query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, select: "id,published,slug,published_at", limit: "1" },
-  }).then((result) => {
-    if (!result.ok) {
-      console.error("publish state read failed:", result.error, { projectId: id, ownerId: owner.id });
-      return void dbUnavailable(res, `READ ${PROJECTS_TABLE}: ${result.error ?? "unknown"}`, result.status);
-    }
-    const row = result.data?.[0];
-    if (!row) return void res.status(404).json({ success: false, code: "NOT_FOUND" });
-    res.json({
-      success: true,
-      published: row.published === true,
-      slug: row.slug ?? null,
-      publishedAt: row.published_at ?? null,
-    });
-  }).catch((err) => {
-    const detail = `publish state read threw: ${err instanceof Error ? err.stack || err.message : String(err)}`;
-    console.error(detail, { projectId: id });
-    return void dbUnavailable(res, detail);
-  });
-});
+  })
+})
 
 // ── 2.2  JOBS  ───────────────────────────────────────────────────────────────
 // A job is a durable, idempotent record of an async AI task ("generate an app
@@ -5947,7 +5524,7 @@ app.post("/api/jobs", limitWrites, async (req: Request, res: Response) => {
     console.error("job create failed:", created.error);
     return dbUnavailable(res);
   }
-  res.status(201).json({ success: true, job: toPublicJob(created.data[0]!) });
+  res.status(201).json({ success: true, job: toPublicJob(created.data[0]) });
 });
 
 app.get("/api/jobs", async (req: Request, res: Response) => {
@@ -6000,8 +5577,8 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
     return res.json({ success: true, job: toPublicJob(job) });
   }
 
-  const ai = getGeminiClients();
-  if (ai.length === 0) return res.status(503).json({ success: false, code: "AI_NOT_CONFIGURED" });
+  const ai = getGeminiClient();
+  if (!ai) return res.status(503).json({ success: false, code: "AI_NOT_CONFIGURED" });
 
   // Claim: queued → running. The `status=eq.queued` filter is the idempotency
   // guard; if another poll already claimed it, this PATCH touches 0 rows and we
@@ -6015,9 +5592,7 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
     const reloaded = await dbRequest<DbJob[]>(JOBS_TABLE, {
       query: { owner_id: `eq.${owner.id}`, id: `eq.${id}`, limit: "1" },
     });
-    const reloadedJob = reloaded.data?.[0] ?? job;
-    if (!reloadedJob) return res.status(404).json({ success: false, code: "NOT_FOUND" });
-    return res.json({ success: true, job: toPublicJob(reloadedJob) });
+    return res.json({ success: true, job: toPublicJob(reloaded.data?.[0] ?? job) });
   }
 
   // Execute with the SAME generation primitive the synchronous routes use.
@@ -6030,8 +5605,7 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
         query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
         body: JSON.stringify({ status: "failed", error, progress: 100, updated_at: new Date().toISOString() }),
       });
-      const failedJob = failed.data?.[0] ?? { ...job, status: "failed", error, progress: 100 };
-      return res.json({ success: true, job: toPublicJob(failedJob) });
+      return res.json({ success: true, job: toPublicJob(failed.data?.[0] ?? { ...job, status: "failed", error, progress: 100 }) });
     };
     if (!html) return failPatch("no-usable-output");
     const done = await dbRequest<DbJob[]>(JOBS_TABLE, {
@@ -6040,8 +5614,7 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
       body: JSON.stringify({ status: "done", result: { html }, progress: 100, updated_at: new Date().toISOString() }),
     });
     if (!done.ok) return dbUnavailable(res);
-    const doneJob = done.data?.[0] ?? { ...job, status: "done", result: { html }, progress: 100 };
-    res.json({ success: true, job: toPublicJob(doneJob) });
+    res.json({ success: false, job: toPublicJob(done.data?.[0]) });
   } catch (e) {
     const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     const failed = await dbRequest<DbJob[]>(JOBS_TABLE, {
@@ -6049,8 +5622,7 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
       query: { owner_id: `eq.${owner.id}`, id: `eq.${id}` },
       body: JSON.stringify({ status: "failed", error: msg, progress: 100, updated_at: new Date().toISOString() }),
     });
-    const catchFailed = failed.data?.[0] ?? { ...job, status: "failed", error: msg, progress: 100 };
-    res.json({ success: true, job: toPublicJob(catchFailed) });
+    res.json({ success: true, job: toPublicJob(failed.data?.[0] ?? { ...job, status: "failed", error: msg, progress: 100 }) });
   }
 });
 
@@ -6088,19 +5660,6 @@ function toPublicTeam(team: DbTeam, members: DbTeamMember[] = []) {
   };
 }
 
-async function teamRow(teamId: string): Promise<DbTeam | null> {
-  const res = await dbRequest<DbTeam[]>(TEAMS_TABLE, { query: { id: `eq.${teamId}`, limit: "1" } });
-  return res.ok ? res.data?.[0] ?? null : null;
-}
-
-/** The caller's role in a team — "owner" (creator) or a member role, or null. */
-async function teamRoleOf(ownerId: string, teamId: string): Promise<TeamRole | null> {
-  const team = await teamRow(teamId);
-  if (!team) return null;
-  if (team.owner_id === ownerId) return "owner";
-  const mem = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, {
-    query: { team_id: `eq.${teamId}`, user_id: `eq.${ownerId}`, active: "eq.true", limit: "1" },
-  });
   const row = mem.ok ? mem.data?.[0] : undefined;
   return row ? row.role : null;
 }
@@ -6119,7 +5678,7 @@ app.post("/api/teams", limitWrites, async (req: Request, res: Response) => {
   const team: DbTeam = { id: mintId("team"), owner_id: owner.id, name_ar: nameAr, name_en: nameEn, created_at: now, updated_at: now };
   const created = await dbRequest<DbTeam[]>(TEAMS_TABLE, { method: "POST", body: JSON.stringify(team) });
   if (!created.ok || !created.data?.[0]) { console.error("team create failed:", created.error); return dbUnavailable(res); }
-  const row = created.data[0]!;
+  const row = created.data[0];
 
   // Seed the creator as the first member so the detail view and memberCount are
   // consistent from the first render. A failure here is non-fatal: teamRoleOf
@@ -6143,6 +5702,22 @@ async function teamMembers(teamId: string): Promise<DbTeamMember[]> {
   return res.ok ? (res.data ?? []) : [];
 }
 
+async function teamRow(teamId: string): Promise<DbTeam | null> {
+  const res = await dbRequest<DbTeam[]>(TEAMS_TABLE, { query: { id: `eq.${teamId}`, limit: "1" } });
+  return res.ok ? res.data?.[0] ?? null : null;
+}
+
+/** The caller's role in a team — "owner" (creator) or a member role, or null. */
+async function teamRoleOf(ownerId: string, teamId: string): Promise<TeamRole | null> {
+  const team = await teamRow(teamId);
+  if (!team) return null;
+  if (team.owner_id === ownerId) return "owner";
+  const mem = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, {
+    query: { team_id: `eq.${teamId}`, user_id: `eq.${ownerId}`, active: "eq.true", limit: "1" },
+  });
+  const row = mem.ok ? mem.data?.[0] : undefined;
+  return row ? row.role : null;
+}
 app.get("/api/teams", limitWrites, async (req, res) => {
   const o = currentOwner(req);
   if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
@@ -6173,20 +5748,15 @@ app.post("/api/teams/:id/invite", limitWrites, async (req, res) => {
   const b = (req.body as Record<string, unknown>) ?? {};
   const em = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
   if (!em) return res.status(400).json({ success: false, code: "EMAIL_REQUIRED" });
-  const inviteLookup = await lookupAccountByEmail(em);
-  if (!inviteLookup.found) {
-    if (inviteLookup.reason === "db_error")
-      return dbUnavailable(res, `READ ${ACCOUNTS_TABLE}: ${inviteLookup.error ?? "unknown"}`, inviteLookup.status);
-    return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND", message: "المستخدم ليس لديه حساب في المنصة." });
-  }
-  const a = inviteLookup.account;
+  const a = await findAccountByEmail(em);
+  if (!a) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND", message: "المستخدم ليس لديه حساب في المنصة." });
   const r: TeamRole = typeof b.role === "string" && isTeamRole(b.role) ? b.role : "member";
   if (r === "owner") return res.status(400).json({ success: false, code: "OWNER_NOT_ALLOWED", message: "لا يمكن تعيين مالك بهذا الطريق." });
   const now = new Date().toISOString();
   const m: DbTeamMember = { id: mintId("mem"), team_id: t.id, user_id: a.account_id, user_email: a.email, user_name: a.display_name ?? "", role: r, joined_at: now, active: true };
   const created = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "POST", body: JSON.stringify(m) });
   if (!created.ok || !created.data?.[0]) { console.error("team invite failed:", created.error); return dbUnavailable(res); }
-  res.json({ success: true, member: toPublicMember(created.data[0]!) });
+  res.json({ success: true, member: toPublicMember(created.data[0]) });
 });
 
 
@@ -6199,14 +5769,14 @@ app.post("/api/teams/:id/change-role", limitWrites, async (req, res) => {
   if (t.owner_id !== c.id && !(await teamRoleOf(c.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية تغيير الصلاحيات." });
   const b = (req.body as Record<string, unknown>) ?? {};
   const uid = typeof b.userId === "string" ? b.userId.trim() : "";
-  const role: TeamRole = typeof b.role === "string" && isTeamRole(b.role) ? b.role : "member";
+  const role: TeamRole = b.role === "owner" ? "owner" : (b.role === "member" ? "member" : (b.role === "guest" ? "guest" : ""));
   if (!uid || !isTeamRole(role)) return res.status(400).json({ success: false, code: "BAD_REQUEST" });
   const m = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}`, active: "eq.true", limit: "1" } });
   if (!m.ok || !m.data?.[0]) return res.status(404).json({ success: false, code: "NOT_MEMBER" });
   if (t.owner_id !== c.id && role === "owner") return res.status(400).json({ success: false, code: "ROLE_TOO_HIGH", message: "فقط المالك يمكنه تعيين مالك." });
   const patched = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "PATCH", query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}` }, body: JSON.stringify({ role, updated_at: new Date().toISOString() }) });
   if (!patched.ok || !patched.data?.[0]) { console.error("team role change failed:", patched.error); return dbUnavailable(res); }
-  res.json({ success: true, member: toPublicMember(patched.data[0]!) });
+  res.json({ success: true, member: toPublicMember(patched.data[0]) });
 });
 app.post("/api/teams/:id/remove", limitWrites, async (req, res) => {
   const c = currentOwner(req);
@@ -6214,18 +5784,11 @@ app.post("/api/teams/:id/remove", limitWrites, async (req, res) => {
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
   const t = await teamRow(String(req.params.id ?? ""));
   if (!t) return res.status(404).json({ success: false, code: "NOT_FOUND" });
-  const callerRole = t.owner_id === c.id ? "owner" : await teamRoleOf(c.id, t.id);
-  if (!callerRole) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية إزالة أعضاء." });
+  if (t.owner_id !== c.id && !(await teamRoleOf(c.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية إزالة أعضاء." });
   const b = (req.body as Record<string, unknown>) ?? {};
   const uid = typeof b.userId === "string" ? b.userId.trim() : "";
   if (!uid) return res.status(400).json({ success: false, code: "USER_ID_REQUIRED" });
   if (uid === t.owner_id) return res.status(400).json({ success: false, code: "OWNER_CANNOT_BE_REMOVED", message: "لا يمكن إزالة المالك؛ نقل الصلاحيات أو اترك الفريق يدويّاً." });
-  // Only the team owner may remove OTHER people. A member or guest can still
-  // remove THEMSELVES (leave the team) — the old check let any active member
-  // eject anybody else, including other members.
-  if (callerRole !== "owner" && uid !== c.id) {
-    return res.status(403).json({ success: false, code: "FORBIDDEN", message: "فقط مالك الفريق يمكنه إزالة أعضاء آخرين." });
-  }
   const patched = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { method: "PATCH", query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}` }, body: JSON.stringify({ active: false, updated_at: new Date().toISOString() }) });
   if (!patched.ok) { console.error("team remove failed:", patched.error); return dbUnavailable(res); }
   res.json({ success: true, removed: uid });
@@ -6248,27 +5811,14 @@ app.get("/api/referral", limitWrites, async (req, res) => {
   const o = currentOwner(req);
   if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
-  const refLookup = await lookupAccountByEmail(o.email);
-  if (!refLookup.found) {
-    if (refLookup.reason === "db_error")
-      return dbUnavailable(res, `READ ${ACCOUNTS_TABLE}: ${refLookup.error ?? "unknown"}`, refLookup.status);
-    return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
-  }
-  let acct = refLookup.account;
+  const acct = await findAccountByEmail(o.email);
+  if (!acct) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
   if (!acct.referral_code) {
     const code = randomReferralCode();
-    // CORRECTNESS (two bugs, either one alone made the mint fail 100%):
-    //  • PostgREST has no `UPDATE` HTTP method — the method is `PATCH`.
-    //  • `ebnily_accounts` has no `updated_at` column, so including it made
-    //    the write answer 400 "column does not exist".
-    const minted = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
-      method: "PATCH",
-      query: { account_id: `eq.${acct.account_id}` },
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify({ referral_code: code }),
-    });
+    const up: Record<string, unknown> = { referral_code: code, updated_at: new Date().toISOString() };
+    const minted = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, { method: "UPDATE", query: { account_id: `eq.${acct.account_id}` }, body: JSON.stringify(up) });
     if (!minted.ok || !minted.data?.[0]) { console.error("referral code mint failed:", minted.error); return dbUnavailable(res); }
-    acct = minted.data[0]!;
+    acct = minted.data[0];
   }
   res.json({ success: true, code: acct.referral_code });
 });
@@ -6339,152 +5889,6 @@ export default app;
  * every route here is already declared with its full `/api/...` path. Mounting
  * at `/api` would make Express look for `/api/api/health`.
  */
-// ═════════════════════════════════════════════════════════════════════════════════
-// Custom domains — link a user domain to a project + DNS verification
-// ══════════════════════════════════════════════════════════════════════════════════
-
-const DNS_TARGET_CNAME = "cname.ebnily.app";
-const DNS_TARGET_A = "76.76.21.21";
-
-type DomainStatus = "pending" | "verifying" | "active" | "failed";
-
-function normalizeDomain(raw: string): string {
-  return String(raw ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/\/$/, "");
-}
-
-function domainErrorArabic(code: string | undefined): string {
-  const map: Record<string, string> = {
-    ENOTFOUND: "الدومين غير موجود أو لا يمكن الوصول إليه — تأكد من كتابة الدومين بشكل صحيح.",
-    ENODATA: "لا يوجد سجل DNS للدومين — أضف سجل CNAME أو A record أولاً.",
-    CNAME_MISSING: "سجل CNAME مفقود — أشر الدومين إلى cname.ebnily.app.",
-    A_MISSING: "سجل A مفقود — أشر الدومين إلى 76.76.21.21 كبديل.",
-    CNAME_WRONG: "سجل CNAME لا يشير إلى cname.ebnily.app.",
-    A_WRONG: "سجل A لا يشير إلى 76.76.21.21.",
-    NOT_ACTIVE: "الدومين لم يتم تفعيله بعد.",
-  };
-  return code ? (map[code] ?? "فشل التحقق من الدومين — حاول مرة أخرى لاحقًا.") : "فشل التحقق من الدومين.";
-}
-
-/** POST /api/domains/add — save a custom domain as pending for a project. */
-app.post("/api/domains/add", limitWrites, async (req: Request, res: Response) => {
-  const owner = currentOwner(req);
-  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
-  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
-
-  const body = (req.body as Record<string, unknown>) ?? {};
-  const projectId = String(body.projectId ?? "");
-  const domain = normalizeDomain(String(body.domain ?? ""));
-  if (!projectId || !domain) {
-    return res.status(400).json({ success: false, code: "BAD_REQUEST", message: "معرف المشروع والدومين مطلوبان." });
-  }
-
-  const existing = await dbRequest<DbProject[]>(PROJECTS_TABLE, {
-    query: { owner_id: `eq.${owner.id}`, id: `eq.${projectId}`, select: "id,name", limit: "1" },
-  });
-  if (!existing.ok || !existing.data?.[0]) {
-    return res.status(404).json({ success: false, code: "NOT_FOUND" });
-  }
-
-  const patch: Record<string, unknown> = {
-    custom_domain: domain,
-    custom_domain_status: "pending",
-    custom_domain_error: null,
-    updated_at: new Date().toISOString(),
-  };
-
-  const updated = await dbRequest<DbProject[]>(PROJECTS_TABLE, {
-    method: "PATCH",
-    query: { owner_id: `eq.${owner.id}`, id: `eq.${projectId}` },
-    body: JSON.stringify(patch),
-  });
-  if (!updated.ok || !updated.data?.[0]) {
-    console.error("domain add failed:", updated.error);
-    return dbUnavailable(res, `WRITE ${PROJECTS_TABLE}: ${updated.error ?? "unknown"}`, updated.status);
-  }
-
-  res.json({
-    success: true,
-    domain,
-    status: "pending",
-    message: "تم حفظ الدومين. أضف سجلات DNS ثم تحقق من الربط.",
-  });
-});
-
-/** POST /api/domains/verify — DNS-check a custom domain and flip status to active/failed. */
-app.post("/api/domains/verify", limitWrites, async (req: Request, res: Response) => {
-  const owner = currentOwner(req);
-  if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
-  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
-
-  const body = (req.body as Record<string, unknown>) ?? {};
-  const projectId = String(body.projectId ?? "");
-  const domain = normalizeDomain(String(body.domain ?? ""));
-  if (!projectId || !domain) {
-    return res.status(400).json({ success: false, code: "BAD_REQUEST", message: "معرف المشروع والدومين مطلوبان." });
-  }
-
-  const row = await dbRequest<DbProject[]>(PROJECTS_TABLE, {
-    query: {
-      owner_id: `eq.${owner.id}`,
-      id: `eq.${projectId}`,
-      select: "id,custom_domain,custom_domain_status",
-      limit: "1",
-    },
-  });
-  if (!row.ok || !row.data?.[0]) {
-    return res.status(404).json({ success: false, code: "NOT_FOUND" });
-  }
-  if (row.data[0].custom_domain !== domain) {
-    return res.status(400).json({ success: false, code: "BAD_REQUEST", message: "هذا الدومين غير مربوط بهذا المشروع." });
-  }
-
-  await dbRequest<DbProject[]>(PROJECTS_TABLE, {
-    method: "PATCH",
-    query: { owner_id: `eq.${owner.id}`, id: `eq.${projectId}` },
-    body: JSON.stringify({ custom_domain_status: "verifying", updated_at: new Date().toISOString() }),
-  });
-
-  let ok = false;
-  let errorCode: string | undefined;
-
-  try {
-    const records = await resolveCname(domain);
-    ok = records.some((r) => r.endsWith(DNS_TARGET_CNAME));
-    if (!ok) errorCode = "CNAME_WRONG";
-  } catch (err: any) {
-    const code = err?.code;
-    if (code === "ENOTFOUND" || code === "ENODATA") {
-      try {
-        const a = await resolve4(domain);
-        ok = a.includes(DNS_TARGET_A);
-        if (!ok) errorCode = "A_WRONG";
-      } catch (err2: any) {
-        errorCode = err2?.code ?? "ENOTFOUND";
-      }
-    } else {
-      errorCode = code;
-    }
-  }
-
-  const status: DomainStatus = ok ? "active" : "failed";
-  await dbRequest<DbProject[]>(PROJECTS_TABLE, {
-    method: "PATCH",
-    query: { owner_id: `eq.${owner.id}`, id: `eq.${projectId}` },
-    body: JSON.stringify({
-      custom_domain_status: status,
-      custom_domain_error: ok ? null : domainErrorArabic(errorCode),
-      updated_at: new Date().toISOString(),
-    }),
-  });
-
-  res.json({ success: true, domain, status, error: ok ? undefined : domainErrorArabic(errorCode) });
-});
-
 export function mountApi(): express.Express {
   return app;
 }

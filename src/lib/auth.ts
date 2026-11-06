@@ -1,32 +1,26 @@
+import type { AuthProviderId, AuthProviderInfo, AuthUser } from '../types';
+
 /**
- * OWNER-LEVEL UI GATING
- * ─────────────────────
+ * OWNER-ONLY UI GATING
+ * ────────────────────
  * The header exposes a few controls that belong to the site owner and must never
  * be shown to ordinary users (owner dashboard, backend/database console, …).
  *
  * The decision is made by the SERVER: `/api/auth/me` verifies the signed session
- * cookie and stamps `user.isOwner` / `user.canManageAdmins` on the response.
- * Nothing about the owner's identity is hard-coded here, so the public bundle no
- * longer leaks the address, and the flag cannot be forged by editing client
- * state. The real protection still lives on the server, where every admin route
- * requires a valid owner/full-admin session (see `requireAdmin` /
- * `requireOwner` in `api/index.ts`).
- *
- * `canManageAdmins` is owner-EQUIVALENT: the owner OR an address declared in
- * `ADMIN_EMAILS`. Treating it as owner here is what lets a full admin see and
- * manage every owner surface — the server enforces the identical rule, so the
- * browser never gains a privilege it did not already have.
+ * cookie and stamps `user.isOwner` on the response. Nothing about the owner's
+ * identity is hard-coded here, so the public bundle no longer leaks the address,
+ * and the flag cannot be forged by editing client state. The real protection
+ * still lives on the server, where every admin route requires a valid owner
+ * session (see `requireAdmin` in `api/index.ts`).
  */
-import type { AuthUser, AuthProviderId, AuthProviderInfo } from "../types";
-
 export function isOwnerAccount(user: AuthUser | null | undefined): boolean {
-  return user?.isOwner === true || user?.canManageAdmins === true;
+  return user?.isOwner === true;
 }
 
 /**
  * May this account open the admin console at all?
  *
- * TRUE for the site owner AND for an active delegated administrator. The server
+ * TRUE for the site owner AND for an acti تظهر رسالة crve delegated administrator. The server
  * decides: `/api/auth/me` stamps `isAdmin` from the stored delegate list, and
  * every `/api/admin/*` route re-checks server-side (`requireAdmin`), so this is
  * only ever a rendering hint — never the boundary.
@@ -565,27 +559,18 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
       authenticated?: boolean;
       user?: AuthUser | null;
       isOwner?: boolean;
-      isAdmin?: boolean;
-      canManageAdmins?: boolean;
     };
     if (!data.authenticated || !data.user) return null;
-    // The privilege verdicts come from the server: prefer the flag on the session
-    // object, fall back to the top-level one. Never re-derive them here.
-    const user = data.user;
-    return {
-      ...user,
-      isOwner: user.isOwner === true || data.isOwner === true,
-      isAdmin: user.isAdmin === true || data.isAdmin === true,
-      canManageAdmins:
-        user.canManageAdmins === true || data.canManageAdmins === true,
-    };
+    // The owner verdict comes from the server: prefer the flag on the session
+    // object, fall back to the top-level one. Never re-derive it here.
+    return { ...data.user, isOwner: data.user.isOwner === true || data.isOwner === true };
   } catch {
     return null;
   }
 }
 
-/** Full-page redirect into the provider's consent screen via the server-side OAuth flow. */
-export async function startOAuth(provider: AuthProviderId): Promise<void> {
+/** Full-page redirect into the provider's consent screen. */
+export function startOAuth(provider: AuthProviderId): void {
   window.location.href = `/api/auth/${provider}`;
 }
 
