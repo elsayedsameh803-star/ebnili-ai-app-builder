@@ -4440,13 +4440,13 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
 // Accepts GEMINI_API_KEY plus common aliases so the function works no matter
 // which exact variable name was configured in the Vercel dashboard.
 function getApiKey(): string {
-  return (
+  const key = (
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
     ""
   ).trim();
+  return key;
 }
 
 function getGeminiClient(): GoogleGenAI | null {
@@ -4851,7 +4851,7 @@ function friendlyAiError(raw: string, language: string): string {
     return en
       ? "The AI engine is under heavy load right now. Please try again in a minute."
       : "محرك الذكاء الاصطناعي عليه ضغط كبير حالياً. حاول مرة أخرى بعد دقيقة.";
-  if (/API_KEY|API key/i.test(raw) && /invalid|incorrect|missing|not valid/i.test(raw))
+  if (/API_KEY_INVALID|API key not valid|invalid API key/i.test(raw))
     return en
       ? "The GEMINI_API_KEY configured on the server is not valid."
       : "مفتاح GEMINI_API_KEY غير صالح على الخادم.";
@@ -4889,7 +4889,7 @@ app.post("/api/ai/generate-app", requireAiSession, requireAiAllowance, async (re
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("generate-app failed:", msg);
-    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+    if (/API_KEY_INVALID|API key not valid|invalid API key|incorrect API key/i.test(msg)) {
       return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
     const language = String((req.body as { language?: string })?.language ?? "ar");
@@ -5131,7 +5131,7 @@ app.post("/api/ai/gemini-enhance-prompt", requireAiSession, requireAiAllowance, 
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("gemini-enhance-prompt failed:", msg);
-    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+    if (/API_KEY_INVALID|API key not valid|invalid API key|incorrect API key/i.test(msg)) {
       return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
     return res.status(502).json({ success: false, message: "فشل تحسين الوصف، حاول مرة أخرى" });
@@ -5193,7 +5193,7 @@ app.post("/api/ai/gemini-architect", requireAiSession, requireAiAllowance, async
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("gemini-architect failed:", msg);
-    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+    if (/API_KEY_INVALID|API key not valid|invalid API key|incorrect API key/i.test(msg)) {
       return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
     return res.status(502).json({ success: false, message: "فشل التصميم، حاول مرة أخرى" });
@@ -5254,7 +5254,7 @@ app.post("/api/ai/gemini-code-doctor", requireAiSession, requireAiAllowance, asy
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("gemini-code-doctor failed:", msg);
-    if (/API_KEY|API key|key/i.test(msg) && /invalid|incorrect|missing|not valid/i.test(msg)) {
+    if (/API_KEY_INVALID|API key not valid|invalid API key|incorrect API key/i.test(msg)) {
       return res.status(503).json({ success: false, message: "مفتاح GEMINI_API_KEY غير صالح، تحقق من القيمة في Vercel" });
     }
     return res.status(502).json({ success: false, message: "فشل فحص الكود، حاول مرة أخرى" });
