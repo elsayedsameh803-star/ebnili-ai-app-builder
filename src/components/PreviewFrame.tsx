@@ -360,7 +360,7 @@ export const PreviewFrame = ({
 
            {/* Hide partial HTML text ("html" etc.) that leaks while streaming. */}
            {isStreaming && (
-             <div className="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm flex items-center justify-center">
+             <div className="absolute inset-0 z-20 bg-white flex items-center justify-center">
                <div className="flex flex-col items-center gap-2 text-slate-500 text-sm">
                  <span className="w-3 h-3 rounded-full bg-rose-400 animate-pulse" />
                  <span>{language === 'ar' ? 'يتم بناء المعاينة…' : 'Building preview…'}</span>
