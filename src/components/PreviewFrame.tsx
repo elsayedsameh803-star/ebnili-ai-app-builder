@@ -104,6 +104,10 @@ export const PreviewFrame = ({
   // Build enhanced HTML with inspector script & console interceptor
   const buildInjectedCode = (rawHtml: string, inspectActive: boolean) => {
     if (!rawHtml) return '';
+    // Ensure proper doctype to prevent "html" text from leaking
+    if (!rawHtml.trim().startsWith('<!')) {
+      rawHtml = `<!DOCTYPE html>\n${rawHtml}`;
+    }
 
     // SECURITY: the injected bridge used to post every message with targetOrigin
     // `'*'`, which tells the browser "deliver this to whatever window is the
@@ -228,7 +232,8 @@ export const PreviewFrame = ({
   };
 
   const handleOpenNewTab = () => {
-    const blob = new Blob([code], { type: 'text/html' });
+    const html = code.trim().startsWith('<!') ? code : `<!DOCTYPE html>\n${code}`;
+    const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
   };
