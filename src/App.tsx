@@ -1867,6 +1867,7 @@ export default function App() {
               language={language}
               subscriptionTier={subscription.tier}
               onOpenSubscription={() => setShowSubscription(true)}
+              isStreaming={isStreaming}
               projectId={projectId}
             />
           )}
