@@ -80,8 +80,18 @@ export const InteractiveTerminal = ({ language, open, onClose }: Props) => {
         if (arg.startsWith('generate')) push({ text: ar ? `تم توليد مكون: ${arg.replace('generate', '').trim()}` : `Generated component: ${arg.replace('generate', '').trim()}`, kind: 'output' });
         else push({ text: ar ? 'استخدم: ebnily generate "اسم"' : 'Use: ebnily generate "name"', kind: 'error' });
         break;
-      default:
-        push({ text: ar ? `أمر غير معروف: ${head}` : `Unknown command: ${head}`, kind: 'error' });
+      case 'help':
+        push({ text: ar ? 'الأوامر المتاحة: help, status, git, vercel, ebnily, exit, pytest' : 'Available commands: help, status, git, vercel, ebnily, exit, pytest', kind: 'info' });
+        push({ text: ar ? '  help - عرض هذه القائمة' : '  help - show this list', kind: 'info' });
+        push({ text: ar ? '  status - فحص حالة السيرفر' : '  status - check server status', kind: 'info' });
+        push({ text: ar ? '  git add . - أضافة الملفات' : '  git add . - stage files', kind: 'info' });
+        push({ text: ar ? '  git commit -m "msg" - إجراء commit' : '  git commit -m "msg" - commit changes', kind: 'info' });
+        push({ text: ar ? '  git push - رفع إلى GitHub' : '  git push - push to GitHub', kind: 'info' });
+        push({ text: ar ? '  vercel --prod - نشر إلى Vercel' : '  vercel --prod - deploy to Vercel', kind: 'info' });
+        push({ text: ar ? '  ebnily generate "name" - توليد مكون' : '  ebnily generate "name" - generate component', kind: 'info' });
+        push({ text: ar ? '  exit - إغلاق التيرمينال' : '  exit - close terminal', kind: 'info' });
+        push({ text: ar ? '  pytest - اختبار وحدة' : '  pytest - run tests', kind: 'info' });
+        break;
     }
   };
 
