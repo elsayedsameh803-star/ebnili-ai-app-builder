@@ -5657,10 +5657,6 @@ function toPublicTeam(team: DbTeam, members: DbTeamMember[] = []) {
   };
 }
 
-  const row = mem.ok ? mem.data?.[0] : undefined;
-  return row ? row.role : null;
-}
-
 app.post("/api/teams", limitWrites, async (req: Request, res: Response) => {
   const owner = currentOwner(req);
   if (!owner) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });

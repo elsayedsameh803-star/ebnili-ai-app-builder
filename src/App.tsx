@@ -1928,7 +1928,7 @@ export default function App() {
             </button>
           </div>
         </div>
-      )}
+      )}  </main>
       </div>
         </div>{/* /workspace column */}
       </div>{/* /studio row: rail + workspace */}
