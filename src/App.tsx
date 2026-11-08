@@ -202,6 +202,17 @@ export default function App() {
   const [showDeploy, setShowDeploy] = useState<boolean>(false);
   const [showIntegrations, setShowIntegrations] = useState<boolean>(false);
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
+  const [showWelcomeGift, setShowWelcomeGift] = useState(false);
+  // Show welcome gift for free users after registration
+  useEffect(() => {
+    if (authUser && subscription?.tier === 'free') {
+      const shown = localStorage.getItem('welcomeGiftShown');
+      if (!shown) {
+        setShowWelcomeGift(true);
+        localStorage.setItem('welcomeGiftShown', 'true');
+      }
+    }
+  }, [authUser, subscription]);
   const [showGeminiStudio, setShowGeminiStudio] = useState<boolean>(false);
 
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
@@ -1898,7 +1909,25 @@ export default function App() {
               </div>
             </div>
           )}
-        </main>
+          {showWelcomeGift && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md mx-4 text-center">
+            <div className="text-4xl mb-4">🎉</div>
+            <h2 className="text-xl font-bold text-white mb-2">
+              مبروك ليك هديه مجانيه لبناء موقعك
+            </h2>
+            <p className="text-sm text-slate-400 mb-4">
+              Congratulations! You have a free gift to build your site.
+            </p>
+            <button
+              onClick={() => setShowWelcomeGift(false)}
+              className="px-6 py-2 bg-gradient-to-r from-sky-400 to-violet-500 text-white rounded-lg font-bold"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
       </div>
         </div>{/* /workspace column */}
       </div>{/* /studio row: rail + workspace */}
