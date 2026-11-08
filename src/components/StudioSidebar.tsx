@@ -44,6 +44,7 @@ import {
   Plus,
   Github,
   Globe,
+  Terminal,
   Sparkles,
   MousePointerClick,
   Crown,
@@ -92,6 +93,7 @@ export interface StudioSidebarProps {
   subscription?: UserSubscription;
   onOpenSubscription?: () => void;
   onOpenGeminiStudio?: () => void;
+  onOpenTerminal?: () => void;
   /**
    * Opens «لوحة المستخدم» — the signed-in customer's own dashboard (plan,
    * balance, quota meter, projects). Never rendered without a session: App only
@@ -192,6 +194,7 @@ export const StudioSidebar = ({
   subscription,
   onOpenSubscription,
   onOpenGeminiStudio,
+  onOpenTerminal,
   onOpenUserDashboard,
   onOpenAdmin,
   onOpenGitHubImport,
@@ -501,6 +504,9 @@ export const StudioSidebar = ({
         )}
         {onOpenGeminiStudio && (
           <Row icon={Sparkles} label={ar ? 'استوديو إبنيلي' : 'Ebnili Studio'} onClick={onOpenGeminiStudio} iconClass="text-amber-400" />
+        )}
+        {onOpenTerminal && (
+          <Row icon={Terminal} label={ar ? 'تيرمينال' : 'Terminal'} onClick={onOpenTerminal} iconClass="text-emerald-400" />
         )}
         {/* «لوحة المستخدم» — the customer's OWN dashboard. Gated on the session:
             a guest has no account to show, so the row simply does not exist. */}
