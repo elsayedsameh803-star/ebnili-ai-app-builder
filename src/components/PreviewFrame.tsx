@@ -22,6 +22,8 @@ interface PreviewFrameProps {
   isStreaming?: boolean;
   /** The project id, so the Publish button can publish the real project. */
   projectId?: string | null;
+  /** Called when the user wants to close/pin the preview panel. */
+  onClosePreview?: () => void;
 }
 
 export const PreviewFrame = ({
@@ -453,7 +455,12 @@ export const PreviewFrame = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 px-2 pb-1 shrink-0">
+        {/* Pin / Unpin Controls - FIXED: outside console drawer */}
+        <div
+          className={`flex items-center gap-1.5 px-2 pb-1 shrink-0 transition-all duration-300 ${
+            isPinned ? 'bg-slate-800/80' : 'bg-white/60'
+          }`}
+        >
           <button
             onClick={() => setRefreshKey((k) => k + 1)}
             className="p-1 hover:text-white rounded hover:bg-slate-800 transition"
@@ -466,7 +473,11 @@ export const PreviewFrame = ({
               setIsPinned((p) => !p);
               setRefreshKey((k) => k + 1);
             }}
-            className="p-1 hover:text-white rounded hover:bg-slate-800 transition"
+            className={`p-1 rounded transition-all duration-300 ${
+              isPinned
+                ? 'bg-slate-700 text-white'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
             title={
               isPinned
                 ? language === 'ar'
