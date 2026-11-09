@@ -4,7 +4,8 @@ import {
   ExternalLink,
   Terminal,
   MousePointerClick,
-  Crown
+  Crown,
+  X,
 } from 'lucide-react';
 import { DeviceMode, ConsoleLog, SelectedElementInfo, Language } from '../types';
 import { PublishButton } from './PublishButton';
@@ -33,11 +34,13 @@ export const PreviewFrame = ({
   onOpenSubscription,
   isStreaming = false,
   projectId = null,
+  onClosePreview,
 }: PreviewFrameProps) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([]);
   const [showConsole, setShowConsole] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [isPinned, setIsPinned] = useState(false);
 
   // REACTIVE narrow flag.
   //
@@ -448,6 +451,34 @@ export const PreviewFrame = ({
               ))
             )}
           </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 px-2 pb-1 shrink-0">
+          <button
+            onClick={() => setRefreshKey((k) => k + 1)}
+            className="p-1 hover:text-white rounded hover:bg-slate-800 transition"
+            title={language === 'ar' ? 'إعادة تحميل' : 'Reload'}
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              setIsPinned((p) => !p);
+              setRefreshKey((k) => k + 1);
+            }}
+            className="p-1 hover:text-white rounded hover:bg-slate-800 transition"
+            title={
+              isPinned
+                ? language === 'ar'
+                  ? 'إلغاء التثبيت'
+                  : 'Unpin'
+                : language === 'ar'
+                  ? 'تثبيت المعاينة'
+                  : 'Pin preview'
+            }
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
     </div>
