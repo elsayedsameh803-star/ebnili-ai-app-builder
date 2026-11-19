@@ -3149,11 +3149,27 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
   // Confirmations grant nothing extra here: the row now says "confirmed", and
   // `/api/subscriptions/current` turns that into a real tier for the account.
   if (status === "confirmed" && payment.account_email) {
+    // Update the account's tier in the database so the quota reflects the new plan immediately.
+    // Also clear any free-tier-specific data (blocks, usage counter) when upgrading to a paid tier.
+    const newTier = body.tier || (payment.plan_id === "business" ? "business" : "pro");
+    const updateData: Record<string, unknown> = { tier: newTier };
+    // When upgrading from free to paid, reset the daily usage counter and clear any blocks
+    if (payment.tier === "free" && newTier !== "free") {
+      updateData.ai_used = 0;
+      updateData.ai_day = null;
+      updateData.is_blocked = false;
+      updateData.block_reason = null;
+    }
+    await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+      method: "PATCH",
+      query: { account_id: `eq.${payment.account_id}` },
+      body: JSON.stringify(updateData),
+    });
+
     // Fast path for the owner's own browser only. The durable entitlement is the
     // status written above — never this cookie.
     try {
-      const tier = body.tier === "business" || payment.plan_id === "business" ? "business" : "pro";
-      res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(payment.account_email, tier), {
+      res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(payment.account_email, newTier), {
         httpOnly: true,
         secure: cookiesAreSecure(req),
         sameSite: "lax",
@@ -4487,12 +4503,12 @@ const CANDIDATE_MODELS = [
 // allowed to run (see `maxDuration` in vercel.json), leaving room for a real
 // answer plus a second attempt, and the text-only studio endpoints keep a
 // shorter slice because they never return a document.
-const GENERATE_BUDGET_MS = 240_000;
-const GENERATE_ATTEMPT_TIMEOUT_MS = 75_000;
-const REFINE_BUDGET_MS = 180_000;
-const REFINE_ATTEMPT_TIMEOUT_MS = 70_000;
-const STUDIO_BUDGET_MS = 120_000;
-const STUDIO_ATTEMPT_TIMEOUT_MS = 45_000;
+const GENERATE_BUDGET_MS = 600_000; // Extended from 240s to 600s (10min) to allow long generations
+const GENERATE_ATTEMPT_TIMEOUT_MS = 300_000; // Extended from 75s to 300s (5min) per attempt
+const REFINE_BUDGET_MS = 300_000; // Extended from 180s to 300s (5min) to allow long refinements
+const REFINE_ATTEMPT_TIMEOUT_MS = 150_000; // Extended from 70s to 150s (2.5min) per attempt
+const STUDIO_BUDGET_MS = 300_000; // Extended from 120s to 300s (5min) for studio operations
+const STUDIO_ATTEMPT_TIMEOUT_MS = 120_000; // Extended from 45s to 120s (2min) per attempt
 
 // Never let a document get cut off mid-file: an unterminated HTML string used
 // to reach the browser as a blank/broken preview. A high ceiling keeps big
