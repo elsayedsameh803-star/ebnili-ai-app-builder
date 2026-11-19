@@ -3154,7 +3154,10 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
     const newTier = body.tier || (payment.plan_id === "business" ? "business" : "pro");
     const updateData: Record<string, unknown> = { tier: newTier };
     // When upgrading from free to paid, reset the daily usage counter and clear any blocks
-    if (payment.tier === "free" && newTier !== "free") {
+    // Check account's current tier to determine if coming from free tier
+    const account = await findAccountByEmail(payment.account_email);
+    const wasFree = account?.tier === "free";
+    if (wasFree && newTier !== "free") {
       updateData.ai_used = 0;
       updateData.ai_day = null;
       updateData.is_blocked = false;
