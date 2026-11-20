@@ -12,7 +12,7 @@ export interface Review {
 export default function ReviewsPage({ initialReviews = [], onSubmitReview }: {
   initialReviews?: Review[];
   onSubmitReview?: (name: string, rating: number, comment: string) => void;
-}) => {
+}): void => {
   const [name, setName] = useState('');
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
