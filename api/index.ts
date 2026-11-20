@@ -1606,15 +1606,13 @@ async function consumeAiAllowance(
 
   const account = await findAccountByEmail(session.email);
   const tier: Tier = account ? tierOf(account.tier) : tierOf((req as Request & { accountTier?: Tier }).accountTier);
-  const limit = dailyQuotaFor(tier);
-
-  // THE SINGLE SPEND PATH. `ebnily_consume_ai_credit` takes a row lock, so the
-  // check and the increment cannot interleave with another request. Every AI
-  // call in the product goes through this one statement — there is no second
-  // place that writes `ai_used`, which is what makes the guarantee hold.
+  const window = quotaWindowFor(tier);
+  // Use monthly limit logic for paid plans, daily for free trial
+  // p_limit: the quota amount (150 for PRO monthly, 100 for Business monthly, 3 for Free daily)
+  // p_window: 'monthly' or 'daily' - determines which counter (ai_month/ai_month_used vs ai_day/ai_used) the stored procedure resets and checks
   const rpc = await dbRequest<RpcConsumeResult[]>(RPC_CONSUME_AI, {
     method: "POST",
-    body: JSON.stringify({ p_account_id: session.id, p_limit: limit }),
+    body: JSON.stringify({ p_account_id: session.id, p_limit: dailyQuotaFor(tier), p_window: window }),
   });
 
   if (!rpc.ok) {

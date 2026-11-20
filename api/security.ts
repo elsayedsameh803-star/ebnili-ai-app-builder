@@ -77,8 +77,8 @@ export const TIER_DAILY_QUOTA = {
   // command OR one modification. Deliberately stingy so a free account cannot
   // meaningfully burn the paid Gemini key, and so upgrading is the obvious move.
   free: 3,
-  // Pro: 100 AI actions per month (a command OR a modification each).
-  pro: 100,
+  // Pro: 150 AI actions per month (a command OR a modification each).
+  pro: 150,
   // Business: 400 AI actions per month — a full agency studio.
   business: 400,
 } as const;
