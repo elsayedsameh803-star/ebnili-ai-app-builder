@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { RotateCw, ExternalLink, Terminal, MousePointerClick, Crown, X } from 'lucide-react';
 import { DeviceMode, ConsoleLog, SelectedElementInfo, Language } from '../types';
+import { stripCodeForDisplay } from '../lib/projects';
 import { PublishButton } from './PublishButton';
 
 interface PreviewFrameProps {

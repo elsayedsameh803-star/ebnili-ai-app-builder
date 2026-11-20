@@ -362,6 +362,30 @@ export function hasRealContent(code: string): boolean {
   return !/ابدأ مشروعك/.test(t);
 }
 
+/** Strip HTML tags, code fences, and markup from generated code so it displays cleanly. */
+export function stripCodeForDisplay(code: string): string {
+  if (!code) return '';
+  let cleaned = code
+    // Remove triple-backtick code fences (```html, ```tsx, ```jsx, ```css, ```js, etc.)
+    .replace(/```[a-z]*\n([\s\S]*?)```/g, '$1')
+    .replace(/```$/g, '')
+    // Remove HTML tags (<tag>...</tag>, <tag/>)
+    .replace(/<[^>]+>/g, '')
+    // Remove HTML comments
+    .replace(/<!--[\s\S]*?-->/g, '')
+    // Remove inline event handlers (onclick, onload, etc.)
+    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/g, '')
+    // Remove style attributes
+    .replace(/\s+style\s*=\s*["'][^"']*["']/gi, '')
+    // Remove remaining angle brackets that could be render as HTML
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    // Normalize whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned;
+}
+
 export function newProjectId(): string {
   return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
