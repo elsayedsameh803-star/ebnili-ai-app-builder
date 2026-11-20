@@ -1604,8 +1604,7 @@ async function consumeAiAllowance(
     return { allowed: false, used: 0, limit: TIER_DAILY_QUOTA.free, reason: "db_unavailable" };
   }
 
-  const account = await findAccountByEmail(session.email);
-  const tier: Tier = account ? tierOf(account.tier) : tierOf((req as Request & { accountTier?: Tier }).accountTier);
+  // Check the ebnili_plan grant cookie first: if it exists, is bound to this session,\n   // and is not expired, use its tier so a paid plan overrides the database tier.\n   const grant = readPlanGrant(req);\n   let tier: Tier;\n   if (grant && grantBelongsToSession(grant, session) && new Date(grant.expiresAt).getTime() > Date.now()) {\n     tier = grant.tier as Tier;\n   } else {\n     const account = await findAccountByEmail(session.email);\n     tier = account ? tierOf(account.tier) : tierOf((req as Request & { accountTier?: Tier }).accountTier);\n   }\n
   const window = quotaWindowFor(tier);
   // Use monthly limit logic for paid plans, daily for free trial
   // p_limit: the quota amount (150 for PRO monthly, 100 for Business monthly, 3 for Free daily)
@@ -3734,8 +3733,12 @@ async function touchAccount(
   // disagree, and the dashboard would show a staff member as "free" while the app
   // treated them as Business.
   const staff = isStaffEmail(session.email);
-  // The table's `tier` column is constrained to ('free','pro','business').
-  const tier: Tier = staff ? "business" : "free";
+  // Preserve existing paid tier if the account already has one set in the DB,
+  // otherwise default to "free" for new accounts and "business" for staff.
+  let tier: Tier = staff ? "business" : "free";
+  if (!staff && account?.tier && account.tier !== "free") {
+    tier = account.tier as Tier;
+  }
 
   // SECURITY / CORRECTNESS — the account row MUST actually be created here.
   // This upsert was `on_conflict=merge-duplicates` with no `account_id=eq.<id>`
