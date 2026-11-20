@@ -5819,7 +5819,7 @@ app.get("/api/referral", limitWrites, async (req, res) => {
   const o = currentOwner(req);
   if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
   if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
-  const acct = await findAccountByEmail(o.email);
+  let acct = await findAccountByEmail(o.email);
   if (!acct) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
   if (!acct.referral_code) {
     const code = randomReferralCode();

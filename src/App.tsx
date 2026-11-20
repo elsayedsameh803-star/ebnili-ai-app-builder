@@ -301,7 +301,8 @@ export default function App() {
     const error = params.get('auth_error');
     const success = params.get('auth');
     const code = params.get('code');
-    if (!error && !success && !code) return;
+const githubError = params.get('github_error');
+    if (!error && !success && !code && !githubError) return;
 
     // If the server forwarded a `auth_detail` (the real provider error), append
     // it with a `::` separator so getAuthErrorMessage can show it alongside the
@@ -325,11 +326,11 @@ export default function App() {
         .catch(() => setAuthProbeFailed(true))
         .finally(() => setAuthChecked(true));
     }
-    setShowAuthModal(Boolean(error));
+    setShowAuthModal(Boolean(error || githubError));
 
     // Remove any leftover OAuth signal (auth=, auth_error=, code=) so the
     // browser lands on a clean URL after sign-in.
-    if (error || success || code) {
+    if (error || success || code || githubError) {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
