@@ -60,14 +60,17 @@ export const PreviewFrame = ({
       // ... rest of the message handling
     };
 
-    if (iframeRef.current) {
-      iframeRef.current.contentWindow.addEventListener('message', handleMessage);
-    }
-    return () => {
-      if (iframeRef.current) {
-        iframeRef.current.contentWindow.removeEventListener('message', handleMessage);
-      }
-    };
+    const iframeWindow = iframeRef.current?.contentWindow;
+
+if (iframeWindow) {
+  iframeWindow.addEventListener('message', handleMessage);
+}
+
+return () => {
+  if (iframeWindow) {
+    iframeWindow.removeEventListener('message', handleMessage);
+  }
+};s
   }, []);
 
   return (

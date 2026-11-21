@@ -506,7 +506,7 @@ export const StudioSidebar = ({
           <Row icon={Sparkles} label={ar ? 'استوديو إبنيلي' : 'Ebnili Studio'} onClick={onOpenGeminiStudio} iconClass="text-amber-400" />
         )}
         {onOpenTerminal && (
-          <Row label={ar ? 'تيرمينال' : 'Terminal'} onClick={onOpenTerminal} iconClass="text-emerald-400" />
+    <Row icon={Terminal} label={ar ? 'تيرمينال' : 'Terminal'} onClick={onOpenTerminal} />
         )}
         {/* «لوحة المستخدم» — the customer's OWN dashboard. Gated on the session:
             a guest has no account to show, so the row simply does not exist. */}

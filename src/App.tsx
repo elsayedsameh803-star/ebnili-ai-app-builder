@@ -203,6 +203,8 @@ export default function App() {
   const [showIntegrations, setShowIntegrations] = useState<boolean>(false);
   const [showSubscription, setShowSubscription] = useState<boolean>(false);
   const [showWelcomeGift, setShowWelcomeGift] = useState(false);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+
   // Show welcome gift for free users after registration
   useEffect(() => {
     if (authUser && subscription?.tier === 'free') {
@@ -226,7 +228,7 @@ export default function App() {
   const [infoPage, setInfoPage] = useState<PageKey | null>(null);
 
   // ── User authentication (Google / GitHub) ─────────────────────────────────
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  
   const [authError, setAuthError] = useState<string | null>(null);
   // `null` until /api/auth/me answers, so the gate doesn't flash for a
   // returning user who already has a valid session cookie.

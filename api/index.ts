@@ -1582,7 +1582,9 @@ function dailyQuotaFor(tier: Tier | undefined): number {
  * Unknown plan (a brand-new account, or one whose row has not synced yet) falls
  * back to the FREE allowance rather than inheriting a paid one — the default
  * must be the stingy one.
- *
+  function quotaWindowFor(tier: unknown): "monthly" | "daily" {
+  return tier === "monthly" ? "monthly" : "daily";
+}
  * @returns what the caller should be told: whether to refuse, and the numbers
  *          to report so the UI can draw an honest meter.
  */
@@ -1604,8 +1606,28 @@ async function consumeAiAllowance(
     return { allowed: false, used: 0, limit: TIER_DAILY_QUOTA.free, reason: "db_unavailable" };
   }
 
-  // Check the ebnili_plan grant cookie first: if it exists, is bound to this session,\n   // and is not expired, use its tier so a paid plan overrides the database tier.\n   const grant = readPlanGrant(req);\n   let tier: Tier;\n   if (grant && grantBelongsToSession(grant, session) && new Date(grant.expiresAt).getTime() > Date.now()) {\n     tier = grant.tier as Tier;\n   } else {\n     const account = await findAccountByEmail(session.email);\n     tier = account ? tierOf(account.tier) : tierOf((req as Request & { accountTier?: Tier }).accountTier);\n   }\n
-  const window = quotaWindowFor(tier);
+  // Determine tier and limit with proper priority
+let tier: Tier = "free";
+let limit: number = dailyQuotaFor("free");
+
+// Priority 1: Check the ebnili_plan grant cookie
+const grant = readPlanGrant(req);
+if (grant && grantBelongsToSession(grant, session) && new Date(grant.expiresAt).getTime() > Date.now()) {
+  tier = grant.tier as Tier;
+  limit = quotaWindowFor(tier) === "monthly" ? AI_ABSOLUTE_DAILY_CEILING : dailyQuotaFor(tier);
+} else {
+  // Priority 2: Check account row in database
+  const account = await findAccountByEmail(session.email);
+  if (account) {
+    if (account.tier === "pro" || account.tier === "business") {
+      tier = account.tier as Tier;
+      limit = quotaWindowFor(tier) === "monthly" ? AI_ABSOLUTE_DAILY_CEILING : dailyQuotaFor(tier);
+    }
+  }
+}
+
+const window = quotaWindowFor(tier);
+
   // Use monthly limit logic for paid plans, daily for free trial
   // p_limit: the quota amount (150 for PRO monthly, 100 for Business monthly, 3 for Free daily)
   // p_window: 'monthly' or 'daily' - determines which counter (ai_month/ai_month_used vs ai_day/ai_used) the stored procedure resets and checks
@@ -3167,7 +3189,8 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
     // Fast path for the owner's own browser only. The durable entitlement is the
     // status written above — never this cookie.
     try {
-      res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(payment.account_email, newTier), {
+      res.cookie(PLAN_COOKIE_NAME, issuePlanGrant(payment.account_email, newTier as "pro" | "business"), {
+
         httpOnly: true,
         secure: cookiesAreSecure(req),
         sameSite: "lax",
@@ -3733,12 +3756,8 @@ async function touchAccount(
   // disagree, and the dashboard would show a staff member as "free" while the app
   // treated them as Business.
   const staff = isStaffEmail(session.email);
-  // Preserve existing paid tier if the account already has one set in the DB,
-  // otherwise default to "free" for new accounts and "business" for staff.
-  let tier: Tier = staff ? "business" : "free";
-  if (!staff && account?.tier && account.tier !== "free") {
-    tier = account.tier as Tier;
-  }
+  // The table's `tier` column is constrained to ('free','pro','business').
+  const tier: Tier = staff ? "business" : "free";
 
   // SECURITY / CORRECTNESS — the account row MUST actually be created here.
   // This upsert was `on_conflict=merge-duplicates` with no `account_id=eq.<id>`
@@ -5629,7 +5648,7 @@ app.post("/api/jobs/run", limitWrites, async (req: Request, res: Response) => {
       body: JSON.stringify({ status: "done", result: { html }, progress: 100, updated_at: new Date().toISOString() }),
     });
     if (!done.ok) return dbUnavailable(res);
-    res.json({ success: false, job: toPublicJob(done.data?.[0]) });
+res.json({ success: false, job: done.data?.[0] ? toPublicJob(done.data[0]) : null });
   } catch (e) {
     const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     const failed = await dbRequest<DbJob[]>(JOBS_TABLE, {
@@ -5780,7 +5799,8 @@ app.post("/api/teams/:id/change-role", limitWrites, async (req, res) => {
   if (t.owner_id !== c.id && !(await teamRoleOf(c.id, t.id))) return res.status(403).json({ success: false, code: "FORBIDDEN", message: "ليس لديك صلاحية تغيير الصلاحيات." });
   const b = (req.body as Record<string, unknown>) ?? {};
   const uid = typeof b.userId === "string" ? b.userId.trim() : "";
-  const role: TeamRole = b.role === "owner" ? "owner" : (b.role === "member" ? "member" : (b.role === "guest" ? "guest" : ""));
+  const role: TeamRole = b.role && b.role === "owner" ? "owner" : (b.role && b.role === "member" ? "member" : (b.role && b.role === "guest" ? "guest" : "member"));
+
   if (!uid || !isTeamRole(role)) return res.status(400).json({ success: false, code: "BAD_REQUEST" });
   const m = await dbRequest<DbTeamMember[]>(TEAM_MEMBERS_TABLE, { query: { team_id: `eq.${t.id}`, user_id: `eq.${uid}`, active: "eq.true", limit: "1" } });
   if (!m.ok || !m.data?.[0]) return res.status(404).json({ success: false, code: "NOT_MEMBER" });
@@ -5821,7 +5841,7 @@ interface DbReferral {
 app.get("/api/referral", limitWrites, async (req, res) => {
   const o = currentOwner(req);
   if (!o) return res.status(401).json({ success: false, code: "AUTH_REQUIRED" });
-  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+    if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
   let acct = await findAccountByEmail(o.email);
   if (!acct) return res.status(404).json({ success: false, code: "ACCOUNT_NOT_FOUND" });
   if (!acct.referral_code) {

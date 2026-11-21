@@ -12,7 +12,7 @@ export interface Review {
 export default function ReviewsPage({ initialReviews = [], onSubmitReview }: {
   initialReviews?: Review[];
   onSubmitReview?: (name: string, rating: number, comment: string) => void;
-}): void => {
+}): void {
   const [name, setName] = useState('');
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
@@ -38,7 +38,7 @@ export default function ReviewsPage({ initialReviews = [], onSubmitReview }: {
     setComment('');
     setSubmitted(true);
     setTimeout(() => setSubmitted(false), 3000);
-  };
+  
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8" dir="rtl">
@@ -158,4 +158,4 @@ export default function ReviewsPage({ initialReviews = [], onSubmitReview }: {
       </div>
     </div>
   );
-};
+}
