@@ -3187,6 +3187,25 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
       body: JSON.stringify(updateData),
     });
 
+    // When upgrading to pro or business, also update the device status so the
+    // protection endpoint returns the correct tier and resets free generations used.
+    // This prevents the user from being stuck in free-tier limits after paying.
+    if (newTier === "pro" || newTier === "business") {
+      await dbRequest<any>(DEVICES_TABLE, {
+        method: "PATCH",
+        query: { account_email: `eq.${payment.account_email}` },
+        body: JSON.stringify({
+          tier: newTier,
+          freeGenerationsUsed: 0,
+          // Keep the existing freeGenerationsLimit or set a reasonable default;
+          // the protection endpoint will use the tier to determine the effective limit.
+          freeGenerationsLimit: newTier === "business" ? 400 : 5,
+        }),
+      }).catch(() => {
+        // Device table may be empty for new accounts; not fatal.
+      });
+    }
+
     // Fast path for the owner's own browser only. The durable entitlement is the
     // status written above — never this cookie.
     try {
