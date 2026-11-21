@@ -38,7 +38,8 @@ import {
   TIER_DAILY_QUOTA as SECURITY_TIER_DAILY_QUOTA,
   AI_ABSOLUTE_DAILY_CEILING,
   quotaForTier,
-} from "./security.js";
+   quotaWindowFor,
+ } from "./security.js";
 
 const app = express();
 app.use(express.json({ limit: "15mb" }));
@@ -3757,7 +3758,14 @@ async function touchAccount(
   // treated them as Business.
   const staff = isStaffEmail(session.email);
   // The table's `tier` column is constrained to ('free','pro','business').
-  const tier: Tier = staff ? "business" : "free";
+  // Single Source of Truth: the `tier` column in `ebnily_accounts` Supabase table.
+  // Preserve existing paid tier if the account already has one; only default to
+  // "free" for completely new accounts, and "business" for staff emails.
+  let tier: Tier = staff ? "business" : "free";
+  const existingAccount = await findAccountByEmail(session.email);
+  if (!staff && existingAccount && existingAccount.tier && existingAccount.tier !== "free") {
+    tier = existingAccount.tier as Tier;
+  }
 
   // SECURITY / CORRECTNESS — the account row MUST actually be created here.
   // This upsert was `on_conflict=merge-duplicates` with no `account_id=eq.<id>`
