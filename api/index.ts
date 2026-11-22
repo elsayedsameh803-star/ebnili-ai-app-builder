@@ -1858,7 +1858,7 @@ app.get("/api/protection/status", async (req: Request, res: Response) => {
   // is never updated. A `Prefer` header is also added so the write is verified.
   const upsert = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
     method: "POST",
-    query: { device_id: `eq.${deviceId}`, on_conflict: "device_id" },
+    query: { on_conflict: "device_id" },
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       device_id: deviceId,
@@ -1901,15 +1901,53 @@ app.get("/api/protection/status", async (req: Request, res: Response) => {
     });
   }
 
+  // Determine the effective tier for this device based on the signed-in account.
+  // If the account has a paid tier (pro or business), the device should reflect
+  // that tier so the quota limits are correct (150 for Pro, 400 for Business).
+  let effectiveTier: "free" | "pro" | "business" = "free";
+  let effectiveFreeLimit = 5;
+
+  if (session) {
+    const account = await findAccountByEmail(session.email);
+    if (account && account.tier && account.tier !== "free") {
+      effectiveTier = account.tier as "pro" | "business";
+      // Map account tier to the corresponding free generations limit.
+      // These values must match the daily/ monthly quota definitions in plans.ts.
+      if (effectiveTier === "pro") {
+        effectiveFreeLimit = 150;
+      } else if (effectiveTier === "business") {
+        effectiveFreeLimit = 400;
+      }
+    }
+  }
+
+  // If the device row exists but has the wrong tier/limit (e.g. old device
+  // created before this fix), update it now so future requests are correct.
+  if (deviceRow && (deviceRow.tier !== effectiveTier || deviceRow.free_limit !== effectiveFreeLimit)) {
+    await dbRequest<DbDevice[]>(DEVICES_TABLE, {
+      method: "PATCH",
+      query: { device_id: `eq.${deviceId}` },
+      body: JSON.stringify({
+        tier: effectiveTier,
+        free_limit: effectiveFreeLimit,
+        // Also reset the used counter when changing from free to a paid tier,
+        // so the user gets the full allowance immediately.
+        ...(effectiveTier !== "free" && deviceRow.free_used >= 5 ? { free_used: 0 } : {}),
+      }),
+    }).catch(() => {
+      // Not fatal if the write fails mid-request.
+    });
+  }
+
   res.json({
     success: true,
     configured: true,
-    deviceId: row.device_id,
-    isBlocked: row.is_blocked === true,
-    blockReason: row.block_reason ?? undefined,
-    freeGenerationsUsed: toNumber(row.free_used),
-    freeGenerationsLimit: toNumber(row.free_limit, 5),
-    tier: row.tier,
+    deviceId: deviceRow?.device_id,
+    isBlocked: deviceRow?.is_blocked === true,
+    blockReason: deviceRow?.block_reason ?? undefined,
+    freeGenerationsUsed: toNumber(deviceRow?.free_used, 0),
+    freeGenerationsLimit: effectiveFreeLimit,
+    tier: effectiveTier,
   });
 });
 
@@ -2898,7 +2936,7 @@ app.post("/api/admin/device/toggle-block", requireAdmin, async (req: Request, re
   // The conflict target must be named explicitly — see `touchAccount`.
   const write = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
     method: "POST",
-    query: { device_id: `eq.${deviceId}`, on_conflict: "device_id" },
+    query: { on_conflict: "device_id" },
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       device_id: deviceId,
@@ -2954,7 +2992,7 @@ app.post("/api/admin/device/set-tier", requireAdmin, async (req: Request, res: R
   // The conflict target must be named explicitly — see `touchAccount`.
   const write = await dbRequest<DbDevice[]>(DEVICES_TABLE, {
     method: "POST",
-    query: { device_id: `eq.${deviceId}`, on_conflict: "device_id" },
+    query: { on_conflict: "device_id" },
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       device_id: deviceId,
