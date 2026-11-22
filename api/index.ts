@@ -1741,8 +1741,14 @@ async function readAiAllowance(req: Request): Promise<{ used: number; limit: num
     const tier: Tier = session ? tierOf(tagged.accountTier) : "free";
     return { used: 0, limit: dailyQuotaFor(tier), tier };
   }
-  const account = await findAccountByEmail(session.email);
-  const tier: Tier = account ? tierOf(account.tier) : tierOf(tagged.accountTier);
+  const grant = readPlanGrant(req);
+  const hasValidGrant = Boolean(grant && grantBelongsToSession(grant, session) && new Date(grant.expiresAt).getTime() > Date.now());
+  const account = hasValidGrant ? null : await findAccountByEmail(session.email);
+  const tier: Tier = hasValidGrant
+    ? tierOf(grant!.tier)
+    : account
+      ? tierOf(account.tier)
+      : tierOf(tagged.accountTier);
   const limit = dailyQuotaFor(tier);
   // Read-only, and spent by nobody: the same function the spend path uses, but
   // its read-only sibling, so the number the meter shows is the number the
