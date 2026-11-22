@@ -1741,14 +1741,26 @@ async function readAiAllowance(req: Request): Promise<{ used: number; limit: num
     const tier: Tier = session ? tierOf(tagged.accountTier) : "free";
     return { used: 0, limit: dailyQuotaFor(tier), tier };
   }
-  const grant = readPlanGrant(req);
-  const hasValidGrant = Boolean(grant && grantBelongsToSession(grant, session) && new Date(grant.expiresAt).getTime() > Date.now());
-  const account = hasValidGrant ? null : await findAccountByEmail(session.email);
-  const tier: Tier = hasValidGrant
-    ? tierOf(grant!.tier)
-    : account
-      ? tierOf(account.tier)
-      : tierOf(tagged.accountTier);
+  const account = session.email ? await findAccountByEmail(session.email) : null;
+  const resolvedTier = await resolveEffectiveTier(req, session, account);
+  const tier: Tier = resolvedTier !== "free" ? resolvedTier : (account ? tierOf(account.tier) : tierOf(tagged.accountTier));
+        account_email: `eq.${session.email.toLowerCase()}`,
+        status: "eq.confirmed",
+        order: "reviewed_at.desc",
+        limit: "1",
+      },
+    });
+    const payRow = payRes.ok && Array.isArray(payRes.data) ? payRes.data[0] : undefined;
+    if (payRow) {
+      const start = Date.parse(payRow.reviewed_at ?? "") || Date.now();
+      const ttl = payRow.billing_cycle === "yearly" ? 365 * 24 * 60 * 60 * 1000 : 31 * 24 * 60 * 60 * 1000;
+      if (Date.now() <= start + ttl) {
+        paidTierFromDb = payRow.plan_id === "business" ? "business" : "pro";
+      }
+    }
+  }
+  const resolvedAccountTier = account ? tierOf(account.tier) : tierOf(tagged.accountTier);
+  const tier: Tier = hasValidGrant ? tierOf(grant!.tier) : paidTierFromDb ? paidTierFromDb : resolvedAccountTier;
   const limit = dailyQuotaFor(tier);
   // Read-only, and spent by nobody: the same function the spend path uses, but
   // its read-only sibling, so the number the meter shows is the number the
@@ -1938,7 +1950,7 @@ app.get("/api/protection/status", async (req: Request, res: Response) => {
         free_limit: effectiveFreeLimit,
         // Also reset the used counter when changing from free to a paid tier,
         // so the user gets the full allowance immediately.
-        ...(effectiveTier !== "free" && deviceRow.free_used >= 5 ? { free_used: 0 } : {}),
+        ...(effectiveTier !== "free" ? { free_used: 0 } : {}),
       }),
     }).catch(() => {
       // Not fatal if the write fails mid-request.
@@ -1951,7 +1963,7 @@ app.get("/api/protection/status", async (req: Request, res: Response) => {
     deviceId: deviceRow?.device_id,
     isBlocked: deviceRow?.is_blocked === true,
     blockReason: deviceRow?.block_reason ?? undefined,
-    freeGenerationsUsed: toNumber(deviceRow?.free_used, 0),
+    freeGenerationsUsed: effectiveTier !== "free" ? 0 : toNumber(deviceRow?.free_used, 0),
     freeGenerationsLimit: effectiveFreeLimit,
     tier: effectiveTier,
   });
@@ -3231,13 +3243,23 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
       body: JSON.stringify(updateData),
     });
 
+    if (payment.account_email) {
+      const normEmail = normalizeEmail(payment.account_email);
+      if (normEmail) {
+        await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+          method: "PATCH",
+          query: { email: `ilike.${normEmail}` },
+          body: JSON.stringify(updateData),
+        }).catch(() => {});
+      }
+    }
     // When upgrading to pro or business, also update the device status so the
     // protection endpoint returns the correct tier and resets free generations used.
     // This prevents the user from being stuck in free-tier limits after paying.
     if (newTier === "pro" || newTier === "business") {
       await dbRequest<any>(DEVICES_TABLE, {
         method: "PATCH",
-        query: { account_email: `eq.${payment.account_email}` },
+        query: { account_email: `ilike.${normalizeEmail(payment.account_email)}` },
         body: JSON.stringify({
           tier: newTier,
           freeGenerationsUsed: 0,
@@ -3825,9 +3847,32 @@ async function touchAccount(
   // Preserve existing paid tier if the account already has one; only default to
   // "free" for completely new accounts, and "business" for staff emails.
   let tier: Tier = staff ? "business" : "free";
-  const existingAccount = await findAccountByEmail(session.email);
-  if (!staff && existingAccount && existingAccount.tier && existingAccount.tier !== "free") {
-    tier = existingAccount.tier as Tier;
+  const normEmail = normalizeEmail(session.email);
+  const byEmailRows = normEmail ? await dbRequest<Array<{ tier?: string | null }>>(ACCOUNTS_TABLE, { query: { select: "tier", email: `ilike.${normEmail}`, limit: "10" } }).then(r => (r.ok && Array.isArray(r.data)) ? r.data : []).catch(() => []) : [];
+  const byIdRows = session.id ? await dbRequest<Array<{ tier?: string | null }>>(ACCOUNTS_TABLE, { query: { select: "tier", account_id: `eq.${session.id}`, limit: "5" } }).then(r => (r.ok && Array.isArray(r.data)) ? r.data : []).catch(() => []) : [];
+  const allTiers = [...byEmailRows, ...byIdRows].map(r => tierOf(r?.tier));
+  const savedTier: Tier = allTiers.includes("business") ? "business" : (allTiers.includes("pro") ? "pro" : "free");
+  if (!staff && normEmail && supabaseConfig().dbConfigured) {
+    const payRes = await dbRequest<Array<{ plan_id?: string | null; billing_cycle?: string | null; reviewed_at?: string | null }>>(PAYMENTS_TABLE, {
+      query: {
+        select: "plan_id,billing_cycle,reviewed_at",
+        account_email: `ilike.${normEmail}`,
+        status: "eq.confirmed",
+        order: "reviewed_at.desc",
+        limit: "1",
+      },
+    }).catch(() => null);
+    const payRow = payRes && payRes.ok && Array.isArray(payRes.data) ? payRes.data[0] : undefined;
+    if (payRow) {
+      const start = Date.parse(payRow.reviewed_at ?? "") || Date.now();
+      const ttl = payRow.billing_cycle === "yearly" ? 365 * 24 * 60 * 60 * 1000 : 31 * 24 * 60 * 60 * 1000;
+      if (Date.now() <= start + ttl) {
+        tier = payRow.plan_id === "business" ? "business" : "pro";
+      }
+    }
+  }
+  if (!staff && tier === "free" && savedTier !== "free") {
+    tier = savedTier;
   }
 
   // SECURITY / CORRECTNESS — the account row MUST actually be created here.
@@ -3847,7 +3892,7 @@ async function touchAccount(
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
       account_id: session.id,
-      email: session.email ?? "",
+      email: normEmail || session.email || "",
       display_name: session.name ?? "",
       provider: session.provider ?? "",
       avatar_url: session.picture || null,
@@ -3858,8 +3903,6 @@ async function touchAccount(
       first_seen_at: new Date().toISOString(),
       last_ip: ip || null,
       user_agent: ua || null,
-      // Staff keep Business on every later visit too — see the PATCH below.
-      tier,
     }),
   });
 
@@ -3890,7 +3933,7 @@ async function touchAccount(
       //
       // Only staff are re-asserted: a normal account's `tier` is left exactly as
       // it is, so a payment the owner approved is never silently reverted here.
-      ...(staff ? { tier } : {}),
+      ...(staff || savedTier !== "free" ? { tier } : {}),
     }),
   });
 
@@ -3959,6 +4002,46 @@ function toPublicAccount(row: DbAccount) {
  * The browser never sends a tier. That is still the rule: everything below is
  * derived from the verified session cookie, never from a request field.
  */
+async function resolveEffectiveTier(req: Request, session: AuthUser | null, existingAccount?: DbAccount | null): Promise<Tier> {
+  if (isOwnerAccount(session)) return "business";
+  if (isStaffEmail(session?.email)) return "business";
+  if (session?.email && supabaseConfig().dbConfigured) {
+    const payRes = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+      query: {
+        select: "account_email,plan_id,billing_cycle,reviewed_at",
+        account_email: `eq.${session.email.toLowerCase()}`,
+        status: "eq.confirmed",
+        order: "reviewed_at.desc",
+        limit: "1",
+      },
+    });
+    const payRow = payRes.ok && Array.isArray(payRes.data) ? payRes.data[0] : undefined;
+    if (payRow) {
+      const start = Date.parse(payRow.reviewed_at ?? "") || Date.now();
+      const ttl = payRow.billing_cycle === "yearly" ? 365 * 24 * 60 * 60 * 1000 : 31 * 24 * 60 * 60 * 1000;
+      if (Date.now() <= start + ttl) {
+        const paidTier: Tier = payRow.plan_id === "business" ? "business" : "pro";
+        if (existingAccount && tierOf(existingAccount.tier) !== paidTier && existingAccount.account_id) {
+          await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
+            method: "PATCH",
+            query: { account_id: `eq.${existingAccount.account_id}` },
+            body: JSON.stringify({ tier: paidTier }),
+          });
+        }
+        return paidTier;
+      }
+    }
+  }
+  const grant = readPlanGrant(req);
+  if (grant && grantBelongsToSession(grant, session) && new Date(grant.expiresAt).getTime() > Date.now()) {
+    return tierOf(grant.tier);
+  }
+  if (existingAccount && isPaidTier(tierOf(existingAccount.tier))) {
+    return tierOf(existingAccount.tier);
+  }
+  return "free";
+}
+
 function serverTierFor(req: Request, session: AuthUser | null): Tier {
   if (isOwnerAccount(session)) return "business";
   // Staff bypass the subscription check entirely — see `isStaffEmail`.
@@ -5994,5 +6077,3 @@ export default app;
 export function mountApi(): express.Express {
   return app;
 }
-
-

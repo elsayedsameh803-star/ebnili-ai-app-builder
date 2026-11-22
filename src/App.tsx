@@ -498,7 +498,7 @@ const githubError = params.get('github_error');
   // Subscription State with Orange Cash support
   const [subscription, setSubscription] = useState<UserSubscription>({
     tier: 'free',
-    planName: 'Starter Free (المجانية)',
+    planName: '',
     status: 'active',
     generationsUsedToday: 1,
     generationsLimitToday: 2,
@@ -1919,10 +1919,10 @@ const githubError = params.get('github_error');
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md mx-4 text-center">
             <div className="text-4xl mb-4">🎉</div>
             <h2 className="text-xl font-bold text-white mb-2">
-              مبروك ليك هديه مجانيه لبناء موقعك
+              {subscription.tier !== 'free' ? 'مبروك تفعيل باقتك المدفوعة لبناء موقعك' : 'مبروك ليك هديه مجانيه لبناء موقعك'}
             </h2>
             <p className="text-sm text-slate-400 mb-4">
-              Congratulations! You have a free gift to build your site.
+              {subscription.tier !== 'free' ? 'Congratulations! Your paid plan is active to build your site.' : 'Congratulations! You have a free gift to build your site.'}
             </p>
             <button
               onClick={() => setShowWelcomeGift(false)}

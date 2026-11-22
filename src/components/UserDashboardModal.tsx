@@ -139,12 +139,11 @@ export const UserDashboardModal = ({
   const [loadingProject, setLoadingProject] = useState<boolean>(false);
 
   const activeSubscription = serverSubscription ?? subscription ?? null;
-// Determine the effective tier: grant cookie > active subscription > fallback to free
-  const grantTier = quota?.tier; // This comes from /api/ai/quota which reads the grant cookie
+  const subTier = String(activeSubscription?.tier || '').toLowerCase();
+  const isPaidActiveSub = (subTier === 'pro' || subTier === 'business') && (!activeSubscription?.status || activeSubscription.status === 'active');
+  const grantTier = quota?.tier;
   const subscriptionTier = activeSubscription?.tier;
-  // Use grant tier if available, otherwise subscription tier, otherwise 'free'
-  const tier = (grantTier || subscriptionTier || 'free').toLowerCase();
-  const tierMeta = TIER_LABEL[tier] ?? TIER_LABEL.free;
+  const tier = isPaidActiveSub ? subTier : String(grantTier || subscriptionTier || 'free').toLowerCase();
 
   /**
    * Pull this account's own numbers — on open and on manual refresh.
@@ -229,8 +228,9 @@ export const UserDashboardModal = ({
   const used = quota?.used ?? 0;
 // Use the quota's limit (from grant cookie) if available, 
 // otherwise fall back to activeSubscription's limit, then 0
-const limit = quota?.limit ?? activeSubscription?.generationsLimitToday ?? 0;
-const remaining = quota ? quota.remaining : Math.max(0, limit - used);
+  const subLimit = Number(activeSubscription?.generationsLimitToday) || 0;
+  const limit = isPaidActiveSub ? (subLimit || Number(quota?.limit) || 100) : (quota?.limit ?? subLimit);
+const remaining = isPaidActiveSub ? Math.max(0, limit - used) : (quota ? quota.remaining : Math.max(0, limit - used));
   const usedPct = percent(used, limit);
   const barTone =
     usedPct >= 100
@@ -241,6 +241,7 @@ const remaining = quota ? quota.remaining : Math.max(0, limit - used);
   const planStatus = activeSubscription?.status ?? 'active';
   const expiresAt = activeSubscription?.expiresAt;
 
+  const tierMeta = TIER_LABEL[tier] ?? TIER_LABEL.free;
   return (
     <div
       role="dialog"
@@ -327,9 +328,9 @@ const remaining = quota ? quota.remaining : Math.max(0, limit - used);
                     ? ar
                       ? 'منتهية'
                       : 'Expired'
-                    : ar
-                      ? 'تجريبية'
-                      : 'Trial'}
+                    : tier !== 'free'
+                      ? (ar ? 'فعّالة' : 'Active')
+                      : (ar ? 'تجريبية' : 'Trial')}
               </span>
             </div>
 
@@ -453,7 +454,7 @@ const remaining = quota ? quota.remaining : Math.max(0, limit - used);
                   <li>
                     {ar ? 'الباقه' : 'Plan'}:{' '}
                     <b className="text-slate-200">
-                      {activeSubscription?.planName || (ar ? 'المجانية' : 'Free')}
+                      {activeSubscription?.planName || (tier === 'business' ? 'Business' : tier === 'pro' ? 'Pro' : (ar ? 'المجانية' : 'Free'))}
                     </b>
                   </li>
                   <li>
@@ -467,9 +468,9 @@ const remaining = quota ? quota.remaining : Math.max(0, limit - used);
                           ? ar
                             ? 'منتهي'
                             : 'Expired'
-                          : ar
-                            ? 'تجريبي'
-                            : 'Trial'}
+                          : tier !== 'free'
+                            ? (ar ? 'فعّال' : 'Active')
+                            : (ar ? 'تجريبي' : 'Trial')}
                     </b>
                   </li>
                   {expiresAt && (

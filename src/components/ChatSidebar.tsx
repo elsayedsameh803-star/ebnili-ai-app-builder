@@ -514,7 +514,7 @@ export const ChatSidebar = ({
                 <div className="flex items-center gap-2">
                   <Crown className="w-4 h-4 text-amber-400" />
                   <span className="text-xs font-bold text-white uppercase tracking-wider">
-                    {subscription?.planName || (language === 'ar' ? 'الباقة المجانية' : 'Starter Free')}
+                    {subscription?.planName || (subscription?.tier === 'business' ? 'Business' : subscription?.tier === 'pro' ? 'Pro' : (language === 'ar' ? 'الباقة المجانية' : 'Starter Free'))}
                   </span>
                 </div>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
