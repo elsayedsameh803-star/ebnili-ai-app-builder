@@ -1683,7 +1683,7 @@ async function findAccountByEmail(email: string): Promise<DbAccount | null> {
   const normalized = normalizeEmail(email);
   if (!normalized) return null;
   const rows = await dbRequest<DbAccount[]>(ACCOUNTS_TABLE, {
-    query: { select: ACCOUNT_QUOTA_COLUMNS, account_email: `eq.${normalized}`, limit: "1" },
+    query: { select: ACCOUNT_QUOTA_COLUMNS, email: `eq.${normalized}`, limit: "1" },
   });
   return rows.ok && Array.isArray(rows.data) && rows.data[0] ? rows.data[0] : null;
 }
