@@ -76,53 +76,53 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     id: 'pro',
     nameAr: 'باقة المحترفين (Pro)',
     nameEn: 'Professional Pro',
-    taglineAr: 'للمطورين وصنّاع المنتجات: ١٠٠ توليد يومياً و٣ مشاريع نشطة',
-    taglineEn: 'For developers and indie makers: 100 generations a day, 3 live projects',
+    taglineAr: 'للمطورين وصنّاع المنتجات: ١٥٠ توليد يومياً و٣ مشاريع نشطة',
+    taglineEn: 'For developers and indie makers: 150 generations a day, 3 live projects',
     priceMonthly: PRO_USD,
     priceYearly: PRO_USD_YEARLY,
     currency: 'USD',
     payEgpMonthly: egpAmount(PRO_USD),
     payEgpYearly: egpAmount(PRO_USD_YEARLY),
-    badgeAr: 'الأكثر طلباً 🔥',
-    badgeEn: 'Most Popular 🔥',
+    badgeAr: 'Pro',
+    badgeEn: 'Pro',
     isPopular: true,
     featuresAr: [
-      '١٥٠ أمراً أو تعديلاً بالذكاء الاصطناعي شهرياً — كل أمر = توليد أو تعديل',
+      '١٥٠ أمراً أو تعديلاً بالذكاء الاصطناعي يومياً — كل أمر = توليد أو تعديل',
       'تصدير كود المشروع بالكامل كملف ZIP نظيف جاهز للنشر (React + Tailwind)',
       'تعديل بصري مباشر على أي عنصر بنقرة زر (Visual Inspector Pro)',
       'ربط قواعد بيانات Supabase و PostgreSQL و APIs خارجية',
       'نشر مباشر على نطاق فرعي من إبنيلي + ٣ مشاريع نشطة',
       'أولوية في الطابور وسرعة استجابة أعلى',
-      'مؤشر usage يوضح كم أوامر متبقية لك هذا الشهر'
+      'مؤشر usage يوضح كم أوامر متبقية لك هذا اليوم'
     ],
     featuresEn: [
-      '150 AI commands or modifications per month — each action = one generation or edit',
+      '150 AI commands or modifications per day — each action = one generation or edit',
       'Full source code ZIP export ready for production (React & Tailwind)',
       'Advanced Visual Inspector: click & modify any element directly',
       'Connect Supabase, PostgreSQL schemas & external APIs',
       'Publish to a live Ebnili subdomain + 3 active projects',
       'Priority processing queue',
-      'Live usage meter showing your remaining actions this month'
+      'Live usage meter showing your remaining actions today'
     ],
-    limitsAr: '١٥٠ أمر/شهر · ٣ مشاريع',
-    limitsEn: '150 actions/month · 3 projects'
+    limitsAr: '١٥٠ أمر/يوم · ٣ مشاريع',
+    limitsEn: '150 actions/day · 3 projects'
   },
   {
     id: 'business',
     nameAr: 'باقة الأعمال والشركات',
     nameEn: 'Business & Agency',
-    taglineAr: 'للوكالات والفرق: مشاريع غير محدودة + نطاق مخصص + ٤٠٠ أمر شهرياً',
-    taglineEn: 'For agencies: unlimited projects, your own domain, 400 actions a month',
+    taglineAr: 'للوكالات والفرق: مشاريع غير محدودة + نطاق مخصص + ٤٠٠ أمر يومياً',
+    taglineEn: 'For agencies: unlimited projects, your own domain, 400 actions a day',
     priceMonthly: BUSINESS_USD,
     priceYearly: BUSINESS_USD_YEARLY,
     currency: 'USD',
     payEgpMonthly: egpAmount(BUSINESS_USD),
     payEgpYearly: egpAmount(BUSINESS_USD_YEARLY),
-    badgeAr: 'للوكالات والفرق',
-    badgeEn: 'Agencies',
+    badgeAr: 'Business',
+    badgeEn: 'Business',
     featuresAr: [
-      '٤٠٠ أمر أو تعديل بالذكاء الاصطناعي شهرياً — استوديو وكالة كامل',
-      'مشاريع غير محدودة (Pro: ٣ فقط) — عميل جديد = مشروع جديد بلا تكلفة',
+      '٤٠٠ أمر أو تعديل بالذكاء الاصطناعي يومياً — استوديو وكالة كامل',
+      'مشاريع غير محدودة',
       'نشر على نطاق مخصص باسم علامتك (قريباً — حالياً رابط /preview عام)',
       'تصدير White-label بدون أي شعار أو نسبة لإبنيلي',
       'وصول عبر API لأتمتة التوليد داخل أنظمة وكالتك (قريباً)',
@@ -130,16 +130,16 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       'فواتير ضريبية للشركات (VAT) عند الطلب'
     ],
     featuresEn: [
-      '400 AI commands or modifications per month — a full agency studio',
-      'Unlimited projects (Pro: only 3) — a new client costs you nothing extra',
+      '400 AI commands or modifications per day — a full agency studio',
+      'Unlimited projects',
       'Custom-domain publishing (coming soon — currently a public /preview link)',
       'White-label export: no watermark, no attribution to Ebnili',
       'API access for agency automation (coming soon)',
       'Highest priority queue + VIP support over WhatsApp',
       'Tax invoices (VAT) for registered businesses'
     ],
-    limitsAr: '٤٠٠ أمر/شهر · مشاريع + نطاق مخصص + API',
-    limitsEn: '400 actions/month · unlimited projects + custom domain + API'
+    limitsAr: '٤٠٠ أمر/يوم · مشاريع + نطاق مخصص + API',
+    limitsEn: '400 actions/day · unlimited projects + custom domain + API'
   }
 ];
 

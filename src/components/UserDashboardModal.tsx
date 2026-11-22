@@ -139,7 +139,11 @@ export const UserDashboardModal = ({
   const [loadingProject, setLoadingProject] = useState<boolean>(false);
 
   const activeSubscription = serverSubscription ?? subscription ?? null;
-  const tier = (quota?.tier || activeSubscription?.tier || 'free').toLowerCase();
+// Determine the effective tier: grant cookie > active subscription > fallback to free
+  const grantTier = quota?.tier; // This comes from /api/ai/quota which reads the grant cookie
+  const subscriptionTier = activeSubscription?.tier;
+  // Use grant tier if available, otherwise subscription tier, otherwise 'free'
+  const tier = (grantTier || subscriptionTier || 'free').toLowerCase();
   const tierMeta = TIER_LABEL[tier] ?? TIER_LABEL.free;
 
   /**
@@ -223,8 +227,10 @@ export const UserDashboardModal = ({
   if (!isOpen) return null;
 
   const used = quota?.used ?? 0;
-  const limit = quota?.limit ?? activeSubscription?.generationsLimitToday ?? 0;
-  const remaining = quota ? quota.remaining : Math.max(0, limit - used);
+// Use the quota's limit (from grant cookie) if available, 
+// otherwise fall back to activeSubscription's limit, then 0
+const limit = quota?.limit ?? activeSubscription?.generationsLimitToday ?? 0;
+const remaining = quota ? quota.remaining : Math.max(0, limit - used);
   const usedPct = percent(used, limit);
   const barTone =
     usedPct >= 100
