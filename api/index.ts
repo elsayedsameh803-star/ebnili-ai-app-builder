@@ -4580,7 +4580,7 @@ app.get("/api/auth/callback/supabase", async (req: AuthReq, res: AuthRes) => {
     const session = issueAuthSession(identity);
     if (!session) return fail("auth_secret_missing");
 
-    res.cookie(AUTH_COOKIE_NAME, session, authCookieOptions(AUTH_SESSION_TTL_MS));
+    res.cookie(AUTH_COOKIE_NAME, session, authCookieOptions(AUTH_SESSION_TTL_MS, req));
     return res.redirect(`${home}/?auth=success`);
   } catch (e) {
     console.error("supabase callback failed:", e instanceof Error ? e.message : String(e));
@@ -4627,7 +4627,7 @@ app.get("/api/auth/callback/:provider", async (req: AuthReq, res: AuthRes) => {
     const session = issueAuthSession(user);
     if (!session) return fail("auth_secret_missing");
 
-    res.cookie(AUTH_COOKIE_NAME, session, authCookieOptions(AUTH_SESSION_TTL_MS));
+    res.cookie(AUTH_COOKIE_NAME, session, authCookieOptions(AUTH_SESSION_TTL_MS, req));
     return res.redirect(`${home}/?auth=success`);
   } catch (e) {
     console.error("auth callback failed:", e instanceof Error ? e.message : String(e));
@@ -6085,3 +6085,4 @@ export default app;
 export function mountApi(): express.Express {
   return app;
 }
+
