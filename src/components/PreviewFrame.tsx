@@ -60,17 +60,11 @@ export const PreviewFrame = ({
       // ... rest of the message handling
     };
 
-    const iframeWindow = iframeRef.current?.contentWindow;
+    window.addEventListener('message', handleMessage);
 
-if (iframeWindow) {
-  iframeWindow.addEventListener('message', handleMessage);
-}
-
-return () => {
-  if (iframeWindow) {
-    iframeWindow.removeEventListener('message', handleMessage);
-  }
-};s
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
   }, []);
 
   return (
