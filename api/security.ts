@@ -76,7 +76,7 @@ export const TIER_DAILY_QUOTA = {
   // FREE is a preview-only trial: 3 AI actions a day, each action being one
   // command OR one modification. Deliberately stingy so a free account cannot
   // meaningfully burn the paid Gemini key, and so upgrading is the obvious move.
-  free: 0,
+  free: AI_ABSOLUTE_DAILY_CEILING,
   // Pro: 150 AI actions per month (a command OR a modification each).
   pro: 150,
   // Business: 400 AI actions per month — a full agency studio.

@@ -329,17 +329,19 @@ app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
 
   let entitled: { email: string; tier: "pro" | "business"; expiresAt: string } | null = null;
 
-  if (session && supabaseConfig().dbConfigured) {
+  const normEmail336 = normalizeEmail(session?.email);
+  if (session && normEmail336 && supabaseConfig().dbConfigured) {
     const result = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
       query: {
         select: "account_email,plan_id,billing_cycle,reviewed_at",
-        account_email: `eq.${session.email.toLowerCase()}`,
+        account_email: `eq.${normEmail336}`,
         status: "eq.confirmed",
         order: "reviewed_at.desc",
         limit: "1",
       },
     });
-    const row = result.ok && Array.isArray(result.data) ? result.data[0] : undefined;
+    const rawRow336 = result.ok && Array.isArray(result.data) ? result.data[0] : undefined;
+    const row = rawRow336 && normalizeEmail(rawRow336.account_email) === normEmail336 ? rawRow336 : undefined;
     if (row) {
       // A yearly plan runs a year; a monthly one a month — measured from when the
       // owner confirmed it, not from submission, so a delayed review is not
@@ -1741,16 +1743,21 @@ async function readAiAllowance(req: Request): Promise<{ used: number; limit: num
     const tier: Tier = session ? tierOf(tagged.accountTier) : "free";
     return { used: 0, limit: dailyQuotaFor(tier), tier };
   }
-  const account = session.email ? await findAccountByEmail(session.email) : null;
-  const resolvedTier = await resolveEffectiveTier(req, session, account);
-  const tier: Tier = resolvedTier !== "free" ? resolvedTier : (account ? tierOf(account.tier) : tierOf(tagged.accountTier));
-        account_email: `eq.${session.email.toLowerCase()}`,
-        status: "eq.confirmed",
-        order: "reviewed_at.desc",
-        limit: "1",
-      },
-    });
-    const payRow = payRes.ok && Array.isArray(payRes.data) ? payRes.data[0] : undefined;
+  const normEmail1747 = normalizeEmail(session?.email);
+  const account = normEmail1747 ? await findAccountByEmail(normEmail1747) : null;
+  const payRes = normEmail1747
+    ? await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+        query: {
+          select: "account_email,plan_id,billing_cycle,reviewed_at",
+          account_email: `eq.${normEmail1747}`,
+          status: "eq.confirmed",
+          order: "reviewed_at.desc",
+          limit: "1",
+        },
+      })
+    : null;
+  const rawPayRow1747 = payRes && payRes.ok && Array.isArray(payRes.data) ? payRes.data[0] : undefined;
+  const payRow = rawPayRow1747 && normalizeEmail(rawPayRow1747.account_email) === normEmail1747 ? rawPayRow1747 : undefined;
     if (payRow) {
       const start = Date.parse(payRow.reviewed_at ?? "") || Date.now();
       const ttl = payRow.billing_cycle === "yearly" ? 365 * 24 * 60 * 60 * 1000 : 31 * 24 * 60 * 60 * 1000;
@@ -1758,7 +1765,6 @@ async function readAiAllowance(req: Request): Promise<{ used: number; limit: num
         paidTierFromDb = payRow.plan_id === "business" ? "business" : "pro";
       }
     }
-  }
   const resolvedAccountTier = account ? tierOf(account.tier) : tierOf(tagged.accountTier);
   const tier: Tier = hasValidGrant ? tierOf(grant!.tier) : paidTierFromDb ? paidTierFromDb : resolvedAccountTier;
   const limit = dailyQuotaFor(tier);
@@ -1883,7 +1889,7 @@ app.get("/api/protection/status", async (req: Request, res: Response) => {
       fingerprint_hash: fingerprintHash,
       // Only fill the account when we actually have one; a null would otherwise
       // erase the address of a device that previously signed in.
-      ...(session ? { account_email: session.email.toLowerCase() } : {}),
+      ...(normalizeEmail(session?.email) ? { account_email: normalizeEmail(session?.email) } : {}),
       screen: String(req.query.screen ?? "").slice(0, 40) || null,
       timezone: String(req.query.timezone ?? "").slice(0, 60) || null,
       platform: String(req.query.platform ?? "").slice(0, 40) || null,
@@ -3262,10 +3268,10 @@ app.post("/api/admin/transaction/update-status", requireAdmin, async (req: Reque
         query: { account_email: `ilike.${normalizeEmail(payment.account_email)}` },
         body: JSON.stringify({
           tier: newTier,
-          freeGenerationsUsed: 0,
-          // Keep the existing freeGenerationsLimit or set a reasonable default;
+          free_used: 0,
+          // The protection endpoint determines the effective limit from the tier.
           // the protection endpoint will use the tier to determine the effective limit.
-          freeGenerationsLimit: newTier === "business" ? 400 : 5,
+          free_limit: newTier === "business" ? 400 : 5,
         }),
       }).catch(() => {
         // Device table may be empty for new accounts; not fatal.
@@ -4005,17 +4011,19 @@ function toPublicAccount(row: DbAccount) {
 async function resolveEffectiveTier(req: Request, session: AuthUser | null, existingAccount?: DbAccount | null): Promise<Tier> {
   if (isOwnerAccount(session)) return "business";
   if (isStaffEmail(session?.email)) return "business";
-  if (session?.email && supabaseConfig().dbConfigured) {
+  const normEmail4012 = normalizeEmail(session?.email);
+  if (normEmail4012 && supabaseConfig().dbConfigured) {
     const payRes = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
       query: {
         select: "account_email,plan_id,billing_cycle,reviewed_at",
-        account_email: `eq.${session.email.toLowerCase()}`,
+          account_email: `eq.${normEmail4012}`,
         status: "eq.confirmed",
         order: "reviewed_at.desc",
         limit: "1",
       },
     });
-    const payRow = payRes.ok && Array.isArray(payRes.data) ? payRes.data[0] : undefined;
+    const rawPayRow4012 = payRes.ok && Array.isArray(payRes.data) ? payRes.data[0] : undefined;
+    const payRow = rawPayRow4012 && normalizeEmail(rawPayRow4012.account_email) === normEmail4012 ? rawPayRow4012 : undefined;
     if (payRow) {
       const start = Date.parse(payRow.reviewed_at ?? "") || Date.now();
       const ttl = payRow.billing_cycle === "yearly" ? 365 * 24 * 60 * 60 * 1000 : 31 * 24 * 60 * 60 * 1000;
