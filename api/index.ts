@@ -3348,7 +3348,7 @@ const AUTH_STATE_COOKIE = "ebnili_oauth_state";
 /** PKCE verifier/challenge, so the browser never carries a usable credential. */
 const AUTH_PKCE_COOKIE = "ebnili_oauth_pkce";
 const AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const AUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const AUTH_STATE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
  * Canonical attributes for every auth cookie.
@@ -3373,7 +3373,7 @@ function authCookieOptions(maxAgeMs?: number, req?: Request) {
 
 /** Delete an auth cookie with exactly the attributes it was created with. */
 function clearAuthCookie(res: Response, name: string, req?: Request): void {
-  res.clearCookie(name, authCookieOptions(undefined, req));
+  res.clearCookie(name, { httpOnly: true, secure: cookiesAreSecure(req), sameSite: "lax", path: "/" });
 }
 
 /**
