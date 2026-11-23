@@ -205,16 +205,6 @@ export default function App() {
   const [showWelcomeGift, setShowWelcomeGift] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
 
-  // Show welcome gift for free users after registration
-  useEffect(() => {
-    if (authUser && subscription?.tier === 'free') {
-      const shown = localStorage.getItem('welcomeGiftShown');
-      if (!shown) {
-        setShowWelcomeGift(true);
-        localStorage.setItem('welcomeGiftShown', 'true');
-      }
-    }
-  }, [authUser, subscription]);
   const [showGeminiStudio, setShowGeminiStudio] = useState<boolean>(false);
 
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
@@ -508,6 +498,17 @@ const githubError = params.get('github_error');
     priorityAiModel: false,
     transactions: [],
   });
+
+  // Show welcome gift for free users after registration
+  useEffect(() => {
+    if (authUser && subscription?.tier === 'free') {
+      const shown = localStorage.getItem('welcomeGiftShown');
+      if (!shown) {
+        setShowWelcomeGift(true);
+        localStorage.setItem('welcomeGiftShown', 'true');
+      }
+    }
+  }, [authUser, subscription]);
 
   // Fetch current subscription from backend.
   // NON-CRITICAL: this only decorates the UI (badge, limits), so it is bounded
