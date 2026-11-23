@@ -1,7 +1,8 @@
 import { motion, useScroll, useTransform } from 'motion/react';
 import { Sparkles, ArrowRight, Shield, Zap, Layers, Globe, BarChart3 } from 'lucide-react';
 import { SiteFooter } from './SiteFooter';
-import { PricingPage } from './PricingPage';
+import { lazy, Suspense } from 'react';
+const PricingPage = lazy(() => import('./PricingPage').then((m) => ({ default: m.PricingPage })));
 
 interface LandingPageProps {
   initialLanguage: 'ar' | 'en';
@@ -287,7 +288,11 @@ export const LandingPage = ({ initialLanguage, onNavigateToLogin, onNavigateToPr
             animate={{ opacity: 1, y: 0 }}
             transition={fadeUp.transition}
           >
-            <PricingPage language={isAr ? 'ar' : 'en'} onNavigate={onNavigate} />
+            <Suspense fallback={null}>
+  <Suspense fallback={null}>
+  <PricingPage language={isAr ? 'ar' : 'en'} onNavigate={onNavigate} />
+</Suspense>
+</Suspense>
           </motion.div>
         </div>
       </section>

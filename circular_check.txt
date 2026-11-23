@@ -1,0 +1,166 @@
+
+src\components\AdminDashboardModal.tsx:1:import { useState, useEffect, useCallback, useMemo } from 'react';
+src\components\AdminDashboardModal.tsx:2:import { 
+src\components\AdminDashboardModal.tsx:24:import { Language, PlatformRealStats, AdminSettings, DeviceProtectionInfo, OrangeCashTransaction, AdminDelegate } from '../types';
+src\components\AdminDashboardModal.tsx:25:import { useModalAccessibility } from './useModalAccessibility';
+src\components\AuthGate.tsx:1:import { useEffect, useState } from 'react';
+src\components\AuthGate.tsx:2:import { Loader2, ShieldCheck, AlertCircle, Sparkles, ServerCrash, RotateCw } from 'lucide-react';
+src\components\AuthGate.tsx:3:import { GoogleIcon, GitHubIcon } from './AuthIcons';
+src\components\AuthGate.tsx:4:import { fetchAuthCallbacks, getAuthErrorMessage, probeAuthRuntime, startOAuth } from '../lib/auth';
+src\components\AuthGate.tsx:5:import { SiteFooter } from './SiteFooter';
+src\components\AuthGate.tsx:6:import type { AuthProviderId, AuthProviderInfo, Language } from '../types';
+src\components\AuthIcons.tsx:1:import React from 'react';
+src\components\AuthModal.tsx:1:import { useEffect, useState } from 'react';
+src\components\AuthModal.tsx:2:import { Loader2, LogIn, X, ShieldCheck, AlertCircle } from 'lucide-react';
+src\components\AuthModal.tsx:3:import { GoogleIcon, GitHubIcon } from './AuthIcons';
+src\components\AuthModal.tsx:4:import { fetchAuthProviders, getAuthErrorMessage, startOAuth } from '../lib/auth';
+src\components\AuthModal.tsx:5:import type { AuthProviderId, AuthProviderInfo, Language } from '../types';
+src\components\ChatSidebar.tsx:1:import { useState, useRef, useEffect } from 'react';
+src\components\ChatSidebar.tsx:2:import type { FormEvent, KeyboardEvent } from 'react';
+src\components\ChatSidebar.tsx:3:import {
+src\components\ChatSidebar.tsx:22:import { ChatMessage, VersionHistoryItem, Language, UserSubscription } from '../types';
+src\components\ChatSidebar.tsx:23:import { QUICK_PROMPT_SUGGESTIONS } from '../data/templates';
+src\components\ChatSidebar.tsx:24:import { ORANGE_CASH_WALLET_NUMBER, ORANGE_CASH_USSD_CODE } from '../data/plans';
+src\components\CodeEditor.tsx:1:import { useState } from 'react';
+src\components\CodeEditor.tsx:2:import {
+src\components\CodeEditor.tsx:8:import { Language } from '../types';
+src\components\CommandTerminal.tsx:1:import { useMemo, useState } from 'react';
+src\components\CommandTerminal.tsx:2:import { Copy, Check, Terminal, AlertTriangle, Github, Server, Package, GitBranch, Rocket, ChevronDown, ChevronRight } from 'lucide-react';
+src\components\CommandTerminal.tsx:3:import type { Language } from '../types';
+src\components\CommandTerminal.tsx:4:import { buildCommandBundle, safeRepoSlug, type CommandEntry, type DeployProvider } from '../lib/commands';
+src\components\CustomDomainCard.tsx:1:import { useCallback, useState } from 'react';
+src\components\CustomDomainCard.tsx:2:import { Copy, CheckCircle2, AlertTriangle, Loader2, Globe } from 'lucide-react';
+src\components\CustomDomainCard.tsx:3:import type { RemoteProject } from '../lib/projects';
+src\components\DeployModal.tsx:1:import { useState, useCallback, useEffect } from 'react';
+src\components\DeployModal.tsx:2:import { Share2, X, Check, Copy, QrCode, Globe, Info, Terminal, Rocket, Loader2, AlertCircle } from 'lucide-react';
+src\components\DeployModal.tsx:3:import { QRCodeSVG } from 'qrcode.react';
+src\components\DeployModal.tsx:4:import { Language } from '../types';
+src\components\DeployModal.tsx:5:import { useModalAccessibility } from './useModalAccessibility';
+src\components\DeployModal.tsx:6:import { CommandTerminal } from './CommandTerminal';
+src\components\DeployModal.tsx:7:import type { PublishState } from '../lib/projects';
+src\components\DeployModal.tsx:8:import { DbUnavailableError, fetchPublishState, publishRemoteProject, unpublishRemoteProject } from '../lib/projects';
+src\components\ErrorBoundary.tsx:1:import { Component } from 'react';
+src\components\ErrorBoundary.tsx:2:import type { ErrorInfo, ReactNode } from 'react';
+src\components\ErrorBoundary.tsx:3:import { AlertTriangle, RotateCcw } from 'lucide-react';
+src\components\ExportModal.tsx:1:import { useState, useCallback } from 'react';
+src\components\ExportModal.tsx:2:import { Download, X, Copy, Check, FileArchive, Code, AlertCircle, Lock, Sparkles } from 'lucide-react';
+src\components\ExportModal.tsx:3:import JSZip from 'jszip';
+src\components\ExportModal.tsx:4:import { Language, SubscriptionTier } from '../types';
+src\components\ExportModal.tsx:5:import { buildProjectExport } from '../lib/auth';
+src\components\ExportModal.tsx:6:import { exportProjectFiles } from '../lib/projects';
+src\components\ExportModal.tsx:7:import { useModalAccessibility } from './useModalAccessibility';
+src\components\ExportModal.tsx:8:import { CommandTerminal } from './CommandTerminal';
+src\components\GeminiStudioModal.tsx:1:import { useState, useCallback } from 'react';
+src\components\GeminiStudioModal.tsx:2:import {
+src\components\GeminiStudioModal.tsx:17:import { Language, UserSubscription } from '../types';
+src\components\GeminiStudioModal.tsx:18:import { STARTER_TEMPLATES } from '../data/templates';
+src\components\GeminiStudioModal.tsx:19:import { ORANGE_CASH_WALLET_NUMBER } from '../data/plans';
+src\components\GeminiStudioModal.tsx:20:import { useModalAccessibility } from './useModalAccessibility';
+src\components\GitHubImporter.tsx:1:import { useCallback, useEffect, useState } from 'react';
+src\components\GitHubImporter.tsx:2:import { Github, Loader2 } from 'lucide-react';
+src\components\GitHubImportModal.tsx:1:import { GitHubImporter } from './GitHubImporter';
+src\components\GitHubImportModal.tsx:2:import type { AuthUser, Language } from '../types';
+src\components\InfoPagesModal.tsx:1:import { useState, useCallback, type ReactNode } from 'react';
+src\components\InfoPagesModal.tsx:2:import {
+src\components\InfoPagesModal.tsx:5:import { Language } from '../types';
+src\components\InfoPagesModal.tsx:6:import { useModalAccessibility } from './useModalAccessibility';
+src\components\IntegrationsModal.tsx:1:import { useState, useCallback } from 'react';
+src\components\IntegrationsModal.tsx:2:import { Database, X, Github, CreditCard } from 'lucide-react';
+src\components\IntegrationsModal.tsx:3:import { Language } from '../types';
+src\components\IntegrationsModal.tsx:4:import { useModalAccessibility } from './useModalAccessibility';
+src\components\InteractiveTerminal.tsx:1:import { useEffect, useRef, useState } from 'react';
+src\components\InteractiveTerminal.tsx:2:import { Terminal as TerminalIcon, X } from 'lucide-react';
+src\components\InteractiveTerminal.tsx:3:import type { Language } from '../types';
+src\components\LandingPage.tsx:1:import { motion, useScroll, useTransform } from 'motion/react';
+src\components\LandingPage.tsx:2:import { Sparkles, ArrowRight, Shield, Zap, Layers, Globe, BarChart3 } from 'lucide-react';
+src\components\LandingPage.tsx:3:import { SiteFooter } from './SiteFooter';
+src\components\LandingPage.tsx:4:import { lazy, Suspense } from 'react';
+src\components\NewProjectHero.tsx:1:import { useState, useRef } from 'react';
+src\components\NewProjectHero.tsx:2:import type { FormEvent } from 'react';
+src\components\NewProjectHero.tsx:3:import {
+src\components\NewProjectHero.tsx:17:import { StarterTemplate, Language, UserSubscription } from '../types';
+src\components\NewProjectHero.tsx:18:import { STARTER_TEMPLATES } from '../data/templates';
+src\components\NewProjectHero.tsx:19:import { SiteFooter } from './SiteFooter';
+src\components\NotFoundPage.tsx:1:import { Home, Search, Sparkles, ArrowLeft, ArrowRight } from 'lucide-react';
+src\components\NotFoundPage.tsx:2:import type { Language } from '../types';
+src\components\PayPage.tsx:1:import { useState, useEffect, useRef } from 'react';
+src\components\PayPage.tsx:2:import { Check, Copy, Upload, ShieldCheck, ArrowLeft, ArrowRight, Loader2, FileText, X } from 'lucide-react';
+src\components\PayPage.tsx:3:import { QRCodeSVG } from 'qrcode.react';
+src\components\PayPage.tsx:4:import { Language, BillingCycle, SubscriptionTier } from '../types';
+src\components\PayPage.tsx:5:import {
+src\components\PayPage.tsx:11:import { getDeviceFingerprint } from '../utils/fingerprint';
+src\components\PreviewFrame.tsx:1:import { useRef, useEffect, useState, useMemo } from 'react';
+src\components\PreviewFrame.tsx:2:import { RotateCw, ExternalLink, Terminal, MousePointerClick, Crown, X } from 'lucide-react';
+src\components\PreviewFrame.tsx:3:import { DeviceMode, ConsoleLog, SelectedElementInfo, Language } from '../types';
+src\components\PreviewFrame.tsx:4:import { stripCodeForDisplay } from '../lib/projects';
+src\components\PreviewFrame.tsx:5:import { PublishButton } from './PublishButton';
+src\components\PricingPage.tsx:1:import { useState, useEffect } from 'react';
+src\components\PricingPage.tsx:2:import { ArrowLeft, ArrowRight, Check, Sparkles } from 'lucide-react';
+src\components\PricingPage.tsx:3:import { Language, BillingCycle } from '../types';
+src\components\PricingPage.tsx:4:import { SUBSCRIPTION_PLANS, USD_TO_EGP } from '../data/plans';
+src\components\PublishButton.tsx:1:import { useCallback, useEffect, useState } from 'react';
+src\components\PublishButton.tsx:2:import { Rocket, Check, Copy, ExternalLink, Loader2, AlertCircle, Globe } from 'lucide-react';
+src\components\PublishButton.tsx:3:import type { Language } from '../types';
+src\components\PublishButton.tsx:4:import type { PublishState } from '../lib/projects';
+src\components\PublishButton.tsx:5:import { DbUnavailableError, fetchPublishState, publishRemoteProject } from '../lib/projects';
+src\components\ReviewsPage.tsx:1:import { useState } from 'react';
+src\components\ReviewsPage.tsx:2:import { Star, Send, User } from 'lucide-react';
+src\components\SiteFooter.tsx:1:import { Phone, Mail, ShieldCheck, Scale, Info, type LucideIcon } from 'lucide-react';
+src\components\SiteFooter.tsx:2:import type { Language } from '../types';
+src\components\SiteSettings.tsx:1:import { useCallback, useEffect, useState } from 'react';
+src\components\SiteSettings.tsx:2:import {
+src\components\SiteSettings.tsx:12:import type { RemoteProject } from '../lib/projects';
+src\components\SiteSettings.tsx:13:import { DbUnavailableError, fetchRemoteProject, fetchRemoteProjects } from '../lib/projects';
+src\components\SiteSettings.tsx:14:import { CustomDomainCard } from './CustomDomainCard';
+src\components\StudioSidebar.tsx:26:import { useState, useEffect, useRef, type ReactNode } from 'react';
+src\components\StudioSidebar.tsx:27:import {
+src\components\StudioSidebar.tsx:58:import { DeviceMode, ViewMode, Language, UserSubscription, AuthUser } from '../types';
+src\components\StudioSidebar.tsx:59:import { isOwnerAccount, isAdminAccount } from '../lib/auth';
+src\components\StudioSidebar.tsx:60:import type { ProjectSummary } from '../lib/projects';
+src\components\SubscriptionModal.tsx:1:import { useState, useCallback } from 'react';
+src\components\SubscriptionModal.tsx:2:import type { FormEvent, ChangeEvent } from 'react';
+src\components\SubscriptionModal.tsx:3:import {
+src\components\SubscriptionModal.tsx:21:import { Language, UserSubscription, SubscriptionTier, BillingCycle } from '../types';
+src\components\SubscriptionModal.tsx:22:import { 
+src\components\SubscriptionModal.tsx:29:import { getDeviceFingerprint } from '../utils/fingerprint';
+src\components\SubscriptionModal.tsx:30:import { useModalAccessibility } from './useModalAccessibility';
+src\components\useModalAccessibility.ts:1:import { useEffect, useRef } from 'react';
+src\components\UserDashboardModal.tsx:1:import { useCallback, useEffect, useState } from 'react';
+src\components\UserDashboardModal.tsx:2:import {
+src\components\UserDashboardModal.tsx:15:import type { AuthUser, Language, UserSubscription } from '../types';
+src\components\UserDashboardModal.tsx:16:import type { ProjectSummary, RemoteProject } from '../lib/projects';
+src\components\UserDashboardModal.tsx:17:import { fetchRemoteProject } from '../lib/projects';
+src\components\UserDashboardModal.tsx:18:import { CustomDomainCard } from './CustomDomainCard';
+src\components\VisualInspectorModal.tsx:1:import { useState, useCallback } from 'react';
+src\components\VisualInspectorModal.tsx:2:import type { FormEvent } from 'react';
+src\components\VisualInspectorModal.tsx:3:import { MousePointerClick, Sparkles, X, Palette, Type, Trash2 } from 'lucide-react';
+src\components\VisualInspectorModal.tsx:4:import { SelectedElementInfo, Language } from '../types';
+src\components\VisualInspectorModal.tsx:5:import { useModalAccessibility } from './useModalAccessibility';
+src\components\WhatsAppSupportButton.tsx:1:import { useState } from 'react';
+src\components\WhatsAppSupportButton.tsx:2:import { MessageCircle, X, ExternalLink, ShieldCheck } from 'lucide-react';
+src\components\WhatsAppSupportButton.tsx:3:import { Language } from '../types';
+src\data\plans.ts:9:import type { SubscriptionPlan } from '../types.ts';
+src\data\templates.ts:5:import type { StarterTemplate } from '../types.ts';
+src\lib\auth.ts:1:import type { AuthProviderId, AuthProviderInfo, AuthUser } from '../types';
+src\lib\projects.ts:1:import type { AppProject, ChatMessage } from '../types';
+src\App.tsx:1:import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+src\App.tsx:2:import { Sparkles, Menu, Eye, Code2 } from 'lucide-react';
+src\App.tsx:3:import { StudioSidebar } from './components/StudioSidebar';
+src\App.tsx:4:import { ChatSidebar } from './components/ChatSidebar';
+src\App.tsx:5:import { PreviewFrame } from './components/PreviewFrame';
+src\App.tsx:6:import { CodeEditor } from './components/CodeEditor';
+src\App.tsx:7:import { NewProjectHero } from './components/NewProjectHero';
+src\App.tsx:8:import { InteractiveTerminal } from './components/InteractiveTerminal';
+src\App.tsx:9:import { LandingPage } from './components/LandingPage';
+src\App.tsx:10:import { InfoPagesModal, type PageKey } from './components/InfoPagesModal';
+src\App.tsx:11:import { getDeviceFingerprint } from './utils/fingerprint';
+src\App.tsx:12:import { fetchCurrentUser, logout as authLogout, isOwnerAccount, isAdminAccount, fetchWithTimeout } from './lib/auth';
+src\App.tsx:13:import { registerDevice } from './lib/protection';
+src\App.tsx:14:import {
+src\App.tsx:56:import { 
+src\main.tsx:1:import { StrictMode } from 'react';
+src\main.tsx:2:import { createRoot } from 'react-dom/client';
+src\main.tsx:3:import App from './App.tsx';
+src\main.tsx:4:import { ErrorBoundary } from './components/ErrorBoundary';
+src\main.tsx:5:import './index.css';
+

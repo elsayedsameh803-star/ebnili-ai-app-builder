@@ -1,0 +1,21 @@
+
+src\components\LandingPage.tsx:5:const PricingPage = lazy(() => import('./PricingPage').then((m) => ({ default: m.PricingPage })));
+src\components\LandingPage.tsx:13:  /** Passed straight to the embedded PricingPage (App's navigate()). */
+src\components\LandingPage.tsx:293:  <PricingPage language={isAr ? 'ar' : 'en'} onNavigate={onNavigate} />
+src\components\PricingPage.tsx:13:export const PricingPage = ({ language, onNavigate }: { language: Language; onNavigate: (p: string) => void }) => {
+src\App.tsx:39:const VisualInspectorModal = lazy(() => import('./components/VisualInspectorModal').then((m) => ({ default: m.VisualInspectorModal })));
+src\App.tsx:40:const ExportModal = lazy(() => import('./components/ExportModal').then((m) => ({ default: m.ExportModal })));
+src\App.tsx:41:const DeployModal = lazy(() => import('./components/DeployModal').then((m) => ({ default: m.DeployModal })));
+src\App.tsx:42:const IntegrationsModal = lazy(() => import('./components/IntegrationsModal').then((m) => ({ default: m.IntegrationsModal })));
+src\App.tsx:43:const SubscriptionModal = lazy(() => import('./components/SubscriptionModal').then((m) => ({ default: m.SubscriptionModal })));
+src\App.tsx:44:const GeminiStudioModal = lazy(() => import('./components/GeminiStudioModal').then((m) => ({ default: m.GeminiStudioModal })));
+src\App.tsx:46:const AdminDashboardModal = lazy(() => import('./components/AdminDashboardModal').then((m) => ({ default: m.AdminDashboardModal })));
+src\App.tsx:49:const UserDashboardModal = lazy(() => import('./components/UserDashboardModal').then((m) => ({ default: m.UserDashboardModal })));
+src\App.tsx:50:const SiteSettings = lazy(() => import('./components/SiteSettings').then((m) => ({ default: m.SiteSettings })));
+src\App.tsx:51:const PricingPage = lazy(() => import('./components/PricingPage').then((m) => ({ default: m.PricingPage })));
+src\App.tsx:52:const PayPage = lazy(() => import('./components/PayPage').then((m) => ({ default: m.PayPage })));
+src\App.tsx:53:const AuthModal = lazy(() => import('./components/AuthModal').then((m) => ({ default: m.AuthModal })));
+src\App.tsx:54:const GitHubImportModal = lazy(() => import('./components/GitHubImportModal').then((m) => ({ default: m.GitHubImportModal })));
+src\App.tsx:55:const NotFoundPage = lazy(() => import('./components/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
+src\App.tsx:1507:          <PricingPage language={language} onNavigate={navigate} />
+
