@@ -491,7 +491,7 @@ const githubError = params.get('github_error');
     planName: '',
     status: 'active',
     generationsUsedToday: 1,
-    generationsLimitToday: 2,
+    generationsLimitToday: 3,
     canExportZip: false,
     canDeployCustomDomain: false,
     canUseVisualInspector: true,

@@ -1,0 +1,1737 @@
+========== EBNILY DIAGNOSTIC REPORT ==========
+
+========== 1 - SUBSCRIPTIONS SIDEBAR ==========
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 11
+  //    and crashes cold starts (ERR_MODULE_NOT_FOUND / FUNCTION_INVOCATION_FAILED).
+  //  • So this function implements the HTTP API surface the frontend needs
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:9://    and crashes cold starts (ERR_MODULE_NOT_FOUND / FUNCTION_INVOCATION_FAILED).
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:10://  • So this function implements the HTTP API surface the frontend needs
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:11://    (health, subscriptions, admin read paths, Gemini AI proxy) directly on
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:12://    Express, with in-memory state. Writes are best-effort (serverless FS is
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:13://    ephemeral) and never throw.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:14:// ─────────────────────────────────────────────────────────────────────────────.Line)
+  //    Express, with in-memory state. Writes are best-effort (serverless FS is
+  //    ephemeral) and never throw.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 94
+   * safe: it only verifies an HMAC, it does not grant anything.
+   *
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:92: * safe: it only verifies an HMAC, it does not grant anything.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:93: *
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:94: * SUBSCRIPTION CHECK (staff bypass)
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:95: * ---------------------------------
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:96: * This also resolves the account's entitlement once per request and stores it on
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:97: * the request. A staff account is short-circuited to Business HERE — before any.Line)
+   * ---------------------------------
+   * This also resolves the account's entitlement once per request and stores it on
+   * the request. A staff account is short-circuited to Business HERE — before any
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 99
+   * the request. A staff account is short-circuited to Business HERE — before any
+   * handler looks at a grant cookie, a payment row, or a client-supplied field —
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:98: * handler looks at a grant cookie, a payment row, or a client-supplied field —
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:99: * which is what "bypass the subscription check" means in practice: there is no
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:100: * remaining check downstream that could downgrade them.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:101: *.Line)
+   * remaining check downstream that could downgrade them.
+   *
+   * `subscriptionBypassed` is deliberately NOT an authorisation flag. It records
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 102
+   * remaining check downstream that could downgrade them.
+   *
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:102: * `subscriptionBypassed` is deliberately NOT an authorisation flag. It records.Line)
+   * that this account skips the subscription gate, nothing more; admin access is
+   * decided separately by `requireAdmin`.
+   */
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 103
+   *
+   * `subscriptionBypassed` is deliberately NOT an authorisation flag. It records
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:103: * that this account skips the subscription gate, nothing more; admin access is
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:104: * decided separately by `requireAdmin`.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:105: */
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:106:app.use((req: Request, _res: Response, next: NextFunction) => {.Line)
+   * decided separately by `requireAdmin`.
+   */
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 108
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    const session = readAuthSession(req as AuthReq);
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:107:  const session = readAuthSession(req as AuthReq);
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:108:  const tagged = req as Request & { authEmail?: string; accountTier?: Tier; subscriptionBypassed?: boolean };
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:109:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:110:  if (session?.email) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:111:    tagged.authEmail = session.email;.Line)
+  
+    if (session?.email) {
+      tagged.authEmail = session.email;
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 115
+      if (staff) {
+        tagged.accountTier = "business";
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:113:    if (staff) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:114:      tagged.accountTier = "business";
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:115:      tagged.subscriptionBypassed = true;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:116:    }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:117:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:118:  next();.Line)
+      }
+    }
+    next();
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 185
+  });
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:183:});
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:184:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:185:// ── Subscriptions: stateless defaults (client holds source of truth) ─────────.Line)
+  const DEFAULT_SUBSCRIPTION = {
+    tier: "free",
+    status: "active",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 186
+  
+  // ── Subscriptions: stateless defaults (client holds source of truth) ─────────
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:186:const DEFAULT_SUBSCRIPTION = {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:187:  tier: "free",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:188:  status: "active",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:189:  planName: "Starter Free",.Line)
+    tier: "free",
+    status: "active",
+    planName: "Starter Free",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 199
+  };
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:197:};
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:198:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:199:// ── Subscriptions: accept BOTH endpoints the frontend uses ──────────────────
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:200:// SECURITY: a paid tier is NEVER granted by a public request. Historically.Line)
+  // SECURITY: a paid tier is NEVER granted by a public request. Historically
+  // POST /api/subscriptions/auto-verify returned an activated Pro/Business
+  // object to ANY caller, so one curl call upgraded an account forever. Payment
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 201
+  // ── Subscriptions: accept BOTH endpoints the frontend uses ──────────────────
+  // SECURITY: a paid tier is NEVER granted by a public request. Historically
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:201:// POST /api/subscriptions/auto-verify returned an activated Pro/Business
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:202:// object to ANY caller, so one curl call upgraded an account forever. Payment
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:203:// now only creates a PENDING review request; the tier is granted exclusively by
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:204:// the owner through POST /api/admin/transaction/update-status (admin session.Line)
+  // object to ANY caller, so one curl call upgraded an account forever. Payment
+  // now only creates a PENDING review request; the tier is granted exclusively by
+  // the owner through POST /api/admin/transaction/update-status (admin session
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 231
+  // ── Staff accounts: automatic Business tier ───────────────────────────────────
+  // The list, the matcher and the reasoning all live in `api/security.ts`:
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:229:// ── Staff accounts: automatic Business tier ───────────────────────────────────
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:230:// The list, the matcher and the reasoning all live in `api/security.ts`:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:231://   • `isStaffEmail()` decides the SUBSCRIPTION tier only.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:232://   • It is deliberately NOT wired into `isOwnerAccount()`, so these addresses get
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:233://     the paid features but never the admin console. Admin remains
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:234://     `OWNER_EMAIL` + the PIN — two independent factors..Line)
+  //   • It is deliberately NOT wired into `isOwnerAccount()`, so these addresses get
+  //     the paid features but never the admin console. Admin remains
+  //     `OWNER_EMAIL` + the PIN — two independent factors.
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 238
+  
+  /**
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:236:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:237:/**
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:238: * Contact details the checkout and subscription screens read.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:239: *
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:240: * WHY: these were hard-coded in every response. The owner can change the wallet
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:241: * number from the dashboard, so the API must serve the stored value — otherwise.Line)
+   *
+   * WHY: these were hard-coded in every response. The owner can change the wallet
+   * number from the dashboard, so the API must serve the stored value — otherwise
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 249
+  }
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:247:}
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:248:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:249:function subscriptionPayload(grant: { email: string; tier: "pro" | "business"; expiresAt: string } | null) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:250:  const paid = grant
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:251:    ? {.Line)
+    const paid = grant
+      ? {
+          ...DEFAULT_SUBSCRIPTION,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 252
+    const paid = grant
+      ? {
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:252:        ...DEFAULT_SUBSCRIPTION,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:253:        tier: grant.tier,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:254:        status: "active" as const,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:255:        planName: grant.tier === "business" ? "Business" : "Pro",.Line)
+          tier: grant.tier,
+          status: "active" as const,
+          planName: grant.tier === "business" ? "Business" : "Pro",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 265
+          expiresAt: grant.expiresAt,
+        }
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:263:        expiresAt: grant.expiresAt,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:264:      }
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:265:    : { ...DEFAULT_SUBSCRIPTION };
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:266:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:267:  return {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:268:    success: true,.Line)
+  
+    return {
+      success: true,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 269
+    return {
+      success: true,
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:269:    subscription: { ...paid, activatedAt: new Date().toISOString() },
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:270:    orangeWalletNumber: "01207782741",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:271:    supportWhatsappNumber: "01207782741",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:272:  };.Line)
+      orangeWalletNumber: "01207782741",
+      supportWhatsappNumber: "01207782741",
+    };
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 276
+  
+  /** Highest tier shape, used for the owner account. */
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:274:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:275:/** Highest tier shape, used for the owner account. */
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:276:function ownerSubscription() {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:277:  return {.Line)
+    return {
+      ...DEFAULT_SUBSCRIPTION,
+      tier: "business" as const,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 278
+  function ownerSubscription() {
+    return {
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:278:    ...DEFAULT_SUBSCRIPTION,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:279:    tier: "business" as const,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:280:    status: "active" as const,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:281:    planName: "Business",.Line)
+      tier: "business" as const,
+      status: "active" as const,
+      planName: "Business",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 301
+   * payment for this account is therefore the source of truth, on every device.
+   */
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:299: * payment for this account is therefore the source of truth, on every device.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:300: */
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:301:app.get("/api/subscriptions/current", async (req: Request, res: Response) => {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:302:  const session = readAuthSession(req);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:303:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:304:  // The owner account needs no grant record..Line)
+    const session = readAuthSession(req);
+  
+    // The owner account needs no grant record.
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 308
+      res.json({
+        success: true,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:306:    res.json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:307:      success: true,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:308:      subscription: ownerSubscription(),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:309:      ...contactDefaults(),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:310:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:311:    return;.Line)
+        ...contactDefaults(),
+      });
+      return;
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 320
+    //
+    // `status: "active"` comes from the shape itself: there is no expiry and no
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:318:  //
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:319:  // `status: "active"` comes from the shape itself: there is no expiry and no
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:320:  // pending review, so the subscription is active from the moment they land.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:321:  if (isStaffEmail(session?.email)) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:322:    res.json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:323:      success: true,.Line)
+    if (isStaffEmail(session?.email)) {
+      res.json({
+        success: true,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 324
+      res.json({
+        success: true,
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:324:      subscription: ownerSubscription(),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:325:      ...contactDefaults(),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:326:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:327:    return;.Line)
+        ...contactDefaults(),
+      });
+      return;
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 336
+      const result = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+        query: {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:334:    const result = await dbRequest<DbPayment[]>(PAYMENTS_TABLE, {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:335:      query: {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:336:        select: "account_email,plan_id,billing_cycle,reviewed_at",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:337:        account_email: `eq.${normEmail336}`,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:338:        status: "eq.confirmed",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:339:        order: "reviewed_at.desc",.Line)
+          account_email: `eq.${normEmail336}`,
+          status: "eq.confirmed",
+          order: "reviewed_at.desc",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 350
+        // silently eaten out of the customer's paid time.
+        const start = Date.parse(row.reviewed_at ?? "") || Date.now();
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:348:      // silently eaten out of the customer's paid time.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:349:      const start = Date.parse(row.reviewed_at ?? "") || Date.now();
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:350:      const ttl = row.billing_cycle === "yearly" ? 365 * 24 * 60 * 60 * 1000 : 31 * 24 * 60 * 60 * 1000;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:351:      if (Date.now() <= start + ttl) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:352:        entitled = {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:353:          email: row.account_email,.Line)
+        if (Date.now() <= start + ttl) {
+          entitled = {
+            email: row.account_email,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 368
+    }
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:366:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:367:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:368:  res.json(subscriptionPayload(entitled));
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:369:});
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:370:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:371:/** Only a logged-in (Google/GitHub) user may open a payment review request. */.Line)
+  });
+  
+  /** Only a logged-in (Google/GitHub) user may open a payment review request. */
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 376
+    res.status(401).json({
+      success: false,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:374:  res.status(401).json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:375:    success: false,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:376:    error: "يجب تسجيل الدخول أولاً لإرسال طلب الاشتراك.",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:377:  });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:378:  return false;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:379:}.Line)
+    });
+    return false;
+  }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 383
+  /**
+   * Records a payment claim for MANUAL review and returns the unchanged FREE
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:381:/**
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:382: * Records a payment claim for MANUAL review and returns the unchanged FREE
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:383: * subscription. Never returns a paid tier: activation is an owner-only action.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:384: *
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:385: * WHY the write matters: this used to acknowledge the request and persist
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:386: * NOTHING ("no state is persisted"). The dashboard's transaction list therefore.Line)
+   *
+   * WHY the write matters: this used to acknowledge the request and persist
+   * NOTHING ("no state is persisted"). The dashboard's transaction list therefore
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 401
+    const planId = String(body.planId || "pro");
+    if (planId !== "pro" && planId !== "business") {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:399:  const planId = String(body.planId || "pro");
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:400:  if (planId !== "pro" && planId !== "business") {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:401:    res.status(400).json({ success: false, error: "خطة الاشتراك غير صحيحة." });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:402:    return;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:403:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:404:.Line)
+      return;
+    }
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 433
+        code: "DB_UNAVAILABLE",
+        error:
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:431:      code: "DB_UNAVAILABLE",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:432:      error:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:433:        "تعذّر تسجيل طلب الاشتراك على الخادم. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:434:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:435:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:436:.Line)
+      });
+    }
+  
+
+========== 2 - PREVIEW HTML LABEL ==========
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json | LINE: 1786
+      },
+      {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1784:    },
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1785:    {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1786:      "name": "escape-html",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1787:      "type": "transitive",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1788:      "scopes": [
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1789:        "prod".Line)
+        "type": "transitive",
+        "scopes": [
+          "prod"
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 502
+   * while `safeExtension()` quietly renamed the object to `.bin`. That combination
+   * is a stored-content-type spoof: a caller could post
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:500: * while `safeExtension()` quietly renamed the object to `.bin`. That combination
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:501: * is a stored-content-type spoof: a caller could post
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:502: * `fileType: "text/html"` with an HTML body and the bucket would hold an object
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:503: * that browsers treat as a page. On a public bucket that is stored XSS, and on a
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:504: * bucket fronted by a static host it is a phishing page on the owner's domain.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:505: *.Line)
+   * that browsers treat as a page. On a public bucket that is stored XSS, and on a
+   * bucket fronted by a static host it is a phishing page on the owner's domain.
+   *
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 677
+        // The list view does not need the full document body.
+        code: "",
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:675:      // The list view does not need the full document body.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:676:      code: "",
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:677:      preview: (row.code || "")
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:678:        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:679:        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:680:        .replace(/<[^>]+>/g, " ").Line)
+          .replace(/<script[\s\S]*?<\/script>/gi, " ")
+          .replace(/<style[\s\S]*?<\/style>/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 817
+    for (const [path, content] of Object.entries(files)) {
+      // Only the executable page carries a mark; README/JSON/SQL are not documents.
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:815:  for (const [path, content] of Object.entries(files)) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:816:    // Only the executable page carries a mark; README/JSON/SQL are not documents.
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:817:    marked[path] = /\.html?$/i.test(path) ? applyWatermark(String(content), tier) : String(content);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:818:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:819:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:820:  res.json({.Line)
+    }
+  
+    res.json({
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1143
+  /** Extensions worth opening in an editor; the rest would only bloat the project. */
+  const IMPORTABLE_EXT =
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1141:/** Extensions worth opening in an editor; the rest would only bloat the project. */
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1142:const IMPORTABLE_EXT =
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1143:  /\.(html?|css|jsx?|tsx?|mjs|cjs|json|md|svg|txt|vue|svelte|astro|ya?ml|toml|sql|sh)$/i;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1144:/** Never read these: dependencies, build output, secrets and heavy lockfiles. */
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1145:const SKIP_PATH =
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1146:  /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.vercel|vendor|coverage|\.cache|__pycache__)(\/|$)/i;.Line)
+  /** Never read these: dependencies, build output, secrets and heavy lockfiles. */
+  const SKIP_PATH =
+    /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.vercel|vendor|coverage|\.cache|__pycache__)(\/|$)/i;
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1212
+  
+      // Open the entry point first when there is one.
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1210:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1211:    // Open the entry point first when there is one.
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1212:    const entry = wanted.find((n) => /(^|\/)(index|app|main)\.(html?|jsx?|tsx?)$/i.test(n.path));
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1213:    const picked = (entry ? [entry, ...wanted.filter((n) => n !== entry)] : wanted).slice(
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1214:      0,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1215:      MAX_IMPORT_FILES,.Line)
+      const picked = (entry ? [entry, ...wanted.filter((n) => n !== entry)] : wanted).slice(
+        0,
+        MAX_IMPORT_FILES,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2528
+  async function notifyNewAdmin(email: string): Promise<boolean> {
+    const apiKey = (process.env.RESEND_API_KEY ?? "").trim();
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2526:async function notifyNewAdmin(email: string): Promise<boolean> {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2527:  const apiKey = (process.env.RESEND_API_KEY ?? "").trim();
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2528:  // `SITE_URL` keeps the button correct on preview deployments; the production
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2529:  // domain is the fallback so the mail is never sent with a dead link.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2530:  const siteUrl = (process.env.SITE_URL ?? "https://ebnily.vercel.app").trim().replace(/\/+$/, "");
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2531:  const from = (process.env.MAIL_FROM ?? "Ebnili <onboarding@resend.dev>").trim();.Line)
+    // domain is the fallback so the mail is never sent with a dead link.
+    const siteUrl = (process.env.SITE_URL ?? "https://ebnily.vercel.app").trim().replace(/\/+$/, "");
+    const from = (process.env.MAIL_FROM ?? "Ebnili <onboarding@resend.dev>").trim();
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2539
+  
+    const subject = "إبنيلي | أصبحت مسؤولاً في لوحة التحكم";
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2537:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2538:  const subject = "إبنيلي | أصبحت مسؤولاً في لوحة التحكم";
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2539:  const html = `<!doctype html>.Line)
+  <html dir="rtl" lang="ar"><head><meta charset="utf-8"></head>
+  <body style="margin:0;padding:24px;background:#0b1120;font-family:'Segoe UI',Tahoma,Arial,sans-serif;color:#e2e8f0">
+    <div style="max-width:560px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:32px">
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2540
+    const subject = "إبنيلي | أصبحت مسؤولاً في لوحة التحكم";
+    const html = `<!doctype html>
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2540:<html dir="rtl" lang="ar"><head><meta charset="utf-8"></head>
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2541:<body style="margin:0;padding:24px;background:#0b1120;font-family:'Segoe UI',Tahoma,Arial,sans-serif;color:#e2e8f0">
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2542:  <div style="max-width:560px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:32px">
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2543:    <h1 style="margin:0 0 16px;font-size:20px;color:#fb7185">تم إعطاؤك صلاحية مسؤول</h1>.Line)
+  <body style="margin:0;padding:24px;background:#0b1120;font-family:'Segoe UI',Tahoma,Arial,sans-serif;color:#e2e8f0">
+    <div style="max-width:560px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:32px">
+      <h1 style="margin:0 0 16px;font-size:20px;color:#fb7185">تم إعطاؤك صلاحية مسؤول</h1>
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2546
+      <p style="margin:0 0 12px;font-size:15px;line-height:1.8">مرحباً،</p>
+      <p style="margin:0 0 12px;font-size:15px;line-height:1.8">
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2544:    <p style="margin:0 0 12px;font-size:15px;line-height:1.8">مرحباً،</p>
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2545:    <p style="margin:0 0 12px;font-size:15px;line-height:1.8">
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2546:      أصبح بريدك <strong dir="ltr">${escapeHtml(email)}</strong> مسؤولاً في لوحة تحكم إبنيلي،
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2547:      ويمكنك الآن إدارة الاشتراكات والمستخدمين والأجهزة وتفعيل الخطط المدفوعة.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2548:    </p>
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2549:    <p style="margin:0 0 24px;font-size:14px;line-height:1.8;color:#94a3b8">.Line)
+        ويمكنك الآن إدارة الاشتراكات والمستخدمين والأجهزة وتفعيل الخطط المدفوعة.
+      </p>
+      <p style="margin:0 0 24px;font-size:14px;line-height:1.8;color:#94a3b8">
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2557
+      </a>
+      <p style="margin:16px 0 0;font-size:13px;line-height:1.8;color:#94a3b8">
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2555:    </a>
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2556:    <p style="margin:16px 0 0;font-size:13px;line-height:1.8;color:#94a3b8">
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2557:      الطريقة: افتح الرابط، سجّل الدخول بحساب <strong dir="ltr">${escapeHtml(email)}</strong>،
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2558:      ثم أدخل رمز دخول لوحة الإدارة (الـ PIN) الذي أرسله لك صاحب الموقع.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2559:    </p>.Line)
+        ثم أدخل رمز دخول لوحة الإدارة (الـ PIN) الذي أرسله لك صاحب الموقع.
+      </p>
+      <p style="margin:24px 0 0;font-size:12px;color:#64748b">هذه رسالة آلية من ${escapeHtml(from)}.</p>
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2560
+        ثم أدخل رمز دخول لوحة الإدارة (الـ PIN) الذي أرسله لك صاحب الموقع.
+      </p>
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2560:    <p style="margin:24px 0 0;font-size:12px;color:#64748b">هذه رسالة آلية من ${escapeHtml(from)}.</p>
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2561:  </div>.Line)
+    </div>
+  </body></html>`;
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2562
+      <p style="margin:24px 0 0;font-size:12px;color:#64748b">هذه رسالة آلية من ${escapeHtml(from)}.</p>
+    </div>
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2562:</body></html>`;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2563:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2564:  try {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2565:    const res = await fetch("https://api.resend.com/emails", {.Line)
+  
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2568
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2566:      method: "POST",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2567:      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2568:      body: JSON.stringify({ from, to: [email], subject, html }),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2569:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2570:    if (!res.ok) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2571:      // Logged, never surfaced as a failure: the grant itself succeeded..Line)
+      });
+      if (!res.ok) {
+        // Logged, never surfaced as a failure: the grant itself succeeded.
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2582
+  }
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2580:}
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2581:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2582:/** Minimal HTML escape — the recipient address is interpolated into the body. */.Line)
+  function escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2583
+  
+  /** Minimal HTML escape — the recipient address is interpolated into the body. */
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2583:function escapeHtml(value: string): string {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2584:  return value
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2585:    .replace(/&/g, "&amp;")
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2586:    .replace(/</g, "&lt;").Line)
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4072
+  // Watermark — enforced on the server, inside the exported artifact itself
+  // ═══════════════════════════════════════════════════════════════════════════
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4070:// Watermark — enforced on the server, inside the exported artifact itself
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4071:// ═══════════════════════════════════════════════════════════════════════════
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4072:// WHY: the watermark used to be a badge in the preview UI only. Removing a
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4073:// `div` in devtools (or exporting straight from the browser bundle) removed it,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4074:// and the ZIP never had one at all. Now the decision is made here, from the
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4075:// server-resolved tier, and the mark is written INTO the exported files — so.Line)
+  // `div` in devtools (or exporting straight from the browser bundle) removed it,
+  // and the ZIP never had one at all. Now the decision is made here, from the
+  // server-resolved tier, and the mark is written INTO the exported files — so
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4088
+    "border:1px solid rgba(148,163,184,.35);pointer-events:none;user-select:none";
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4086:  "border:1px solid rgba(148,163,184,.35);pointer-events:none;user-select:none";
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4087:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4088:const WATERMARK_HTML = `<div id="ebnili-watermark" data-ebnili-watermark="1" style="${WATERMARK_STYLE}">⚡ صنع بواسطة إبنيلي AI</div>`;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4089:.Line)
+  
+  function hasWatermark(html: string): boolean {
+    return /data-ebnili-watermark/i.test(html) || /id="ebnili-watermark"/i.test(html);
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4090
+  const WATERMARK_HTML = `<div id="ebnili-watermark" data-ebnili-watermark="1" style="${WATERMARK_STYLE}">⚡ صنع بواسطة إبنيلي AI</div>`;
+  
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4090:function hasWatermark(html: string): boolean {.Line)
+    return /data-ebnili-watermark/i.test(html) || /id="ebnili-watermark"/i.test(html);
+  }
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4091
+  
+  function hasWatermark(html: string): boolean {
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4091:  return /data-ebnili-watermark/i.test(html) || /id="ebnili-watermark"/i.test(html);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4092:}
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4093:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4094:/**.Line)
+  }
+  
+  /**
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4098
+   * Free → marked. Paid → any existing mark is stripped.
+   */
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4096: * Free → marked. Paid → any existing mark is stripped.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4097: */
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4098:function applyWatermark(html: string, tier: Tier): string {.Line)
+    const doc = String(html ?? "");
+    if (!doc) return doc;
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4099
+   */
+  function applyWatermark(html: string, tier: Tier): string {
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4099:  const doc = String(html ?? "");
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4100:  if (!doc) return doc;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4101:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4102:  if (isPaidTier(tier)) {.Line)
+    if (!doc) return doc;
+  
+    if (isPaidTier(tier)) {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4113
+    if (hasWatermark(doc)) return doc; // already marked — do not stack
+    // Before </body> when there is one, otherwise append.
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4111:  if (hasWatermark(doc)) return doc; // already marked — do not stack
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4112:  // Before </body> when there is one, otherwise append.
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4113:  if (/<\/body>/i.test(doc)) return doc.replace(/<\/body>/i, `${WATERMARK_HTML}\n</body>`);.Line)
+    return `${doc}\n${WATERMARK_HTML}`;
+  }
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4114
+    // Before </body> when there is one, otherwise append.
+    if (/<\/body>/i.test(doc)) return doc.replace(/<\/body>/i, `${WATERMARK_HTML}\n</body>`);
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4114:  return `${doc}\n${WATERMARK_HTML}`;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4115:}
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4116:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4117:function base64url(buf: Buffer): string {.Line)
+  }
+  
+  function base64url(buf: Buffer): string {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4696
+  const STUDIO_ATTEMPT_TIMEOUT_MS = 120_000; // Extended from 45s to 120s (2min) per attempt
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4694:const STUDIO_ATTEMPT_TIMEOUT_MS = 120_000; // Extended from 45s to 120s (2min) per attempt
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4695:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4696:// Never let a document get cut off mid-file: an unterminated HTML string used.Line)
+  // to reach the browser as a blank/broken preview. A high ceiling keeps big
+  // specifications in one answer instead of silently truncating them.
+  const DOCUMENT_MAX_OUTPUT_TOKENS = 65_536;
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4697
+  
+  // Never let a document get cut off mid-file: an unterminated HTML string used
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4697:// to reach the browser as a blank/broken preview. A high ceiling keeps big
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4698:// specifications in one answer instead of silently truncating them.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4699:const DOCUMENT_MAX_OUTPUT_TOKENS = 65_536;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4700:.Line)
+  // specifications in one answer instead of silently truncating them.
+  const DOCUMENT_MAX_OUTPUT_TOKENS = 65_536;
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4883
+  
+  const GENERATE_SYSTEM = `You are Ebnily AI, an elite full-stack engineer and UI/UX designer generating single-file interactive web applications that run directly inside an iframe.
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4881:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4882:const GENERATE_SYSTEM = `You are Ebnily AI, an elite full-stack engineer and UI/UX designer generating single-file interactive web applications that run directly inside an iframe.
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4883:Return ONLY one complete standalone HTML document beginning with <!DOCTYPE html> and ending with </html>, including the Tailwind CDN (https://cdn.tailwindcss.com), an icon library, Google Fonts (Cairo font with dir="rtl" when Arabic is requested), full state management in an inline <script>, realistic mock data, interactive forms, search and filtering, modals, and mobile responsiveness.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4884:No markdown fences, no JSON, no prose before or after the document.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4885:${CORE_RULES}`;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4886:.Line)
+  No markdown fences, no JSON, no prose before or after the document.
+  ${CORE_RULES}`;
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4887
+  ${CORE_RULES}`;
+  
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4887:const REFINE_SYSTEM = `You are Ebnily AI's precision code refiner. Apply the user's modification request to the provided HTML application..Line)
+  Return ONLY the complete updated HTML document (from <!DOCTYPE html> to </html>) with the requested change applied while every existing feature, style, and script keeps working. No explanations, no diffs, no markdown fences, no prose.
+  ${CORE_RULES}`;
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4888
+  
+  const REFINE_SYSTEM = `You are Ebnily AI's precision code refiner. Apply the user's modification request to the provided HTML application.
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4888:Return ONLY the complete updated HTML document (from <!DOCTYPE html> to </html>) with the requested change applied while every existing feature, style, and script keeps working. No explanations, no diffs, no markdown fences, no prose.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4889:${CORE_RULES}`;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4890:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4891:// ── JSON extraction for the studio endpoints ────────────────────────────────.Line)
+  ${CORE_RULES}`;
+  
+  // ── JSON extraction for the studio endpoints ────────────────────────────────
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 4970
+    if (fence && typeof fence[1] === "string") t = fence[1].trim();
+    // Cut any prose written before the document.
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4968:  if (fence && typeof fence[1] === "string") t = fence[1].trim();
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4969:  // Cut any prose written before the document.
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4970:  const start = t.search(/<!DOCTYPE html>/i);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:4971:  if (start > 0) t = t.slice(start);.Line)
+    if (start > 0) t = t.slice(start);
+    // Cut fences/commentary written after </html> (tail prose, change lists…).
+    const end = t.search(/<\/html>/i);
+
+========== 3 - UNABLE MESSAGE AND HIDE ==========
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json | LINE: 1346
+      },
+      {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1344:    },
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1345:    {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1346:      "name": "@types/http-errors",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1347:      "type": "transitive",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1348:      "scopes": [
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1349:        "dev".Line)
+        "type": "transitive",
+        "scopes": [
+          "dev"
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json | LINE: 1756
+      },
+      {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1754:    },
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1755:    {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1756:      "name": "es-errors",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1757:      "type": "transitive",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1758:      "scopes": [
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:1759:        "prod".Line)
+        "type": "transitive",
+        "scopes": [
+          "prod"
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json | LINE: 2036
+      },
+      {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:2034:    },
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:2035:    {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:2036:      "name": "http-errors",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:2037:      "type": "transitive",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:2038:      "scopes": [
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\node\package-manifest.json:2039:        "prod".Line)
+        "type": "transitive",
+        "scopes": [
+          "prod"
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json | LINE: 54
+          "outputDirectory": "dist"
+        },
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:52:        "outputDirectory": "dist"
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:53:      },
+> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:54:      "error": {.Line)
+          "name": "Error",
+          "stack": "Error: spawn cmd.exe ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)\n    at onErrorNT (node:internal/child_process:507:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)",
+          "message": "spawn cmd.exe ENOENT",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json | LINE: 55
+        },
+        "error": {
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:55:        "name": "Error",.Line)
+          "stack": "Error: spawn cmd.exe ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)\n    at onErrorNT (node:internal/child_process:507:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)",
+          "message": "spawn cmd.exe ENOENT",
+          "errno": -4058,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json | LINE: 56
+        "error": {
+          "name": "Error",
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:56:        "stack": "Error: spawn cmd.exe ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)\n    at onErrorNT (node:internal/child_process:507:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:57:        "message": "spawn cmd.exe ENOENT",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:58:        "errno": -4058,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:59:        "code": "ENOENT",.Line)
+          "message": "spawn cmd.exe ENOENT",
+          "errno": -4058,
+          "code": "ENOENT",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json | LINE: 69
+      }
+    ],
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:67:    }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:68:  ],
+> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:69:  "error": {.Line)
+      "name": "Error",
+      "stack": "Error: spawn cmd.exe ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)\n    at onErrorNT (node:internal/child_process:507:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)",
+      "message": "spawn cmd.exe ENOENT",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json | LINE: 70
+    ],
+    "error": {
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:70:    "name": "Error",.Line)
+      "stack": "Error: spawn cmd.exe ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)\n    at onErrorNT (node:internal/child_process:507:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)",
+      "message": "spawn cmd.exe ENOENT",
+      "errno": -4058,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json | LINE: 71
+    "error": {
+      "name": "Error",
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:71:    "stack": "Error: spawn cmd.exe ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)\n    at onErrorNT (node:internal/child_process:507:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:72:    "message": "spawn cmd.exe ENOENT",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:73:    "errno": -4058,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:74:    "code": "ENOENT",.Line)
+      "message": "spawn cmd.exe ENOENT",
+      "errno": -4058,
+      "code": "ENOENT",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 376
+    res.status(401).json({
+      success: false,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:374:  res.status(401).json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:375:    success: false,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:376:    error: "يجب تسجيل الدخول أولاً لإرسال طلب الاشتراك.",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:377:  });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:378:  return false;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:379:}.Line)
+    });
+    return false;
+  }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 401
+    const planId = String(body.planId || "pro");
+    if (planId !== "pro" && planId !== "business") {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:399:  const planId = String(body.planId || "pro");
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:400:  if (planId !== "pro" && planId !== "business") {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:401:    res.status(400).json({ success: false, error: "خطة الاشتراك غير صحيحة." });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:402:    return;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:403:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:404:.Line)
+      return;
+    }
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 410
+      res.status(400).json({
+        success: false,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:408:    res.status(400).json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:409:      success: false,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:410:      error: "يرجى كتابة رقم هاتف محفظة أورانج كاش المحول منها بشكل صحيح.",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:411:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:412:    return;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:413:  }.Line)
+      });
+      return;
+    }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 417
+      res.status(400).json({
+        success: false,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:415:    res.status(400).json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:416:      success: false,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:417:      error: "يرجى كتابة الرقم المرجعي أو كود العملية من رسالة التحويل.",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:418:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:419:    return;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:420:  }.Line)
+      });
+      return;
+    }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 432
+        success: false,
+        code: "DB_UNAVAILABLE",
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:430:      success: false,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:431:      code: "DB_UNAVAILABLE",
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:432:      error:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:433:        "تعذّر تسجيل طلب الاشتراك على الخادم. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:434:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:435:  }.Line)
+          "تعذّر تسجيل طلب الاشتراك على الخادم. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+      });
+    }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 456
+  
+    if (!write.ok) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:454:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:455:  if (!write.ok) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:456:    console.error("payment row insert failed:", write.error);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:457:    return res.status(503).json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:458:      success: false,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:459:      code: "PAYMENT_STORE_FAILED",.Line)
+      return res.status(503).json({
+        success: false,
+        code: "PAYMENT_STORE_FAILED",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 460
+        success: false,
+        code: "PAYMENT_STORE_FAILED",
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:460:      error:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:461:        "تعذّر حفظ طلب الاشتراك الآن. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:462:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:463:  }.Line)
+          "تعذّر حفظ طلب الاشتراك الآن. أرسل تفاصيل التحويل على واتساب 01207782741 وسنتولى التفعيل فوراً.",
+      });
+    }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 484
+  // neither is present the endpoint says so plainly instead of pretending the file
+  // was saved — a payment receipt that silently disappears is worse than a clear
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:482:// neither is present the endpoint says so plainly instead of pretending the file
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:483:// was saved — a payment receipt that silently disappears is worse than a clear
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:484:// error, and the customer keeps the WhatsApp fallback either way.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:485:const RECEIPT_BUCKET = process.env.PAYMENTS_BUCKET || "payments-pending";
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:486:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:487:function receiptStorageConfigured(): boolean {.Line)
+  const RECEIPT_BUCKET = process.env.PAYMENTS_BUCKET || "payments-pending";
+  
+  function receiptStorageConfigured(): boolean {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 571
+        return true;
+      }
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:569:      return true;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:570:    }
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:571:    console.error("storagePut supabase:", res.status, await res.text().catch(() => ""));
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:572:    return false;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:573:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:574:.Line)
+      return false;
+    }
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 670
+    }).then((result) => {
+      if (!result.ok) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:668:  }).then((result) => {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:669:    if (!result.ok) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:670:      console.error("projects list failed:", result.error);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:671:      return dbUnavailable(res);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:672:    }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:673:    const rows = (result.data ?? []).map((row) => ({.Line)
+        return dbUnavailable(res);
+      }
+      const rows = (result.data ?? []).map((row) => ({
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 705
+    }).then((result) => {
+      if (!result.ok) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:703:  }).then((result) => {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:704:    if (!result.ok) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:705:      console.error("project read failed:", result.error);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:706:      return dbUnavailable(res);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:707:    }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:708:    const row = result.data?.[0];.Line)
+        return dbUnavailable(res);
+      }
+      const row = result.data?.[0];
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 740
+    }).then((result) => {
+      if (!result.ok || !result.data?.[0]) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:738:  }).then((result) => {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:739:    if (!result.ok || !result.data?.[0]) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:740:      console.error("project create failed:", result.error);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:741:      return dbUnavailable(res);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:742:    }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:743:    res.status(201).json({ success: true, project: toPublicProject(result.data[0]) });.Line)
+        return dbUnavailable(res);
+      }
+      res.status(201).json({ success: true, project: toPublicProject(result.data[0]) });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 769
+    }).then((result) => {
+      if (!result.ok) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:767:  }).then((result) => {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:768:    if (!result.ok) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:769:      console.error("project update failed:", result.error);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:770:      return dbUnavailable(res);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:771:    }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:772:    const row = result.data?.[0];.Line)
+        return dbUnavailable(res);
+      }
+      const row = result.data?.[0];
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 789
+    }).then((result) => {
+      if (!result.ok) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:787:  }).then((result) => {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:788:    if (!result.ok) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:789:      console.error("project delete failed:", result.error);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:790:      return dbUnavailable(res);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:791:    }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:792:    if (!result.data || result.data.length === 0) {.Line)
+        return dbUnavailable(res);
+      }
+      if (!result.data || result.data.length === 0) {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 868
+   * one: a token signed with a guessable key is a GitHub access token handed to
+   * anyone who reads the bundle. The caller is already inside a try/catch that
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:866: * one: a token signed with a guessable key is a GitHub access token handed to
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:867: * anyone who reads the bundle. The caller is already inside a try/catch that
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:868: * answers with a JSON error, so a throw is the honest outcome here.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:869: */
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:870:function issueGhToken(value: StoredGhToken): string {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:871:  const payload = Buffer.from(JSON.stringify(value), "utf-8").toString("base64url");.Line)
+   */
+  function issueGhToken(value: StoredGhToken): string {
+    const payload = Buffer.from(JSON.stringify(value), "utf-8").toString("base64url");
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1000
+    const session = readAuthSession(req);
+    const home = requestBaseUrl(req);
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:998:  const session = readAuthSession(req);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:999:  const home = requestBaseUrl(req);
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1000:  const fail = (reason: string) => res.redirect(`${home}/?github_error=${encodeURIComponent(reason)}`);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1001:  if (!session) return fail("auth_required");
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1002:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1003:  // Single-use nonce, as with the sign-in callback — a replayed callback URL.Line)
+    if (!session) return fail("auth_required");
+  
+    // Single-use nonce, as with the sign-in callback — a replayed callback URL
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1029
+        }).toString(),
+      });
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1027:      }).toString(),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1028:    });
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1029:    const tokenJson = (await tokenRes.json()) as { access_token?: string; error?: string };.Line)
+      if (!tokenJson.access_token) return fail(tokenJson.error || "exchange_failed");
+  
+      // Read the login so the UI can confirm which account was linked.
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1030
+      });
+      const tokenJson = (await tokenRes.json()) as { access_token?: string; error?: string };
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1030:    if (!tokenJson.access_token) return fail(tokenJson.error || "exchange_failed");
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1031:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1032:    // Read the login so the UI can confirm which account was linked.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1033:    let login = "";.Line)
+  
+      // Read the login so the UI can confirm which account was linked.
+      let login = "";
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1062
+      return res.redirect(`${home}/?github=linked`);
+    } catch (e) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1060:    return res.redirect(`${home}/?github=linked`);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1061:  } catch (e) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1062:    console.error("github link failed:", e instanceof Error ? e.message : String(e));
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1063:    return fail("exchange_failed");
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1064:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1065:});.Line)
+      return fail("exchange_failed");
+    }
+  });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1136
+      });
+    } catch (e) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1134:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1135:  } catch (e) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1136:    console.error("github repos failed:", e instanceof Error ? e.message : String(e));.Line)
+      res.status(502).json({ success: false, message: "تعذر الوصول إلى GitHub." });
+    }
+  });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1137
+    } catch (e) {
+      console.error("github repos failed:", e instanceof Error ? e.message : String(e));
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1137:    res.status(502).json({ success: false, message: "تعذر الوصول إلى GitHub." });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1138:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1139:});
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1140:.Line)
+    }
+  });
+  
+
+========== 4 - TERMINAL REAL EXECUTION ==========
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json | LINE: 56
+        "error": {
+          "name": "Error",
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:54:      "error": {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:55:        "name": "Error",
+> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:56:        "stack": "Error: spawn cmd.exe ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)\n    at onErrorNT (node:internal/child_process:507:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:57:        "message": "spawn cmd.exe ENOENT",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:58:        "errno": -4058,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:59:        "code": "ENOENT",.Line)
+          "message": "spawn cmd.exe ENOENT",
+          "errno": -4058,
+          "code": "ENOENT",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json | LINE: 71
+    "error": {
+      "name": "Error",
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:69:  "error": {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:70:    "name": "Error",
+> C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:71:    "stack": "Error: spawn cmd.exe ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)\n    at onErrorNT (node:internal/child_process:507:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:72:    "message": "spawn cmd.exe ENOENT",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:73:    "errno": -4058,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\.vercel\output\builds.json:74:    "code": "ENOENT",.Line)
+      "message": "spawn cmd.exe ENOENT",
+      "errno": -4058,
+      "code": "ENOENT",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx | LINE: 40
+      switch (head) {
+        case 'help':
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:38:    switch (head) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:39:      case 'help':
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:40:        push({ text: ar ? 'الأوامر: help, clear, status, git add ., git commit -m "...", git push, vercel --prod, ebnily generate "اسم", exit' : 'Commands: help, clear, status, git add ., git commit -m "...", git push, vercel --prod, ebnily generate "name", exit', kind: 'output' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:41:        break;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:42:      case 'clear':
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:43:        setLines([]);.Line)
+          break;
+        case 'clear':
+          setLines([]);
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx | LINE: 70
+          break;
+        case 'git':
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:68:        break;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:69:      case 'git':
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:70:        if (arg === 'add .') push({ text: ar ? 'تم تجهيز الملفات (snapshot staged)' : 'Files staged (snapshot)', kind: 'output' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:71:        else if (arg.startsWith('commit -m')) push({ text: ar ? `تم الـ commit: ${arg.replace('commit -m', '').trim()}` : `Committed: ${arg.replace('commit -m', '').trim()}`, kind: 'output' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:72:        else if (arg === 'push') push({ text: ar ? 'تم رفع اللقطة إلى GitHub (محاكاة)' : 'Pushed snapshot to GitHub (simulated)', kind: 'output' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:73:        else push({ text: ar ? 'أمر git غير معروف' : 'Unknown git command', kind: 'error' });.Line)
+          else if (arg.startsWith('commit -m')) push({ text: ar ? `تم الـ commit: ${arg.replace('commit -m', '').trim()}` : `Committed: ${arg.replace('commit -m', '').trim()}`, kind: 'output' });
+          else if (arg === 'push') push({ text: ar ? 'تم رفع اللقطة إلى GitHub (محاكاة)' : 'Pushed snapshot to GitHub (simulated)', kind: 'output' });
+          else push({ text: ar ? 'أمر git غير معروف' : 'Unknown git command', kind: 'error' });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx | LINE: 77
+        case 'vercel':
+          if (arg === '--prod') push({ text: ar ? 'تم نشر الموقع إلى Vercel (محاكاة)' : 'Deployed to Vercel (simulated)', kind: 'output' });
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:75:      case 'vercel':
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:76:        if (arg === '--prod') push({ text: ar ? 'تم نشر الموقع إلى Vercel (محاكاة)' : 'Deployed to Vercel (simulated)', kind: 'output' });
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:77:        else push({ text: ar ? 'استخدم: vercel --prod' : 'Use: vercel --prod', kind: 'error' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:78:        break;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:79:      case 'ebnily':
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:80:        if (arg.startsWith('generate')) push({ text: ar ? `تم توليد مكون: ${arg.replace('generate', '').trim()}` : `Generated component: ${arg.replace('generate', '').trim()}`, kind: 'output' });.Line)
+          break;
+        case 'ebnily':
+          if (arg.startsWith('generate')) push({ text: ar ? `تم توليد مكون: ${arg.replace('generate', '').trim()}` : `Generated component: ${arg.replace('generate', '').trim()}`, kind: 'output' });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx | LINE: 87
+          push({ text: ar ? '  help - عرض هذه القائمة' : '  help - show this list', kind: 'info' });
+          push({ text: ar ? '  status - فحص حالة السيرفر' : '  status - check server status', kind: 'info' });
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:85:        push({ text: ar ? '  help - عرض هذه القائمة' : '  help - show this list', kind: 'info' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:86:        push({ text: ar ? '  status - فحص حالة السيرفر' : '  status - check server status', kind: 'info' });
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:87:        push({ text: ar ? '  git add . - أضافة الملفات' : '  git add . - stage files', kind: 'info' });.Line)
+          push({ text: ar ? '  git commit -m "msg" - إجراء commit' : '  git commit -m "msg" - commit changes', kind: 'info' });
+          push({ text: ar ? '  git push - رفع إلى GitHub' : '  git push - push to GitHub', kind: 'info' });
+          push({ text: ar ? '  vercel --prod - نشر إلى Vercel' : '  vercel --prod - deploy to Vercel', kind: 'info' });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx | LINE: 88
+          push({ text: ar ? '  status - فحص حالة السيرفر' : '  status - check server status', kind: 'info' });
+          push({ text: ar ? '  git add . - أضافة الملفات' : '  git add . - stage files', kind: 'info' });
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:88:        push({ text: ar ? '  git commit -m "msg" - إجراء commit' : '  git commit -m "msg" - commit changes', kind: 'info' });.Line)
+          push({ text: ar ? '  git push - رفع إلى GitHub' : '  git push - push to GitHub', kind: 'info' });
+          push({ text: ar ? '  vercel --prod - نشر إلى Vercel' : '  vercel --prod - deploy to Vercel', kind: 'info' });
+          push({ text: ar ? '  ebnily generate "name" - توليد مكون' : '  ebnily generate "name" - generate component', kind: 'info' });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx | LINE: 89
+          push({ text: ar ? '  git add . - أضافة الملفات' : '  git add . - stage files', kind: 'info' });
+          push({ text: ar ? '  git commit -m "msg" - إجراء commit' : '  git commit -m "msg" - commit changes', kind: 'info' });
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:89:        push({ text: ar ? '  git push - رفع إلى GitHub' : '  git push - push to GitHub', kind: 'info' });.Line)
+          push({ text: ar ? '  vercel --prod - نشر إلى Vercel' : '  vercel --prod - deploy to Vercel', kind: 'info' });
+          push({ text: ar ? '  ebnily generate "name" - توليد مكون' : '  ebnily generate "name" - generate component', kind: 'info' });
+          push({ text: ar ? '  exit - إغلاق التيرمينال' : '  exit - close terminal', kind: 'info' });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx | LINE: 90
+          push({ text: ar ? '  git commit -m "msg" - إجراء commit' : '  git commit -m "msg" - commit changes', kind: 'info' });
+          push({ text: ar ? '  git push - رفع إلى GitHub' : '  git push - push to GitHub', kind: 'info' });
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:90:        push({ text: ar ? '  vercel --prod - نشر إلى Vercel' : '  vercel --prod - deploy to Vercel', kind: 'info' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:91:        push({ text: ar ? '  ebnily generate "name" - توليد مكون' : '  ebnily generate "name" - generate component', kind: 'info' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:92:        push({ text: ar ? '  exit - إغلاق التيرمينال' : '  exit - close terminal', kind: 'info' });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\components\InteractiveTerminal.tsx:93:        push({ text: ar ? '  pytest - اختبار وحدة' : '  pytest - run tests', kind: 'info' });.Line)
+          push({ text: ar ? '  ebnily generate "name" - توليد مكون' : '  ebnily generate "name" - generate component', kind: 'info' });
+          push({ text: ar ? '  exit - إغلاق التيرمينال' : '  exit - close terminal', kind: 'info' });
+          push({ text: ar ? '  pytest - اختبار وحدة' : '  pytest - run tests', kind: 'info' });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts | LINE: 164
+      '```bash',
+      '# Vercel — logs you in once in the browser, then deploys',
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:162:    '```bash',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:163:    '# Vercel — logs you in once in the browser, then deploys',
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:164:    'npx vercel --prod',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:165:    '',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:166:    '# Netlify',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:167:    'npx netlify deploy --prod --dir=dist',.Line)
+      '',
+      '# Netlify',
+      'npx netlify deploy --prod --dir=dist',
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts | LINE: 176
+      '```bash',
+      'git init',
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:174:    '```bash',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:175:    'git init',
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:176:    'git add .',.Line)
+      'git commit -m "Initial commit"',
+      'git remote add origin https://github.com/OWNER/REPO.git',
+      'git branch -M main',
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts | LINE: 177
+      'git init',
+      'git add .',
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:177:    'git commit -m "Initial commit"',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:178:    'git remote add origin https://github.com/OWNER/REPO.git',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:179:    'git branch -M main',.Line)
+      'git remote add origin https://github.com/OWNER/REPO.git',
+      'git branch -M main',
+      'git push -u origin main',
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts | LINE: 180
+      'git remote add origin https://github.com/OWNER/REPO.git',
+      'git branch -M main',
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:180:    'git push -u origin main',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:181:    '```',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:182:    '',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:183:    'Import that repository on Vercel or Netlify and every later deploy is',.Line)
+      '```',
+      '',
+      'Import that repository on Vercel or Netlify and every later deploy is',
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts | LINE: 184
+      '',
+      'Import that repository on Vercel or Netlify and every later deploy is',
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:184:    'just `git push`.',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:185:    '',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:186:    '## Secrets',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\auth.ts:187:    '',.Line)
+      '',
+      '## Secrets',
+      '',
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts | LINE: 10
+   * The obvious feature is "run these commands on the server". It must not be
+   * built. These projects are arbitrary user-supplied archives, and a shell on
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:8: * The obvious feature is "run these commands on the server". It must not be
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:9: * built. These projects are arbitrary user-supplied archives, and a shell on
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:10: * a Vercel function is not a sandbox — `child_process.exec` would hand the
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:11: * caller the whole runtime: the database URL, the S3 token, every
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:12: * `process.env` secret the owner configured. A single crafted filename in an
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:13: * upload would be remote code execution with the owner's privileges..Line)
+   * caller the whole runtime: the database URL, the S3 token, every
+   * `process.env` secret the owner configured. A single crafted filename in an
+   * upload would be remote code execution with the owner's privileges.
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts | LINE: 160
+        title: 'Create a git repository',
+        titleAr: 'إنشاء مستودع git',
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:158:      title: 'Create a git repository',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:159:      titleAr: 'إنشاء مستودع git',
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:160:      command: 'git init && git add .',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:161:      note: 'Stages every file so the first commit is complete.',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:162:      noteAr: 'يجهّز كل الملفات لالتزامن الأول.',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:163:    },.Line)
+        note: 'Stages every file so the first commit is complete.',
+        noteAr: 'يجهّز كل الملفات لالتزامن الأول.',
+      },
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts | LINE: 168
+        title: 'Make the first commit',
+        titleAr: 'إنشاء أول التزام (commit)',
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:166:      title: 'Make the first commit',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:167:      titleAr: 'إنشاء أول التزام (commit)',
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:168:      command: 'git commit -m "Initial commit"',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:169:      note: 'Set a global git identity first if the terminal complains.',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:170:      noteAr: 'إذا اشتكى الطرفية، أضف هويتك في git أولاً.',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:171:    },.Line)
+        note: 'Set a global git identity first if the terminal complains.',
+        noteAr: 'إذا اشتكى الطرفية، أضف هويتك في git أولاً.',
+      },
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts | LINE: 192
+          title: 'Push to GitHub',
+          titleAr: 'الدفع (push) إلى GitHub',
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:190:        title: 'Push to GitHub',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:191:        titleAr: 'الدفع (push) إلى GitHub',
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:192:        command: 'git branch -M main && git push -u origin main',.Line)
+          note: 'After this, every later deploy is simply: git push',
+          noteAr: 'بعدها كل نشر جديد يكون ببساطة: git push',
+        },
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts | LINE: 193
+          titleAr: 'الدفع (push) إلى GitHub',
+          command: 'git branch -M main && git push -u origin main',
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:193:        note: 'After this, every later deploy is simply: git push',.Line)
+          noteAr: 'بعدها كل نشر جديد يكون ببساطة: git push',
+        },
+      );
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts | LINE: 194
+          command: 'git branch -M main && git push -u origin main',
+          note: 'After this, every later deploy is simply: git push',
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:194:        noteAr: 'بعدها كل نشر جديد يكون ببساطة: git push',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:195:      },
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:196:    );
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:197:  } else {.Line)
+        },
+      );
+    } else {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts | LINE: 216
+        title: isNetlify ? 'Deploy to Netlify' : 'Deploy to Vercel',
+        titleAr: isNetlify ? 'النشر على Netlify' : 'النشر على Vercel',
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:214:      title: isNetlify ? 'Deploy to Netlify' : 'Deploy to Vercel',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:215:      titleAr: isNetlify ? 'النشر على Netlify' : 'النشر على Vercel',
+> C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:216:      command: isNetlify ? 'npx netlify deploy --prod --dir=dist' : 'npx vercel --prod',
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:217:      note: isNetlify
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:218:        ? 'One-time browser login, then publishes dist/.'
+  C:\Users\Fast\OneDrive\Desktop\ebnily\src\lib\commands.ts:219:        : 'One-time browser login, then publishes the project.',.Line)
+        note: isNetlify
+          ? 'One-time browser login, then publishes dist/.'
+          : 'One-time browser login, then publishes the project.',
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\tests\commands.test.ts | LINE: 92
+  
+  test("buildCommandBundle switches the deploy command by provider", () => {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\tests\commands.test.ts:90:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\tests\commands.test.ts:91:test("buildCommandBundle switches the deploy command by provider", () => {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\tests\commands.test.ts:92:  assert.equal(buildCommandBundle("s", "vercel").deploy[0]!.command, "npx vercel --prod");
+  C:\Users\Fast\OneDrive\Desktop\ebnily\tests\commands.test.ts:93:  assert.equal(
+  C:\Users\Fast\OneDrive\Desktop\ebnily\tests\commands.test.ts:94:    buildCommandBundle("s", "netlify").deploy[0]!.command,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\tests\commands.test.ts:95:    "npx netlify deploy --prod --dir=dist",.Line)
+    assert.equal(
+      buildCommandBundle("s", "netlify").deploy[0]!.command,
+      "npx netlify deploy --prod --dir=dist",
+
+========== 5 - FREE 3 GENERATIONS ==========
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 191
+    planName: "Starter Free",
+    generationsUsedToday: 0,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:189:  planName: "Starter Free",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:190:  generationsUsedToday: 0,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:191:  generationsLimitToday: 5,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:192:  canExportZip: false,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:193:  canDeployCustomDomain: false,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:194:  canUseVisualInspector: true,.Line)
+    canExportZip: false,
+    canDeployCustomDomain: false,
+    canUseVisualInspector: true,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 257
+          planName: grant.tier === "business" ? "Business" : "Pro",
+          // المركزي: quotaForTier — لا Unlimited (pro → 100, business → 400).
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:255:        planName: grant.tier === "business" ? "Business" : "Pro",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:256:        // المركزي: quotaForTier — لا Unlimited (pro → 100, business → 400).
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:257:        generationsLimitToday: dailyQuotaFor(grant.tier),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:258:        canExportZip: true,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:259:        canDeployCustomDomain: grant.tier === "business",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:260:        priorityAiModel: true,.Line)
+          canExportZip: true,
+          canDeployCustomDomain: grant.tier === "business",
+          priorityAiModel: true,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 283
+      planName: "Business",
+      // المركزي: نفس سقف business من quotaForTier — لا Unlimited.
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:281:    planName: "Business",
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:282:    // المركزي: نفس سقف business من quotaForTier — لا Unlimited.
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:283:    generationsLimitToday: quotaForTier("business"),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:284:    canExportZip: true,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:285:    canDeployCustomDomain: true,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:286:    priorityAiModel: true,.Line)
+      canExportZip: true,
+      canDeployCustomDomain: true,
+      priorityAiModel: true,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1533
+   *
+   *  1. The promise was false. A paying customer hit the same 60/day ceiling as a
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1531: *
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1532: *  1. The promise was false. A paying customer hit the same 60/day ceiling as a
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1533: *     free trial user, with nothing in the plan to justify the difference.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1534: *  2. The ceiling was per PROCESS (`new Map()` in a serverless runtime), so a
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1535: *     cold start or a second instance silently handed the same account a fresh
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1536: *     allowance. It was not a budget, only a speed bump..Line)
+   *  2. The ceiling was per PROCESS (`new Map()` in a serverless runtime), so a
+   *     cold start or a second instance silently handed the same account a fresh
+   *     allowance. It was not a budget, only a speed bump.
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1634
+  const window = quotaWindowFor(tier);
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1632:const window = quotaWindowFor(tier);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1633:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1634:  // Use monthly limit logic for paid plans, daily for free trial
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1635:  // p_limit: the quota amount (150 for PRO monthly, 100 for Business monthly, 3 for Free daily)
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1636:  // p_window: 'monthly' or 'daily' - determines which counter (ai_month/ai_month_used vs ai_day/ai_used) the stored procedure resets and checks
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1637:  const rpc = await dbRequest<RpcConsumeResult[]>(RPC_CONSUME_AI, {.Line)
+    // p_limit: the quota amount (150 for PRO monthly, 100 for Business monthly, 3 for Free daily)
+    // p_window: 'monthly' or 'daily' - determines which counter (ai_month/ai_month_used vs ai_day/ai_used) the stored procedure resets and checks
+    const rpc = await dbRequest<RpcConsumeResult[]>(RPC_CONSUME_AI, {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1842
+   * Device registry — register on sight, report the real block state.
+   *
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1840: * Device registry — register on sight, report the real block state.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1841: *
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1842: * WHY: this answered `isBlocked: false, freeGenerationsUsed: 0` for everyone,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1843: * unconditionally. Two consequences: an owner who blocked a device saw it keep
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1844: * working (the block button had no effect on the product), and the dashboard's
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1845: * device list stayed permanently empty because nothing was ever recorded..Line)
+   * unconditionally. Two consequences: an owner who blocked a device saw it keep
+   * working (the block button had no effect on the product), and the dashboard's
+   * device list stayed permanently empty because nothing was ever recorded.
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1860
+        deviceId: null,
+        isBlocked: false,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1858:      deviceId: null,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1859:      isBlocked: false,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1860:      freeGenerationsUsed: 0,.Line)
+        freeGenerationsLimit: 5,
+        configured: supabaseConfig().dbConfigured,
+      });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1861
+        isBlocked: false,
+        freeGenerationsUsed: 0,
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1861:      freeGenerationsLimit: 5,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1862:      configured: supabaseConfig().dbConfigured,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1863:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1864:  }.Line)
+        configured: supabaseConfig().dbConfigured,
+      });
+    }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1873
+        deviceId,
+        isBlocked: false,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1871:      deviceId,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1872:      isBlocked: false,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1873:      freeGenerationsUsed: 0,.Line)
+        freeGenerationsLimit: 5,
+        configured: false,
+      });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1874
+        isBlocked: false,
+        freeGenerationsUsed: 0,
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1874:      freeGenerationsLimit: 5,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1875:      configured: false,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1876:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1877:  }.Line)
+        configured: false,
+      });
+    }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1922
+        deviceId,
+        isBlocked: false,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1920:      deviceId,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1921:      isBlocked: false,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1922:      freeGenerationsUsed: 0,.Line)
+        freeGenerationsLimit: 5,
+        configured: true,
+      });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1923
+        isBlocked: false,
+        freeGenerationsUsed: 0,
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1923:      freeGenerationsLimit: 5,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1924:      configured: true,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1925:    });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1926:  }.Line)
+        configured: true,
+      });
+    }
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1938
+      if (account && account.tier && account.tier !== "free") {
+        effectiveTier = account.tier as "pro" | "business";
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1936:    if (account && account.tier && account.tier !== "free") {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1937:      effectiveTier = account.tier as "pro" | "business";
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1938:      // Map account tier to the corresponding free generations limit.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1939:      // These values must match the daily/ monthly quota definitions in plans.ts.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1940:      if (effectiveTier === "pro") {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1941:        effectiveFreeLimit = 150;.Line)
+        // These values must match the daily/ monthly quota definitions in plans.ts.
+        if (effectiveTier === "pro") {
+          effectiveFreeLimit = 150;
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1972
+      isBlocked: deviceRow?.is_blocked === true,
+      blockReason: deviceRow?.block_reason ?? undefined,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1970:    isBlocked: deviceRow?.is_blocked === true,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1971:    blockReason: deviceRow?.block_reason ?? undefined,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1972:    freeGenerationsUsed: effectiveTier !== "free" ? 0 : toNumber(deviceRow?.free_used, 0),.Line)
+      freeGenerationsLimit: effectiveFreeLimit,
+      tier: effectiveTier,
+    });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 1973
+      blockReason: deviceRow?.block_reason ?? undefined,
+      freeGenerationsUsed: effectiveTier !== "free" ? 0 : toNumber(deviceRow?.free_used, 0),
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1973:    freeGenerationsLimit: effectiveFreeLimit,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1974:    tier: effectiveTier,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1975:  });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:1976:});.Line)
+      tier: effectiveTier,
+    });
+  });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2247
+  });
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2245:});
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2246:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2247:app.post("/api/admin/auth", rateLimit(authLimiter, LIMIT_RULES.auth, "admin", "محاولات كثيرة جداً. انتظر قليلاً ثم أعد المحاولة."), async (req: Request, res: Response) => {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2248:  // Admin is the site owner OR an active delegate. The PIN is a second factor,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2249:  // not the identity: without a signed-in account this endpoint answers 404
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2250:  // exactly like every other admin route, so a stranger cannot even obtain a.Line)
+    // Admin is the site owner OR an active delegate. The PIN is a second factor,
+    // not the identity: without a signed-in account this endpoint answers 404
+    // exactly like every other admin route, so a stranger cannot even obtain a
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2285
+    const failureRec = adminLoginFailures.get(adminClientKey(req));
+    if (failureRec && Date.now() <= failureRec.resetAt && failureRec.count >= ADMIN_MAX_FAILS) {
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2283:  const failureRec = adminLoginFailures.get(adminClientKey(req));
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2284:  if (failureRec && Date.now() <= failureRec.resetAt && failureRec.count >= ADMIN_MAX_FAILS) {
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2285:    const throttleMsg = "محاولات دخول كثيرة جداً — أعد المحاولة بعد 10 دقائق.";
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2286:    return res.status(429).json({ success: false, message: throttleMsg, error: throttleMsg });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2287:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2288:  // PIN-only: an email address alone must never grant owner access..Line)
+      return res.status(429).json({ success: false, message: throttleMsg, error: throttleMsg });
+    }
+    // PIN-only: an email address alone must never grant owner access.
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2374
+      "device_id,fingerprint_hash,account_email,screen,timezone,platform,user_agent,ip_address,is_blocked,block_reason,free_used,free_limit,tier,first_seen_at,last_seen_at";
+    const accountSelect =
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2372:    "device_id,fingerprint_hash,account_email,screen,timezone,platform,user_agent,ip_address,is_blocked,block_reason,free_used,free_limit,tier,first_seen_at,last_seen_at";
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2373:  const accountSelect =
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2374:    "account_id,email,display_name,provider,avatar_url,credits,credits_granted,welcome_given,last_seen_at,first_seen_at,requests_count,last_ip,user_agent,tier,is_blocked,block_reason";
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2375:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2376:  const [paymentsRes, pendingRes, devicesRes, confirmedRes, settingsRes, accountsRes] =
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2377:    await Promise.all([.Line)
+  
+    const [paymentsRes, pendingRes, devicesRes, confirmedRes, settingsRes, accountsRes] =
+      await Promise.all([
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2460
+    const onlineNow = publicAccounts.filter((a) => a.presence === "online").length;
+    const idleNow = publicAccounts.filter((a) => a.presence === "idle").length;
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2458:  const onlineNow = publicAccounts.filter((a) => a.presence === "online").length;
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2459:  const idleNow = publicAccounts.filter((a) => a.presence === "idle").length;
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2460:  const totalCredits = publicAccounts.reduce((sum, a) => sum + a.credits, 0);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2461:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2462:  return res.json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2463:    success: true,.Line)
+  
+    return res.json({
+      success: true,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2487
+        onlineAccountsCount: onlineNow,
+        idleAccountsCount: idleNow,
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2485:      onlineAccountsCount: onlineNow,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2486:      idleAccountsCount: idleNow,
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2487:      totalCreditsOutstanding: totalCredits,.Line)
+        welcomeCreditsPerSignup: WELCOME_CREDITS,
+      },
+      // The delegated-admin list ships inside `settings`, which is only ever built
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2488
+        idleAccountsCount: idleNow,
+        totalCreditsOutstanding: totalCredits,
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2488:      welcomeCreditsPerSignup: WELCOME_CREDITS,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2489:    },
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2490:    // The delegated-admin list ships inside `settings`, which is only ever built
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2491:    // from the stored row and returned from this owner-only route. A delegated.Line)
+      },
+      // The delegated-admin list ships inside `settings`, which is only ever built
+      // from the stored row and returned from this owner-only route. A delegated
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2838
+  // ── Owner: credit controls ────────────────────────────────────────────────────
+  // WHY: the dashboard needs to top a user up (support request, a good-review
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2836:// ── Owner: credit controls ────────────────────────────────────────────────────
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2837:// WHY: the dashboard needs to top a user up (support request, a good-review
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2838:// reward) and to take credits away (abuse). The value is validated as an
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2839:// integer in [0, 100000] on the server — the browser's number is never trusted,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2840:// which is the same rule every other owner action follows here.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2841:.Line)
+  // integer in [0, 100000] on the server — the browser's number is never trusted,
+  // which is the same rule every other owner action follows here.
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2842
+  // which is the same rule every other owner action follows here.
+  
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2842:app.post("/api/admin/account/set-credits", requireAdmin, async (req: Request, res: Response) => {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2843:  if (!supabaseConfig().dbConfigured) return dbUnavailable(res);.Line)
+    if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+    const body = (req.body ?? {}) as { accountId?: string; credits?: number };
+  
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2844
+  app.post("/api/admin/account/set-credits", requireAdmin, async (req: Request, res: Response) => {
+    if (!supabaseConfig().dbConfigured) return dbUnavailable(res);
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2844:  const body = (req.body ?? {}) as { accountId?: string; credits?: number };
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2845:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2846:  const accountId = String(body.accountId ?? "").trim();
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2847:  if (!accountId) return res.status(400).json({ success: false, message: "معرّف الحساب مطلوب." });.Line)
+  
+    const accountId = String(body.accountId ?? "").trim();
+    if (!accountId) return res.status(400).json({ success: false, message: "معرّف الحساب مطلوب." });
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2849
+    if (!accountId) return res.status(400).json({ success: false, message: "معرّف الحساب مطلوب." });
+  
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2848:
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2849:  const credits = Number(body.credits);.Line)
+    if (!Number.isFinite(credits) || !Number.isInteger(credits) || credits < 0 || credits > 100_000) {
+      return res.status(400).json({
+        success: false,
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2850
+  
+    const credits = Number(body.credits);
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2850:  if (!Number.isFinite(credits) || !Number.isInteger(credits) || credits < 0 || credits > 100_000) {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2851:    return res.status(400).json({
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2852:      success: false,
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2853:      message: "قيمة الكريديت يجب أن تكون عدداً صحيحاً بين 0 و 100000.",.Line)
+      return res.status(400).json({
+        success: false,
+        message: "قيمة الكريديت يجب أن تكون عدداً صحيحاً بين 0 و 100000.",
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2861
+      query: { account_id: `eq.${accountId}` },
+      headers: { Prefer: "return=representation" },
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2859:    query: { account_id: `eq.${accountId}` },
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2860:    headers: { Prefer: "return=representation" },
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2861:    body: JSON.stringify({ credits }),
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2862:  });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2863:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2864:  if (!write.ok) {.Line)
+    });
+  
+    if (!write.ok) {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 2865
+  
+    if (!write.ok) {
+> $ (> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2865:    console.error("set-credits failed:", write.error);
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2866:    return res.status(503).json({ success: false, message: "تعذّر تحديث الكريديت." });
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2867:  }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:2868:  if (!Array.isArray(write.data) || write.data.length === 0) {.Line)
+      return res.status(503).json({ success: false, message: "تعذّر تحديث الكريديت." });
+    }
+    if (!Array.isArray(write.data) || write.data.length === 0) {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 3263
+      }
+      // When upgrading to pro or business, also update the device status so the
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3261:    }
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3262:    // When upgrading to pro or business, also update the device status so the
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3263:    // protection endpoint returns the correct tier and resets free generations used.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3264:    // This prevents the user from being stuck in free-tier limits after paying.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3265:    if (newTier === "pro" || newTier === "business") {
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3266:      await dbRequest<any>(DEVICES_TABLE, {.Line)
+      // This prevents the user from being stuck in free-tier limits after paying.
+      if (newTier === "pro" || newTier === "business") {
+        await dbRequest<any>(DEVICES_TABLE, {
+
+FILE: C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts | LINE: 3597
+  
+  /**
+> $ (  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3595:
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3596:/**
+> C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3597: * Credits granted to a brand-new account.
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3598: *
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3599: * WHY a wallet at all: the free tier used to be a per-day counter held in a
+  C:\Users\Fast\OneDrive\Desktop\ebnily\api\index.ts:3600: * signed cookie, which meant the allowance was bound to the browser — clearing.Line)
+   *
+   * WHY a wallet at all: the free tier used to be a per-day counter held in a
+   * signed cookie, which meant the allowance was bound to the browser — clearing
+
+========== GIT STATUS ==========
+?? api/index.ts.bak
+?? ebnily-diagnostic.txt
+?? src/App.tsx.bak
+94f07ba Listen for iframe postMessage on window instead of contentWindow
+ea5b3d2 Increase OAuth state TTL and align clearCookie options
+5bdbd6d fix: pass req to authCookieOptions in supabase callback and harden auth session check
+049d53d fix: retry auth session check after login to prevent landing page loop
+d61195d fix: move welcomeGiftShown effect after subscription state
+
+========== PACKAGE CONFIGURATION ==========
+{
+  "name": "ebnily",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "tsx server.ts",
+    "build": "vite build && npm run build:images && npm run build:seo",
+    "build:images": "node scripts/generate-brand-images.mjs",
+    "build:seo": "node scripts/generate-seo-pages.mjs",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist-server/server.cjs",
+    "vercel-build": "vite build && npm run build:images && npm run build:seo",
+    "start": "node dist-server/server.cjs",
+    "preview": "vite preview",
+    "clean": "rimraf dist dist-server",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "jszip": "^3.10.2",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "vite": "^6.2.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jszip": "^3.4.1",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.4",
+    "autoprefixer": "^10.4.21",
+    "esbuild": "^0.25.0",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3"
+  }
+}
+
+
+========== END OF REPORT ==========
+

@@ -795,7 +795,7 @@ export const AdminDashboardModal = ({
         // The old code checked `data.success` only and stayed silent otherwise, so
         // a failed block looked exactly like a successful one.
         showToast(
-          (data as { message?: string }).message || 'تعذّر تحديث حالة الجهاز. تأكد من تنفيذ supabase/projects.sql',
+          (data as { message?: string }).message || 'تعذّر تحديث الحالة، تأكد من تهيئة قاعدة البيانات',
         );
         return;
       }
