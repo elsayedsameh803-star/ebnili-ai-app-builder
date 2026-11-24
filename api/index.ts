@@ -4668,11 +4668,10 @@ function getGeminiClient(): GoogleGenAI | null {
 // Anything the key cannot reach answers 404 and is dropped immediately
 // (classifyModelError → "permanent"), so listing extra candidates is free.
 const CANDIDATE_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b",
+  "gemini-3.8-flash",
+  "gemini-flash-latest",
   "gemini-1.5-pro",
+  "gemini-1.5-flash",
 ];
 
 // TIME BUDGETS — this is what made "big prompts" fail 100% of the time.
@@ -5152,6 +5151,7 @@ app.post("/api/ai/generate-app/stream", requireAiSession, requireAiAllowance, as
     const remaining = deadline - Date.now();
     if (remaining <= 2_000) break;
     const attemptTimeout = Math.min(remaining, GENERATE_ATTEMPT_TIMEOUT_MS);
+    // gemini-3.5-flash and gemini-3.5-flash-lite use thinking mode; 3.8-flash does not
     const usesThinkingLevel = model === "gemini-3.5-flash" || model === "gemini-3.5-flash-lite";
     const config = {
       systemInstruction: GENERATE_SYSTEM,
