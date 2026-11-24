@@ -5264,7 +5264,7 @@ app.post("/api/ai/refine-app", requireAiSession, requireAiAllowance, async (req:
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("refine-app failed:", msg);
-    return fallback(friendlyAiError(msg, language));
+    return fallback(`${friendlyAiError(msg, language)} | RAW: ${msg.slice(0, 180)}`);
   }
 });
 
@@ -6080,5 +6080,6 @@ export default app;
 export function mountApi(): express.Express {
   return app;
 }
+
 
 
