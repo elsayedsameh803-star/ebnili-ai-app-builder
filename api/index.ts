@@ -4667,12 +4667,7 @@ function getGeminiClient(): GoogleGenAI | null {
 //   gemini-3.7 / 3.6      → previous-generation stable models
 // Anything the key cannot reach answers 404 and is dropped immediately
 // (classifyModelError → "permanent"), so listing extra candidates is free.
-const CANDIDATE_MODELS = [
-  "gemini-3.8-flash",
-  "gemini-flash-latest",
-  "gemini-1.5-pro",
-  "gemini-1.5-flash",
-];
+const CANDIDATE_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3-flash", "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
 
 // TIME BUDGETS — this is what made "big prompts" fail 100% of the time.
 //
@@ -4685,7 +4680,7 @@ const CANDIDATE_MODELS = [
 // allowed to run (see `maxDuration` in vercel.json), leaving room for a real
 // answer plus a second attempt, and the text-only studio endpoints keep a
 // shorter slice because they never return a document.
-const GENERATE_BUDGET_MS = 600_000; // Extended from 240s to 600s (10min) to allow long generations
+const GENERATE_BUDGET_MS = 285_000; // Extended from 240s to 600s (10min) to allow long generations
 const GENERATE_ATTEMPT_TIMEOUT_MS = 300_000; // Extended from 75s to 300s (5min) per attempt
 const REFINE_BUDGET_MS = 300_000; // Extended from 180s to 300s (5min) to allow long refinements
 const REFINE_ATTEMPT_TIMEOUT_MS = 150_000; // Extended from 70s to 150s (2.5min) per attempt
