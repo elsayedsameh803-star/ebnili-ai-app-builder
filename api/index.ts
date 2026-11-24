@@ -4667,7 +4667,7 @@ function getGeminiClient(): GoogleGenAI | null {
 //   gemini-3.7 / 3.6      → previous-generation stable models
 // Anything the key cannot reach answers 404 and is dropped immediately
 // (classifyModelError → "permanent"), so listing extra candidates is free.
-const CANDIDATE_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3-flash", "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+const CANDIDATE_MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"];
 
 // TIME BUDGETS — this is what made "big prompts" fail 100% of the time.
 //
@@ -6080,4 +6080,5 @@ export default app;
 export function mountApi(): express.Express {
   return app;
 }
+
 
